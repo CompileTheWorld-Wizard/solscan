@@ -718,18 +718,45 @@
         .token-list {
             max-height: 400px;
             overflow-y: auto;
-            overflow-x: auto;
             width: 100%;
         }
 
         .token-list .table-container {
             overflow-x: auto;
-        }
-
-        .token-table {
             width: 100%;
+        }
+        
+        .token-table {
+            width: auto;
+            min-width: 100%;
             border-collapse: collapse;
             background: white;
+            table-layout: auto;
+        }
+        
+        .token-table th,
+        .token-table td {
+            position: relative;
+        }
+        
+        .token-table th .resizer {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 5px;
+            height: 100%;
+            cursor: col-resize;
+            user-select: none;
+            background: transparent;
+            z-index: 1;
+        }
+        
+        .token-table th .resizer:hover {
+            background: #667eea;
+        }
+        
+        .token-table th .resizer.active {
+            background: #667eea;
         }
 
         .token-table thead {

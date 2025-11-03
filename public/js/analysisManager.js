@@ -7,6 +7,69 @@ import * as api from './api.js';
 import { showNotification, formatTimestamp, formatNum } from './utils.js';
 
 /**
+ * Initialize column resizing for analysis table
+ */
+function initializeColumnResizing() {
+    const table = document.getElementById('analysisTable');
+    if (!table) return;
+    
+    const resizers = table.querySelectorAll('th .resizer');
+    let currentResizer = null;
+    let currentCell = null;
+    let startX = 0;
+    let startWidth = 0;
+    
+    resizers.forEach((resizer) => {
+        resizer.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            currentResizer = resizer;
+            currentCell = resizer.parentElement;
+            startX = e.pageX;
+            startWidth = currentCell.offsetWidth;
+            
+            resizer.classList.add('active');
+            
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+        });
+    });
+    
+    function handleMouseMove(e) {
+        if (!currentCell || !currentResizer) return;
+        
+        const diff = e.pageX - startX;
+        const newWidth = startWidth + diff;
+        
+        if (newWidth > 50) { // Minimum width
+            currentCell.style.width = `${newWidth}px`;
+            currentCell.style.minWidth = `${newWidth}px`;
+            
+            // Update corresponding td cells
+            const columnIndex = Array.from(currentCell.parentElement.children).indexOf(currentCell);
+            const rows = table.querySelectorAll('tbody tr');
+            rows.forEach(row => {
+                const cell = row.children[columnIndex];
+                if (cell) {
+                    cell.style.width = `${newWidth}px`;
+                    cell.style.minWidth = `${newWidth}px`;
+                }
+            });
+        }
+    }
+    
+    function handleMouseUp() {
+        if (currentResizer) {
+            currentResizer.classList.remove('active');
+        }
+        currentResizer = null;
+        currentCell = null;
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+    }
+}
+
+/**
  * Analyze selected wallet
  */
 export async function analyzeSelectedWallet() {
@@ -163,8 +226,8 @@ export function displayWalletInfo(data) {
                     : null;
 
                 devBuyInfo = `<div style="display: flex; flex-direction: column; gap: 4px;">
-                    <div style="font-size: 0.7rem; color: #6b7280; font-weight: 600;">
-                        <strong>Amount Spent:</strong> ${formatNum(amountSpent)}
+                    <div style="font-size: 0.7rem; color: #6b7280; font-weight: 600; white-space: nowrap;">
+                        <strong>Amount Spent:</strong> ${amountSpent.toLocaleString('en-US', { useGrouping: true, maximumFractionDigits: 18 })}
                     </div>
                     ${tokensReceived ? `
                         <div style="font-size: 0.7rem; color: #667eea; font-weight: 600;">
@@ -234,21 +297,21 @@ export function displayWalletInfo(data) {
 
         tradesHTML = `
             <div class="table-container">
-                <table class="token-table">
+                <table class="token-table" id="analysisTable">
                     <thead>
                         <tr>
-                            <th>#</th>
-                            <th>Token Name</th>
-                            <th>Symbol</th>
-                            <th>Token Address</th>
-                            <th>Creator</th>
-                            <th>First Buy</th>
-                            <th>First Sell</th>
-                            <th>Holding Duration Until 1st Sell</th>
-                            <th>Wallet Buy Amount</th>
-                            <th>Wallet Buy Tokens</th>
-                            <th>Total Sells</th>
-                            <th>Dev Buy</th>
+                            <th>#<span class="resizer"></span></th>
+                            <th>Token Name<span class="resizer"></span></th>
+                            <th>Symbol<span class="resizer"></span></th>
+                            <th>Token Address<span class="resizer"></span></th>
+                            <th>Creator<span class="resizer"></span></th>
+                            <th>First Buy<span class="resizer"></span></th>
+                            <th>First Sell<span class="resizer"></span></th>
+                            <th>Holding Duration Until 1st Sell<span class="resizer"></span></th>
+                            <th>Wallet Buy Amount<span class="resizer"></span></th>
+                            <th>Wallet Buy Tokens<span class="resizer"></span></th>
+                            <th>Total Sells<span class="resizer"></span></th>
+                            <th>Dev Buy<span class="resizer"></span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -257,6 +320,11 @@ export function displayWalletInfo(data) {
                 </table>
             </div>
         `;
+        
+        // Initialize column resizing after table is rendered
+        setTimeout(() => {
+            initializeColumnResizing();
+        }, 0);
     } else {
         tradesHTML = '<div class="empty-tokens" style="padding: 20px; text-align: center; color: #9ca3af;">No trading history found for this wallet</div>';
     }
