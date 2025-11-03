@@ -75,6 +75,7 @@ class DatabaseService {
           in_amount NUMERIC(40, 0) NOT NULL,
           out_amount NUMERIC(40, 0) NOT NULL,
           fee_payer VARCHAR(100) NOT NULL,
+          market_cap NUMERIC(20, 2),
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -141,6 +142,13 @@ class DatabaseService {
       `;
 
       await this.pool.query(createTableQuery);
+
+      // Ensure market_cap column exists for existing installations
+      const alterTransactionsQuery = `
+        ALTER TABLE transactions
+        ADD COLUMN IF NOT EXISTS market_cap NUMERIC(20, 2);
+      `;
+      await this.pool.query(alterTransactionsQuery);
       this.isInitialized = true;
       console.log('✅ Database initialized successfully');
     } catch (error) {
@@ -197,6 +205,23 @@ class DatabaseService {
   }
 
   /**
+   * Update market_cap for a transaction by signature
+   */
+  async updateTransactionMarketCap(transactionId: string, marketCap: number): Promise<void> {
+    try {
+      const query = `
+        UPDATE transactions
+        SET market_cap = $2
+        WHERE transaction_id = $1
+      `;
+      await this.pool.query(query, [transactionId, marketCap]);
+      console.log(`💾 Market cap updated for tx: ${transactionId}`);
+    } catch (error: any) {
+      console.error(`❌ Failed to update market cap for ${transactionId}:`, error.message);
+    }
+  }
+
+  /**
    * Close the database connection pool
    */
   async close(): Promise<void> {
@@ -213,6 +238,30 @@ class DatabaseService {
       idleCount: this.pool.idleCount,
       waitingCount: this.pool.waitingCount,
     };
+  }
+
+  /**
+   * Get latest SOL price (USD) from solPrice table
+   */
+  async getLatestSolPrice(): Promise<number | null> {
+    try {
+      const query = `
+        SELECT price
+        FROM solPrice
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `;
+      const result = await this.pool.query(query);
+      if (result.rows.length === 0) {
+        return null;
+      }
+      const raw = result.rows[0].price;
+      const price = raw !== null && raw !== undefined ? parseFloat(raw.toString()) : NaN;
+      return Number.isNaN(price) ? null : price;
+    } catch (error) {
+      console.error('Failed to fetch latest SOL price:', error);
+      return null;
+    }
   }
 
   /**

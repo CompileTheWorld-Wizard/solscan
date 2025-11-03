@@ -7,6 +7,7 @@ import { dbService } from "../database";
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { tokenQueueService } from "../services/tokenQueueService";
 import { walletTrackingService } from "../services/walletTrackingService";
+import { marketCapService } from "../services";
 
 type StreamResult = {
   lastSlot?: string;
@@ -110,7 +111,6 @@ class TransactionTracker {
           const sig = bs58.encode(tx.signatures[0]);
           console.log("Got tx:", sig, "slot:", currentSlot);
 
-          // Parse transaction based on detected platform
           const result = parseTransaction(data.transaction);
 
           // Save to database asynchronously (non-blocking)
@@ -124,6 +124,23 @@ class TransactionTracker {
               out_amount: result.out_amount,
               feePayer: result.feePayer,
             });
+
+            // Calculate and persist market cap (non-blocking, after saving tx)
+            marketCapService
+              .calculateMarketCap(sig)
+              .then((mc) => {
+                if (mc.success && typeof mc.marketCap === 'number') {
+                  console.log(`🧮 MarketCap for ${sig}: $${mc.marketCap}`);
+                  dbService.updateTransactionMarketCap(sig, mc.marketCap).catch((e) => {
+                    console.error(`Failed to persist market cap for ${sig}:`, e?.message || e);
+                  });
+                } else {
+                  console.log(`⚠️ MarketCap error for ${sig}: ${mc.error}`);
+                }
+              })
+              .catch((err) => {
+                console.error(`MarketCap calculation failed for ${sig}:`, err?.message || err);
+              });
 
             // Extract token from buy/sell events
             const txType = result.type?.toUpperCase();
@@ -317,6 +334,20 @@ class TransactionTracker {
     });
 
     return { success: true, message: "Tracker started successfully" };
+  }
+
+
+  // get transaction data using fetch
+  async getTransactionDetail( signature: string ){
+    const response = await fetch(`https://pro-api.solscan.io/v2.0/transaction/detail${signature}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    const data = await response.json();
+    console.log(data);
+    return data;
   }
 
   /**
