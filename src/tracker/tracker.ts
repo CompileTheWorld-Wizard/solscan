@@ -7,6 +7,7 @@ import { dbService } from "../database";
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { tokenQueueService } from "../services/tokenQueueService";
 import { walletTrackingService } from "../services/walletTrackingService";
+import { marketCapService } from "../services";
 
 type StreamResult = {
   lastSlot?: string;
@@ -110,7 +111,6 @@ class TransactionTracker {
           const sig = bs58.encode(tx.signatures[0]);
           console.log("Got tx:", sig, "slot:", currentSlot);
 
-          // Parse transaction based on detected platform
           const result = parseTransaction(data.transaction);
 
           // Save to database asynchronously (non-blocking)
@@ -125,27 +125,60 @@ class TransactionTracker {
               feePayer: result.feePayer,
             });
 
-            // Extract token from buy/sell events
+            // Process buy/sell events
             const txType = result.type?.toUpperCase();
             console.log(`📝 Transaction type: ${result.type} (normalized: ${txType})`);
             
             if (txType === 'BUY' || txType === 'SELL') {
-              console.log(`✅ Processing ${result.type} transaction...`);
-              
-              // 1. Track wallet-token pair (new separate module)
-              walletTrackingService.trackWalletToken(
-                result.feePayer,
-                result.mintFrom,
-                result.mintTo,
-                result.in_amount?.toString() || '0',
-                result.out_amount?.toString() || '0',
-                result.type
-              ).catch(error => {
-                console.error(`Failed to track wallet-token pair: ${error.message}`);
-              });
+              // Wrap in async IIFE to allow await
+              (async () => {
+                console.log(`✅ Processing ${result.type} transaction...`);
+                
+                // Extract token address once (used by both wallet tracking and token queue)
+                const tokenAddress = this.extractTokenAddress(result);
+                
+                if (!tokenAddress) {
+                  console.log(`⚠️ No valid token found in ${result.type} transaction (mintFrom: ${result.mintFrom?.substring(0, 8)}, mintTo: ${result.mintTo?.substring(0, 8)})`);
+                  return;
+                }
+                
+                console.log(`🔎 Token extracted: ${tokenAddress.substring(0, 8)}...`);
 
-              // 2. Extract and queue token for info extraction (existing module)
-              this.extractAndQueueToken(result);
+                // Handle buy/sell event flow:
+                // 1. Get marketcap for this buy/sell event (await before wallet tracking)
+                let marketCapResult = null;
+                try {
+                  marketCapResult = await marketCapService.calculateMarketCap(sig, tokenAddress);
+                  
+                  if (marketCapResult.success && typeof marketCapResult.marketCap === 'number') {
+                    console.log(`🧮 MarketCap for ${sig}: $${marketCapResult.marketCap}`);
+                    dbService.updateTransactionMarketCap(sig, marketCapResult.marketCap).catch((e) => {
+                      console.error(`Failed to persist market cap for ${sig}:`, e?.message || e);
+                    });
+                  } else {
+                    console.log(`⚠️ MarketCap error for ${sig}: ${marketCapResult.error}`);
+                  }
+                } catch (err: any) {
+                  console.error(`MarketCap calculation failed for ${sig}:`, err?.message || err);
+                }
+
+                // 2. Track wallet-token pair (integrated with buy/sell handling) - uses marketcap from above
+                walletTrackingService.trackWalletToken(
+                  result.feePayer,
+                  tokenAddress,
+                  result.in_amount?.toString() || '0',
+                  result.out_amount?.toString() || '0',
+                  result.type,
+                  marketCapResult
+                ).catch(error => {
+                  console.error(`Failed to track wallet-token pair: ${error.message}`);
+                });
+
+                // 3. Add token to queue for info extraction
+                this.extractAndQueueToken(tokenAddress);
+              })().catch(error => {
+                console.error(`Error processing buy/sell event:`, error?.message || error);
+              });
             } else {
               console.log(`⏭️ Skipping - type is ${result.type}`);
             }
@@ -213,52 +246,38 @@ class TransactionTracker {
   }
 
   /**
-   * Extract token from buy/sell event and add to queue
-   * Extracts the non-SOL token from the transaction
+   * Extract the non-SOL token address from buy/sell transaction
+   * @returns Token address or null if not found
    */
-  private extractAndQueueToken(result: any): void {
-    // SOL wrapped token address
+  private extractTokenAddress(result: any): string | null {
     const SOL_MINT = 'So11111111111111111111111111111111111111112';
-    
-    let tokenMint: string | null = null;
     const txType = result.type?.toUpperCase();
 
-    console.log(`🔎 Extracting token from transaction:`);
-    console.log(`   Type: ${result.type} (normalized: ${txType})`);
-    console.log(`   mintFrom: ${result.mintFrom}`);
-    console.log(`   mintTo: ${result.mintTo}`);
-
-    // For BUY transactions: mintTo is the token we're buying (not SOL)
-    // For SELL transactions: mintFrom is the token we're selling (not SOL)
     if (txType === 'BUY') {
-      // We're buying tokenMint with SOL
+      // For BUY: mintTo is the token we're buying (should not be SOL)
       if (result.mintTo && result.mintTo !== SOL_MINT) {
-        tokenMint = result.mintTo;
-        console.log(`   ✅ BUY detected - Token to buy: ${tokenMint.substring(0, 8)}...`);
-      } else {
-        console.log(`   ⚠️ BUY detected but mintTo is SOL or missing`);
+        return result.mintTo;
       }
     } else if (txType === 'SELL') {
-      // We're selling tokenMint for SOL
+      // For SELL: mintFrom is the token we're selling (should not be SOL)
       if (result.mintFrom && result.mintFrom !== SOL_MINT) {
-        tokenMint = result.mintFrom;
-        console.log(`   ✅ SELL detected - Token to sell: ${tokenMint.substring(0, 8)}...`);
-      } else {
-        console.log(`   ⚠️ SELL detected but mintFrom is SOL or missing`);
+        return result.mintFrom;
       }
     }
 
-    // If we found a token, add it to the queue
-    if (tokenMint) {
-      console.log(`🪙 Detected token in ${result.type} transaction: ${tokenMint.substring(0, 8)}...`);
-      
-      // Add to queue (non-blocking)
-      tokenQueueService.addToken(tokenMint).catch(error => {
-        console.error(`Failed to add token to queue: ${error.message}`);
-      });
-    } else {
-      console.log(`❌ No valid token found to add to queue`);
-    }
+    return null;
+  }
+
+  /**
+   * Add token to queue for info extraction
+   */
+  private extractAndQueueToken(tokenMint: string): void {
+    console.log(`🪙 Adding token to queue: ${tokenMint.substring(0, 8)}...`);
+    
+    // Add to queue (non-blocking)
+    tokenQueueService.addToken(tokenMint).catch(error => {
+      console.error(`Failed to add token to queue: ${error.message}`);
+    });
   }
 
   /**
@@ -317,6 +336,20 @@ class TransactionTracker {
     });
 
     return { success: true, message: "Tracker started successfully" };
+  }
+
+
+  // get transaction data using fetch
+  async getTransactionDetail( signature: string ){
+    const response = await fetch(`https://pro-api.solscan.io/v2.0/transaction/detail${signature}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    const data = await response.json();
+    console.log(data);
+    return data;
   }
 
   /**
@@ -433,4 +466,5 @@ class TransactionTracker {
 
 // Export singleton instance
 export const tracker = new TransactionTracker();
+
 

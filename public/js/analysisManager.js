@@ -1,0 +1,291 @@
+/**
+ * Wallet analysis management
+ */
+
+import { state } from './state.js';
+import * as api from './api.js';
+import { showNotification, formatTimestamp, formatNum } from './utils.js';
+
+/**
+ * Analyze selected wallet
+ */
+export async function analyzeSelectedWallet() {
+    // Use tab select instead of modal select
+    const select = document.getElementById('walletSelectTab') || document.getElementById('walletSelect');
+    const walletAddress = select ? select.value : state.selectedWalletForAnalysis;
+
+    if (!walletAddress) {
+        // Don't show error notification when called automatically
+        return;
+    }
+
+    const container = document.getElementById('walletInfoContainer');
+
+    // Show loading
+    container.innerHTML = `
+        <div class="loading">
+            <div class="loading-spinner"></div>
+            <p>Analyzing wallet...</p>
+        </div>
+    `;
+
+    // Disable select during analysis
+    if (select) {
+        select.disabled = true;
+    }
+
+    try {
+        const result = await api.analyzeWallet(walletAddress);
+
+        if (!result.success) {
+            throw new Error(result.error);
+        }
+
+        displayWalletInfo(result.data);
+    } catch (error) {
+        container.innerHTML = `
+            <div class="wallet-info">
+                <div class="wallet-info-section">
+                    <p style="color: #ef4444; text-align: center;">
+                        ❌ Failed to analyze wallet. Please try again.
+                    </p>
+                </div>
+            </div>
+        `;
+        showNotification('Failed to analyze wallet', 'error');
+    } finally {
+        // Re-enable select after analysis
+        if (select) {
+            select.disabled = false;
+        }
+    }
+}
+
+/**
+ * Display wallet analysis information
+ */
+export function displayWalletInfo(data) {
+    const container = document.getElementById('walletInfoContainer');
+
+    // Store data globally for fetchTokenInfo function (if needed)
+    window.currentWalletData = data;
+
+    let tradesHTML = '';
+    if (data.trades && data.trades.length > 0) {
+        const SOL_MINT = 'So11111111111111111111111111111111111111112';
+
+        const tradeRows = data.trades.map((trade, index) => {
+            // Check if this is SOL
+            const isSOL = trade.token_address === SOL_MINT;
+
+            // Token name: WSOL for SOL, otherwise use token_name or Unknown
+            const tokenName = isSOL ? 'WSOL' : (trade.token_name || 'Unknown Token');
+
+            // Token image: wsol.svg for SOL
+            const tokenImage = isSOL
+                ? `<img src="/img/wsol.svg" alt="WSOL" class="token-image" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover; border: 1px solid #e5e7eb;">`
+                : (trade.image
+                    ? `<img src="${trade.image}" alt="${trade.symbol || '?'}" class="token-image" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover; border: 1px solid #e5e7eb;" onerror="this.src='/img/unknown_coin.png'">`
+                    : `<img src="/img/unknown_coin.png" alt="Unknown Token" class="token-image" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover; border: 1px solid #e5e7eb;">`);
+
+            // Token symbol: WSOL for SOL
+            const tokenSymbol = isSOL ? 'WSOL' : (trade.symbol || '???');
+
+            const creatorCell = trade.creator
+                ? `<td class="token-creator-cell" title="${trade.creator}">
+                    <a href="https://solscan.io/account/${trade.creator}" target="_blank" rel="noopener noreferrer" style="color: #667eea; text-decoration: none; font-family: 'Courier New', monospace; font-size: 0.7rem; white-space: nowrap;">
+                        ${trade.creator}
+                    </a>
+                </td>`
+                : `<td class="token-creator-cell" style="color: #9ca3af; font-style: italic;">-</td>`;
+
+            // First Buy Info
+            let firstBuyMarketCapDisplay;
+            let firstBuyLabel = 'Market Cap:';
+            if (trade.first_buy_mcap !== null && trade.first_buy_mcap !== undefined) {
+                firstBuyMarketCapDisplay = `$${formatNum(trade.first_buy_mcap)}`;
+            } else if (trade.first_buy_supply) {
+                firstBuyLabel = 'Total Supply:';
+                const supplyFormatted = formatNum(trade.first_buy_supply);
+                firstBuyMarketCapDisplay = supplyFormatted;
+            } else {
+                firstBuyMarketCapDisplay = '<span style="color: #9ca3af; font-weight: normal; font-style: italic;">Not available</span>';
+            }
+
+            const firstBuyInfo = trade.first_buy_timestamp
+                ? `<div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="font-weight: 600; color: #10b981;">${formatTimestamp(trade.first_buy_timestamp)}</div>
+                    <div style="font-size: 0.7rem; color: #6b7280;">
+                        <strong>Amount:</strong> ${formatNum(trade.first_buy_amount)}
+                    </div>
+                    <div style="font-size: 0.7rem; color: #10b981; font-weight: 600;">
+                        <strong>${firstBuyLabel}</strong> ${firstBuyMarketCapDisplay}
+                    </div>
+                </div>`
+                : '<span style="color: #9ca3af; font-style: italic;">-</span>';
+
+            // First Sell Info
+            let firstSellMarketCapDisplay;
+            let firstSellLabel = 'Market Cap:';
+            if (trade.first_sell_mcap !== null && trade.first_sell_mcap !== undefined) {
+                firstSellMarketCapDisplay = `$${formatNum(trade.first_sell_mcap)}`;
+            } else if (trade.first_sell_supply) {
+                firstSellLabel = 'Total Supply:';
+                const supplyFormatted = formatNum(trade.first_sell_supply);
+                firstSellMarketCapDisplay = supplyFormatted;
+            } else {
+                firstSellMarketCapDisplay = '<span style="color: #9ca3af; font-weight: normal; font-style: italic;">Not available</span>';
+            }
+
+            const firstSellInfo = trade.first_sell_timestamp
+                ? `<div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="font-weight: 600; color: #ef4444;">${formatTimestamp(trade.first_sell_timestamp)}</div>
+                    <div style="font-size: 0.7rem; color: #6b7280;">
+                        <strong>Amount:</strong> ${formatNum(trade.first_sell_amount)}
+                    </div>
+                    <div style="font-size: 0.7rem; color: #ef4444; font-weight: 600;">
+                        <strong>${firstSellLabel}</strong> ${firstSellMarketCapDisplay}
+                    </div>
+                </div>`
+                : '<span style="color: #9ca3af; font-style: italic;">-</span>';
+
+            // Holding Duration Until 1st Sell
+            const holdingDurationInfo = trade.holding_duration
+                ? `<div style="font-size: 0.75rem; color: #667eea; font-weight: 600;">${trade.holding_duration}</div>`
+                : '<span style="color: #9ca3af; font-style: italic;">-</span>';
+
+            // Dev Buy Info
+            let devBuyInfo;
+            if (trade.dev_buy_amount && trade.dev_buy_amount_decimal !== null && trade.dev_buy_amount_decimal !== undefined) {
+                const amountSpent = parseFloat(trade.dev_buy_amount) / Math.pow(10, trade.dev_buy_amount_decimal);
+                const tokensReceived = trade.dev_buy_token_amount && trade.dev_buy_token_amount_decimal !== null && trade.dev_buy_token_amount_decimal !== undefined
+                    ? parseFloat(trade.dev_buy_token_amount) / Math.pow(10, trade.dev_buy_token_amount_decimal)
+                    : null;
+
+                devBuyInfo = `<div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="font-size: 0.7rem; color: #6b7280; font-weight: 600;">
+                        <strong>Amount Spent:</strong> ${formatNum(amountSpent)}
+                    </div>
+                    ${tokensReceived ? `
+                        <div style="font-size: 0.7rem; color: #667eea; font-weight: 600;">
+                            <strong>Tokens Received:</strong> ${formatNum(tokensReceived)}
+                        </div>
+                    ` : ''}
+                    ${trade.dev_buy_used_token ? `
+                        <div style="font-size: 0.65rem; color: #9ca3af; font-family: 'Courier New', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            <strong>Token Used:</strong> ${trade.dev_buy_used_token}
+                        </div>
+                    ` : ''}
+                </div>`;
+            } else {
+                devBuyInfo = '<span style="color: #9ca3af; font-style: italic;">-</span>';
+            }
+
+            // Total Sells (SOL amount)
+            const totalSells = trade.total_sells !== undefined && trade.total_sells !== null && trade.total_sells > 0
+                ? `<div style="font-size: 0.75rem; color: #667eea; font-weight: 600; text-align: center;">${formatNum(trade.total_sells)} SOL</div>`
+                : '<span style="color: #9ca3af; font-style: italic;">-</span>';
+
+            // Wallet Buy Amount (total SOL spent in buy transactions)
+            const totalBuyAmount = trade.total_buy_amount !== undefined && trade.total_buy_amount !== null && trade.total_buy_amount > 0
+                ? `<div style="font-size: 0.75rem; color: #10b981; font-weight: 600; text-align: center;">${formatNum(trade.total_buy_amount)} SOL</div>`
+                : '<span style="color: #9ca3af; font-style: italic;">-</span>';
+
+            // Wallet Buy Tokens (total token amount received in buy transactions)
+            // Check if value exists and is a valid number (including 0)
+            // Note: 0 is a valid value, so we check if it's not undefined/null and is a number
+            const hasBuyTokens = trade.total_buy_tokens !== undefined && trade.total_buy_tokens !== null && !isNaN(trade.total_buy_tokens);
+            const totalBuyTokens = hasBuyTokens
+                ? `<div style="font-size: 0.75rem; color: #10b981; font-weight: 600; text-align: center;">${formatNum(trade.total_buy_tokens)}</div>`
+                : '<span style="color: #9ca3af; font-style: italic;">-</span>';
+
+            return `
+                <tr>
+                    <td class="token-index-cell">${index + 1}</td>
+                    <td class="token-name-cell">
+                        <div>
+                            ${tokenImage}
+                        <a href="https://solscan.io/token/${trade.token_address}" target="_blank" rel="noopener noreferrer" class="token-name-text" style="text-decoration: none; color: #667eea;">
+                            ${tokenName}
+                        </a>
+                        </div>
+                    </td>
+                    <td class="token-symbol-cell">
+                        <a href="https://solscan.io/token/${trade.token_address}" target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: inherit;">
+                            ${tokenSymbol}
+                        </a>
+                    </td>
+                    <td class="token-mint-cell">
+                        <a href="https://solscan.io/token/${trade.token_address}" target="_blank" rel="noopener noreferrer" style="font-family: 'Courier New', monospace; font-size: 0.7rem; color: #667eea; text-decoration: none; white-space: nowrap;">
+                            ${trade.token_address}
+                        </a>
+                    </td>
+                    ${creatorCell}
+                    <td style="font-size: 0.75rem;">${firstBuyInfo}</td>
+                    <td style="font-size: 0.75rem;">${firstSellInfo}</td>
+                    <td style="font-size: 0.75rem;">${holdingDurationInfo}</td>
+                    <td style="font-size: 0.75rem;">${totalBuyAmount}</td>
+                    <td style="font-size: 0.75rem;">${totalBuyTokens}</td>
+                    <td style="font-size: 0.75rem;">${totalSells}</td>
+                    <td class="token-dev-buy-cell" style="font-size: 0.75rem;">${devBuyInfo}</td>
+                </tr>
+            `;
+        }).join('');
+
+        tradesHTML = `
+            <div class="table-container">
+                <table class="token-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Token Name</th>
+                            <th>Symbol</th>
+                            <th>Token Address</th>
+                            <th>Creator</th>
+                            <th>First Buy</th>
+                            <th>First Sell</th>
+                            <th>Holding Duration Until 1st Sell</th>
+                            <th>Wallet Buy Amount</th>
+                            <th>Wallet Buy Tokens</th>
+                            <th>Total Sells</th>
+                            <th>Dev Buy</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tradeRows}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    } else {
+        tradesHTML = '<div class="empty-tokens" style="padding: 20px; text-align: center; color: #9ca3af;">No trading history found for this wallet</div>';
+    }
+
+    container.innerHTML = `
+        <div class="wallet-info">
+            <div class="wallet-info-section">
+                <h3>💼 Wallet Address</h3>
+                <div class="wallet-address">
+                    <a href="https://solscan.io/account/${data.wallet}" target="_blank" rel="noopener noreferrer" style="color: #667eea; text-decoration: none;">
+                        ${data.wallet}
+                    </a>
+                </div>
+            </div>
+            
+            <div class="wallet-info-section" style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);">
+                <h3>📊 Trading History</h3>
+                <div style="font-size: 1.5rem; color: #667eea; font-weight: 600;">
+                    ${data.totalTrades || 0} tokens traded
+                </div>
+            </div>
+            
+            <div class="wallet-info-section">
+                <h3 style="font-size: 1.1rem; margin-bottom: 15px;">🪙 Tokens Traded <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; margin-left: 8px;">${data.totalTrades || 0}</span></h3>
+                <div class="token-list">
+                    ${tradesHTML}
+                </div>
+            </div>
+        </div>
+    `;
+}
+

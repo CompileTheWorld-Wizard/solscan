@@ -10,20 +10,29 @@
 
 import { dbService } from '../database';
 
-export class WalletTrackingService {
-  private readonly SOL_MINT = 'So11111111111111111111111111111111111111112';
+interface MarketCapResult {
+  success: boolean;
+  marketCap?: number;
+  tokenSupply?: number;
+  tokenBalance?: number;
+  solAmount?: number;
+  tokenAddress?: string;
+  error?: string;
+}
 
+export class WalletTrackingService {
   /**
    * Track wallet-token pair from buy/sell event
-   * Extracts the non-SOL token from the transaction and records first buy/sell
+   * Records first buy/sell for a wallet-token pair
+   * Uses marketcap from tracker (passed as marketCapResult) instead of fetching it
    */
   async trackWalletToken(
     walletAddress: string,
-    mintFrom: string,
-    mintTo: string,
+    tokenAddress: string,
     inAmount: string,
     outAmount: string,
-    transactionType: string
+    transactionType: string,
+    marketCapResult: MarketCapResult | null = null
   ): Promise<void> {
     try {
       const txType = transactionType.toUpperCase();
@@ -34,45 +43,33 @@ export class WalletTrackingService {
         return;
       }
 
-      // Extract the token (non-SOL) from the transaction
-      let tokenAddress: string | null = null;
+      // Determine amount based on transaction type
       let amount: string;
-
       if (txType === 'BUY') {
-        // For BUY: mintTo is the token we're buying (should not be SOL)
-        if (mintTo && mintTo !== this.SOL_MINT) {
-          tokenAddress = mintTo;
-          amount = inAmount; // Amount spent to buy (e.g., SOL amount)
-        }
-      } else if (txType === 'SELL') {
-        // For SELL: mintFrom is the token we're selling (should not be SOL)
-        if (mintFrom && mintFrom !== this.SOL_MINT) {
-          tokenAddress = mintFrom;
-          amount = outAmount; // Amount received from sell (e.g., SOL amount)
-        }
+        amount = inAmount; // Amount spent to buy (e.g., SOL amount)
+      } else {
+        amount = outAmount; // Amount received from sell (e.g., SOL amount)
       }
 
-      // If no valid token found, skip
-      if (!tokenAddress) {
-        console.log(`⚠️ No valid token found to track (mintFrom: ${mintFrom?.substring(0, 8)}, mintTo: ${mintTo?.substring(0, 8)})`);
-        return;
-      }
-
-      // Validate wallet address
+      // Validate inputs
       if (!walletAddress || walletAddress.length === 0) {
         console.log(`⚠️ Invalid wallet address for tracking`);
         return;
       }
 
-      // Validate amount
+      if (!tokenAddress || tokenAddress.length === 0) {
+        console.log(`⚠️ Invalid token address for tracking`);
+        return;
+      }
+
       if (!amount) {
         console.log(`⚠️ No amount found for tracking`);
         return;
       }
 
-      // Fetch market data from Solscan API before saving
       console.log(`👛 [Wallet: ${walletAddress.substring(0, 8)}...] [Token: ${tokenAddress.substring(0, 8)}...] [Type: ${txType}] [Amount: ${amount}]`);
       
+      // Build market data using marketcap from tracker (if available)
       let marketData: {
         supply: string | null;
         price: number | null;
@@ -81,28 +78,64 @@ export class WalletTrackingService {
       } | null = null;
       
       let isEmptyData = false;
-      
-      try {
-        const fetchResult = await dbService.fetchMcapFromSolscan(tokenAddress);
+
+      // Use marketcap from tracker (marketCapResult) if available
+      if (marketCapResult && marketCapResult.success && typeof marketCapResult.marketCap === 'number') {
+        // Build market data using calculated marketcap from tracker
+        marketData = {
+          market_cap: marketCapResult.marketCap,
+          supply: marketCapResult.tokenSupply ? marketCapResult.tokenSupply.toString() : null,
+          price: null, // Not available from marketCapService calculation
+          decimals: null // Not available from marketCapService calculation
+        };
+        console.log(`   MCap (from tracker): $${marketCapResult.marketCap}, Supply: ${marketData.supply || 'N/A'}`);
         
-        // Check if result indicates empty data (token not indexed yet)
-        if (fetchResult && fetchResult.isEmpty === true) {
-          isEmptyData = true;
-          console.log(`   ⏳ Token not indexed in Solscan yet, will retry in 60 seconds...`);
-        } else {
-          marketData = fetchResult;
-          if (marketData) {
-            if (marketData.market_cap !== null) {
-              console.log(`   MCap: ${marketData.market_cap}, Supply: ${marketData.supply || 'N/A'}, Price: ${marketData.price || 'N/A'}`);
-            } else {
-              console.log(`   MCap: Not available, Supply: ${marketData.supply || 'N/A'}, Price: ${marketData.price || 'N/A'}`);
-            }
-          } else {
-            console.log(`   Market data: Not available`);
+        // Still fetch price/decimals if needed (non-blocking, optional)
+        dbService.fetchMcapFromSolscan(tokenAddress).then(fetchResult => {
+          if (fetchResult && !fetchResult.isEmpty && marketData) {
+            // Update price and decimals if available
+            if (fetchResult.price !== null) marketData.price = fetchResult.price;
+            if (fetchResult.decimals !== null) marketData.decimals = fetchResult.decimals;
+            // Optionally update supply if more accurate
+            if (fetchResult.supply) marketData.supply = fetchResult.supply;
+            
+            // Update wallet-token pair with price/decimals
+            dbService.updateWalletTokenMarketData(
+              walletAddress,
+              tokenAddress,
+              txType as 'BUY' | 'SELL',
+              marketData
+            ).catch(() => {
+              // Silent fail for optional update
+            });
           }
+        }).catch(() => {
+          // Silent fail for optional price/decimals fetch
+        });
+      } else {
+        // Fallback: fetch market data if tracker didn't provide it
+        try {
+          const fetchResult = await dbService.fetchMcapFromSolscan(tokenAddress);
+          
+          // Check if result indicates empty data (token not indexed yet)
+          if (fetchResult && fetchResult.isEmpty === true) {
+            isEmptyData = true;
+            console.log(`   ⏳ Token not indexed in Solscan yet, will retry in 60 seconds...`);
+          } else {
+            marketData = fetchResult;
+            if (marketData) {
+              if (marketData.market_cap !== null) {
+                console.log(`   MCap: ${marketData.market_cap}, Supply: ${marketData.supply || 'N/A'}, Price: ${marketData.price || 'N/A'}`);
+              } else {
+                console.log(`   MCap: Not available, Supply: ${marketData.supply || 'N/A'}, Price: ${marketData.price || 'N/A'}`);
+              }
+            } else {
+              console.log(`   Market data: Not available`);
+            }
+          }
+        } catch (error: any) {
+          console.warn(`⚠️ Failed to fetch market data, continuing without it:`, error.message);
         }
-      } catch (error: any) {
-        console.warn(`⚠️ Failed to fetch market data, continuing without it:`, error.message);
       }
 
       // Save wallet-token pair to database (save first even if market data is empty)

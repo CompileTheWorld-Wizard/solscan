@@ -9,6 +9,12 @@ interface TransactionData {
   in_amount: string;
   out_amount: string;
   feePayer: string;
+  mint_from_name?: string | null;
+  mint_from_image?: string | null;
+  mint_from_symbol?: string | null;
+  mint_to_name?: string | null;
+  mint_to_image?: string | null;
+  mint_to_symbol?: string | null;
 }
 
 interface TokenData {
@@ -75,6 +81,7 @@ class DatabaseService {
           in_amount NUMERIC(40, 0) NOT NULL,
           out_amount NUMERIC(40, 0) NOT NULL,
           fee_payer VARCHAR(100) NOT NULL,
+          market_cap NUMERIC(20, 2),
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -141,6 +148,13 @@ class DatabaseService {
       `;
 
       await this.pool.query(createTableQuery);
+
+      // Ensure market_cap column exists for existing installations
+      const alterTransactionsQuery = `
+        ALTER TABLE transactions
+        ADD COLUMN IF NOT EXISTS market_cap NUMERIC(20, 2);
+      `;
+      await this.pool.query(alterTransactionsQuery);
       this.isInitialized = true;
       console.log('✅ Database initialized successfully');
     } catch (error) {
@@ -197,6 +211,23 @@ class DatabaseService {
   }
 
   /**
+   * Update market_cap for a transaction by signature
+   */
+  async updateTransactionMarketCap(transactionId: string, marketCap: number): Promise<void> {
+    try {
+      const query = `
+        UPDATE transactions
+        SET market_cap = $2
+        WHERE transaction_id = $1
+      `;
+      await this.pool.query(query, [transactionId, marketCap]);
+      console.log(`💾 Market cap updated for tx: ${transactionId}`);
+    } catch (error: any) {
+      console.error(`❌ Failed to update market cap for ${transactionId}:`, error.message);
+    }
+  }
+
+  /**
    * Close the database connection pool
    */
   async close(): Promise<void> {
@@ -216,44 +247,87 @@ class DatabaseService {
   }
 
   /**
-   * Get recent transactions with pagination and optional date filtering
+   * Get SOL price (USD) from solPrice table
+   * Note: solPrice table only has price field (no time field)
+   */
+  async getLatestSolPrice(): Promise<number | null> {
+    try {
+      const query = `
+        SELECT price
+        FROM solPrice
+        LIMIT 1
+      `;
+      const result = await this.pool.query(query);
+      if (result.rows.length === 0) {
+        return null;
+      }
+      const raw = result.rows[0].price;
+      const price = raw !== null && raw !== undefined ? parseFloat(raw.toString()) : NaN;
+      return Number.isNaN(price) ? null : price;
+    } catch (error) {
+      console.error('Failed to fetch SOL price:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get recent transactions with pagination and optional date/wallet filtering
    */
   async getTransactions(
     limit: number = 50, 
     offset: number = 0,
     fromDate?: string,
-    toDate?: string
+    toDate?: string,
+    walletAddresses?: string[] | null
   ): Promise<TransactionData[]> {
     try {
       let query = `
         SELECT 
-          transaction_id,
-          platform,
-          type,
-          mint_from,
-          mint_to,
-          in_amount,
-          out_amount,
-          fee_payer as "feePayer",
-          created_at
-        FROM transactions
+          t.transaction_id,
+          t.platform,
+          t.type,
+          t.mint_from,
+          t.mint_to,
+          t.in_amount,
+          t.out_amount,
+          t.fee_payer as "feePayer",
+          t.market_cap as "marketCap",
+          t.created_at,
+          token_from.token_name as "mint_from_name",
+          token_from.image as "mint_from_image",
+          token_from.symbol as "mint_from_symbol",
+          token_to.token_name as "mint_to_name",
+          token_to.image as "mint_to_image",
+          token_to.symbol as "mint_to_symbol"
+        FROM transactions t
+        LEFT JOIN tokens token_from ON t.mint_from = token_from.mint_address
+        LEFT JOIN tokens token_to ON t.mint_to = token_to.mint_address
       `;
       
       const params: any[] = [];
       const conditions: string[] = [];
       let paramCount = 0;
 
+      // Add wallet filter if provided
+      if (walletAddresses && walletAddresses.length > 0) {
+        paramCount++;
+        const placeholders = walletAddresses.map((_, i) => `$${paramCount + i}`).join(', ');
+        conditions.push(`t.fee_payer IN (${placeholders})`);
+        params.push(...walletAddresses);
+        paramCount += walletAddresses.length - 1;
+      }
+
       // Add date filters if provided
       if (fromDate) {
         paramCount++;
-        conditions.push(`created_at >= $${paramCount}`);
+        conditions.push(`t.created_at >= $${paramCount}`);
         params.push(fromDate);
       }
 
       if (toDate) {
         paramCount++;
         // Add end of day to include the entire toDate
-        conditions.push(`created_at <= $${paramCount}`);
+        conditions.push(`t.created_at <= $${paramCount}`);
         params.push(`${toDate} 23:59:59`);
       }
 
@@ -263,7 +337,7 @@ class DatabaseService {
       }
 
       // Always sort by most recent first
-      query += ' ORDER BY created_at DESC';
+      query += ' ORDER BY t.created_at DESC';
 
       // Add pagination
       paramCount++;
@@ -283,25 +357,34 @@ class DatabaseService {
   }
 
   /**
-   * Get total transaction count with optional date filtering
+   * Get total transaction count with optional date/wallet filtering
    */
-  async getTransactionCount(fromDate?: string, toDate?: string): Promise<number> {
+  async getTransactionCount(fromDate?: string, toDate?: string, walletAddresses?: string[] | null): Promise<number> {
     try {
-      let query = 'SELECT COUNT(*) as count FROM transactions';
+      let query = 'SELECT COUNT(*) as count FROM transactions t';
       const params: any[] = [];
       const conditions: string[] = [];
       let paramCount = 0;
 
+      // Add wallet filter if provided
+      if (walletAddresses && walletAddresses.length > 0) {
+        paramCount++;
+        const placeholders = walletAddresses.map((_, i) => `$${paramCount + i}`).join(', ');
+        conditions.push(`t.fee_payer IN (${placeholders})`);
+        params.push(...walletAddresses);
+        paramCount += walletAddresses.length - 1;
+      }
+
       // Add date filters if provided
       if (fromDate) {
         paramCount++;
-        conditions.push(`created_at >= $${paramCount}`);
+        conditions.push(`t.created_at >= $${paramCount}`);
         params.push(fromDate);
       }
 
       if (toDate) {
         paramCount++;
-        conditions.push(`created_at <= $${paramCount}`);
+        conditions.push(`t.created_at <= $${paramCount}`);
         params.push(`${toDate} 23:59:59`);
       }
 
@@ -315,6 +398,30 @@ class DatabaseService {
     } catch (error) {
       console.error('Failed to get transaction count:', error);
       return 0;
+    }
+  }
+
+  /**
+   * Get the earliest transaction timestamp for a wallet (used as tracking start time)
+   */
+  async getEarliestTransactionForWallet(walletAddress: string): Promise<{ created_at: string } | null> {
+    try {
+      const query = `
+        SELECT created_at
+        FROM transactions
+        WHERE fee_payer = $1
+        ORDER BY created_at ASC
+        LIMIT 1
+      `;
+
+      const result = await this.pool.query(query, [walletAddress]);
+      if (result.rows.length === 0) {
+        return null;
+      }
+      return result.rows[0];
+    } catch (error) {
+      console.error('Failed to get earliest transaction for wallet:', error);
+      return null;
     }
   }
 
@@ -838,6 +945,149 @@ class DatabaseService {
   }
 
   /**
+   * Get total SOL amount from sell events for a wallet-token pair
+   */
+  async getTotalSellsForWalletToken(walletAddress: string, tokenAddress: string): Promise<number> {
+    try {
+      const SOL_MINT = 'So11111111111111111111111111111111111111112';
+      const SOL_DECIMALS = 9; // SOL has 9 decimals
+      
+      // Query for sell transactions: wallet sells token (mint_from) and receives SOL (mint_to)
+      // Use UPPER() for case-insensitive comparison as type might be stored as 'Sell', 'SELL', or 'sell'
+      // Cast NUMERIC to ensure proper aggregation
+      const query = `
+        SELECT COALESCE(SUM(out_amount::NUMERIC), 0)::TEXT as total_amount
+        FROM transactions
+        WHERE fee_payer = $1
+          AND UPPER(TRIM(type)) = 'SELL'
+          AND mint_from = $2
+          AND mint_to = $3
+      `;
+
+      const result = await this.pool.query(query, [walletAddress, tokenAddress, SOL_MINT]);
+      const totalAmountRaw = result.rows[0]?.total_amount || '0';
+      
+      // Convert from raw amount (with decimals) to SOL
+      const totalAmountSOL = parseFloat(totalAmountRaw) / Math.pow(10, SOL_DECIMALS);
+      
+      return totalAmountSOL;
+    } catch (error) {
+      console.error(`Failed to get total sells amount for ${walletAddress} - ${tokenAddress}:`, error);
+      return 0;
+    }
+  }
+
+  /**
+   * Get total SOL amount spent in buy transactions for a wallet-token pair
+   */
+  async getTotalBuyAmountForWalletToken(walletAddress: string, tokenAddress: string): Promise<number> {
+    try {
+      const SOL_MINT = 'So11111111111111111111111111111111111111112';
+      const SOL_DECIMALS = 9; // SOL has 9 decimals
+      
+      // Query for buy transactions: wallet buys token (mint_to) and spends SOL (mint_from)
+      // Use UPPER() for case-insensitive comparison as type might be stored as 'Buy', 'BUY', or 'buy'
+      // Cast NUMERIC to ensure proper aggregation
+      const query = `
+        SELECT COALESCE(SUM(in_amount::NUMERIC), 0)::TEXT as total_amount
+        FROM transactions
+        WHERE fee_payer = $1
+          AND UPPER(TRIM(type)) = 'BUY'
+          AND mint_from = $2
+          AND mint_to = $3
+      `;
+
+      const result = await this.pool.query(query, [walletAddress, SOL_MINT, tokenAddress]);
+      const totalAmountRaw = result.rows[0]?.total_amount || '0';
+      
+      // Convert from raw amount (with decimals) to SOL
+      const totalAmountSOL = parseFloat(totalAmountRaw) / Math.pow(10, SOL_DECIMALS);
+      
+      return totalAmountSOL;
+    } catch (error) {
+      console.error(`Failed to get total buy amount for ${walletAddress} - ${tokenAddress}:`, error);
+      return 0;
+    }
+  }
+
+  /**
+   * Get total token amount received in buy transactions for a wallet-token pair
+   */
+  async getTotalBuyTokensForWalletToken(walletAddress: string, tokenAddress: string, tokenDecimals: number | null = null): Promise<number> {
+    try {
+      const SOL_MINT = 'So11111111111111111111111111111111111111112';
+      
+      // Query for buy transactions: wallet buys token (mint_to) and receives tokens (out_amount)
+      // Use UPPER() for case-insensitive comparison as type might be stored as 'Buy', 'BUY', or 'buy'
+      // Cast NUMERIC to ensure proper aggregation
+      const query = `
+        SELECT COALESCE(SUM(out_amount::NUMERIC), 0)::TEXT as total_amount
+        FROM transactions
+        WHERE fee_payer = $1
+          AND UPPER(TRIM(type)) = 'BUY'
+          AND mint_from = $2
+          AND mint_to = $3
+      `;
+
+      const result = await this.pool.query(query, [walletAddress, SOL_MINT, tokenAddress]);
+      const totalAmountRaw = result.rows[0]?.total_amount || '0';
+      
+      // Get token decimals if not provided or invalid
+      // Priority: dev_buy_token_amount_decimal (from tokens table) > first_buy_decimals (from wallets table) > default 9
+      let decimals = tokenDecimals;
+      if (decimals === null || decimals === undefined || isNaN(decimals)) {
+        // First try to get dev_buy_token_amount_decimal from tokens table (most accurate for token decimals)
+        const tokenQuery = `
+          SELECT dev_buy_token_amount_decimal FROM tokens WHERE mint_address = $1
+        `;
+        const tokenResult = await this.pool.query(tokenQuery, [tokenAddress]);
+        const devBuyTokenDecimals = tokenResult.rows[0]?.dev_buy_token_amount_decimal;
+        
+        if (devBuyTokenDecimals !== null && devBuyTokenDecimals !== undefined && !isNaN(devBuyTokenDecimals)) {
+          decimals = devBuyTokenDecimals;
+        } else {
+          // If not found, try to get from first_buy_decimals in wallets table
+          const walletQuery = `
+            SELECT first_buy_decimals FROM wallets WHERE wallet_address = $1 AND token_address = $2
+          `;
+          const walletResult = await this.pool.query(walletQuery, [walletAddress, tokenAddress]);
+          const walletDecimals = walletResult.rows[0]?.first_buy_decimals;
+          
+          if (walletDecimals !== null && walletDecimals !== undefined && !isNaN(walletDecimals)) {
+            decimals = walletDecimals;
+          } else {
+            // Default to 9 if not found
+            decimals = 9;
+          }
+        }
+      }
+      
+      // Ensure decimals is a valid number
+      if (isNaN(decimals) || decimals < 0) {
+        decimals = 9; // Fallback to 9
+      }
+      
+      // Convert from raw amount (with decimals) to token amount
+      const totalAmountNum = parseFloat(totalAmountRaw);
+      if (isNaN(totalAmountNum)) {
+        return 0;
+      }
+      
+      // If totalAmountNum is 0, return 0 (no buy transactions or sum is 0)
+      if (totalAmountNum === 0) {
+        return 0;
+      }
+      
+      const totalTokens = totalAmountNum / Math.pow(10, decimals);
+      
+      return totalTokens;
+    } catch (error) {
+      console.error(`Failed to get total buy tokens for ${walletAddress} - ${tokenAddress}:`, error);
+      return 0;
+    }
+  }
+
+  /**
    * Get wallets by token address
    */
   async getTokenWallets(tokenAddress: string, limit: number = 50): Promise<any[]> {
@@ -869,6 +1119,25 @@ class DatabaseService {
       return result.rows;
     } catch (error) {
       console.error('Failed to fetch token wallets:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get all unique wallet addresses from transactions table
+   */
+  async getAllWalletsFromTransactions(): Promise<string[]> {
+    try {
+      const query = `
+        SELECT DISTINCT fee_payer as wallet_address
+        FROM transactions
+        ORDER BY fee_payer ASC
+      `;
+
+      const result = await this.pool.query(query);
+      return result.rows.map((row) => row.wallet_address);
+    } catch (error) {
+      console.error('Failed to fetch wallets from transactions:', error);
       return [];
     }
   }

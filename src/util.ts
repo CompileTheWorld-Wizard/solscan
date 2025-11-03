@@ -68,6 +68,5 @@ export const detectSwapPlatform = ( tx : any ) => {
         }
     }
     
-    console.log("\n✗ No platform detected\n");
     return null;
 }

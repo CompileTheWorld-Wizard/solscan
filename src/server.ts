@@ -127,10 +127,14 @@ app.get("/api/transactions", async (req, res) => {
     const offset = parseInt(req.query.offset as string) || 0;
     const fromDate = req.query.fromDate as string;
     const toDate = req.query.toDate as string;
+    const wallets = req.query.wallets as string; // Comma-separated wallet addresses
+    
+    // Parse wallets if provided
+    const walletAddresses = wallets ? wallets.split(',').filter(w => w.trim().length > 0) : null;
     
     const [transactions, total] = await Promise.all([
-      dbService.getTransactions(limit, offset, fromDate, toDate),
-      dbService.getTransactionCount(fromDate, toDate)
+      dbService.getTransactions(limit, offset, fromDate, toDate, walletAddresses),
+      dbService.getTransactionCount(fromDate, toDate, walletAddresses)
     ]);
     
     res.json({
@@ -141,6 +145,18 @@ app.get("/api/transactions", async (req, res) => {
       fromDate: fromDate || null,
       toDate: toDate || null
     });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/wallets - Get all unique wallet addresses from transactions table
+ */
+app.get("/api/wallets", async (req, res) => {
+  try {
+    const wallets = await dbService.getAllWalletsFromTransactions();
+    res.json({ success: true, wallets });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -170,33 +186,133 @@ app.get("/api/analyze/:wallet", async (req, res) => {
       }, {} as Record<string, any>);
     }
     
-    // Format trading data for frontend
-    const tradingData = walletTrades.map((trade: any) => ({
-      token_address: trade.token_address,
-      first_buy_timestamp: trade.first_buy_timestamp,
-      first_buy_amount: trade.first_buy_amount,
-      first_buy_mcap: trade.first_buy_mcap,
-      first_buy_supply: trade.first_buy_supply,
-      first_buy_price: trade.first_buy_price,
-      first_buy_decimals: trade.first_buy_decimals,
-      first_sell_timestamp: trade.first_sell_timestamp,
-      first_sell_amount: trade.first_sell_amount,
-      first_sell_mcap: trade.first_sell_mcap,
-      first_sell_supply: trade.first_sell_supply,
-      first_sell_price: trade.first_sell_price,
-      first_sell_decimals: trade.first_sell_decimals,
-      created_at: trade.created_at,
-      // Add token metadata from tokens table
-      token_name: tokenInfo[trade.token_address]?.token_name || null,
-      symbol: tokenInfo[trade.token_address]?.symbol || null,
-      image: tokenInfo[trade.token_address]?.image || null,
-      creator: tokenInfo[trade.token_address]?.creator || null,
-      // Add dev buy information
-      dev_buy_amount: tokenInfo[trade.token_address]?.dev_buy_amount || null,
-      dev_buy_amount_decimal: tokenInfo[trade.token_address]?.dev_buy_amount_decimal || null,
-      dev_buy_token_amount: tokenInfo[trade.token_address]?.dev_buy_token_amount || null,
-      dev_buy_token_amount_decimal: tokenInfo[trade.token_address]?.dev_buy_token_amount_decimal || null,
-      dev_buy_used_token: tokenInfo[trade.token_address]?.dev_buy_used_token || null,
+    // Get the earliest transaction timestamp for this wallet (tracking start time)
+    // This is used when calculating holding duration for tokens bought before tracking started
+    let trackingStartTime: string | null = null;
+    try {
+      const earliestTx = await dbService.getEarliestTransactionForWallet(wallet);
+      if (earliestTx) {
+        trackingStartTime = earliestTx.created_at;
+      }
+    } catch (error) {
+      console.error('Failed to get earliest transaction for wallet:', error);
+    }
+    
+    /**
+     * Format duration in human-readable format
+     * @param durationSeconds - Duration in seconds
+     * @returns Formatted duration string
+     */
+    const formatDuration = (durationSeconds: number): string => {
+      // Format: SS sec or MM min SS sec or HH h MM min or DD days ago
+      if (durationSeconds < 60) {
+        return `${durationSeconds} sec`;
+      } else if (durationSeconds < 3600) {
+        const minutes = Math.floor(durationSeconds / 60);
+        const seconds = durationSeconds % 60;
+        return seconds > 0 ? `${minutes} min ${seconds} sec` : `${minutes} min`;
+      } else if (durationSeconds < 86400) {
+        const hours = Math.floor(durationSeconds / 3600);
+        const minutes = Math.floor((durationSeconds % 3600) / 60);
+        return minutes > 0 ? `${hours} h ${minutes} min` : `${hours} h`;
+      } else {
+        const days = Math.floor(durationSeconds / 86400);
+        return `${days} day${days > 1 ? 's' : ''} ago`;
+      }
+    };
+    
+    /**
+     * Calculate and format holding duration until first sell
+     * @param buyTimestamp - First buy timestamp
+     * @param sellTimestamp - First sell timestamp
+     * @returns Formatted duration string or null
+     */
+    const formatHoldingDuration = (buyTimestamp: string | null, sellTimestamp: string | null): string | null => {
+      // If buy date exists but sell date is missing, skip it (hasn't sold yet)
+      if (buyTimestamp && !sellTimestamp) {
+        return null;
+      }
+      
+      // If both are missing, return null
+      if (!sellTimestamp) {
+        return null;
+      }
+      
+      let startDate: Date;
+      
+      // If sell date exists but buy date is missing, use tracking start time (bought before stream)
+      if (sellTimestamp && !buyTimestamp) {
+        if (!trackingStartTime) {
+          // No tracking start time available, cannot calculate
+          return null;
+        }
+        startDate = new Date(trackingStartTime);
+      } else if (buyTimestamp && sellTimestamp) {
+        // Both exist, use buy timestamp
+        startDate = new Date(buyTimestamp);
+      } else {
+        return null;
+      }
+      
+      // Calculate duration in seconds
+      const sellDate = new Date(sellTimestamp);
+      const durationSeconds = Math.floor((sellDate.getTime() - startDate.getTime()) / 1000);
+      
+      // Ensure positive duration
+      if (durationSeconds < 0) {
+        return null;
+      }
+      
+      return formatDuration(durationSeconds);
+    };
+
+    // Format trading data for frontend (with total sells amount and buy amounts)
+    const tradingData = await Promise.all(walletTrades.map(async (trade: any) => {
+      // Get total SOL amount from sell events for this wallet-token pair
+      const totalSellsAmount = await dbService.getTotalSellsForWalletToken(wallet, trade.token_address);
+      
+      // Get total SOL amount spent in buy transactions
+      const totalBuyAmount = await dbService.getTotalBuyAmountForWalletToken(wallet, trade.token_address);
+      
+      // Get total token amount received in buy transactions
+      // Use dev_buy_token_amount_decimal from tokens table if available, otherwise use first_buy_decimals
+      const devBuyTokenDecimals = tokenInfo[trade.token_address]?.dev_buy_token_amount_decimal || null;
+      const tokenDecimalsToUse = devBuyTokenDecimals !== null && devBuyTokenDecimals !== undefined && !isNaN(devBuyTokenDecimals)
+        ? devBuyTokenDecimals
+        : trade.first_buy_decimals;
+      const totalBuyTokens = await dbService.getTotalBuyTokensForWalletToken(wallet, trade.token_address, tokenDecimalsToUse);
+      
+      return {
+        token_address: trade.token_address,
+        first_buy_timestamp: trade.first_buy_timestamp,
+        first_buy_amount: trade.first_buy_amount,
+        first_buy_mcap: trade.first_buy_mcap,
+        first_buy_supply: trade.first_buy_supply,
+        first_buy_price: trade.first_buy_price,
+        first_buy_decimals: trade.first_buy_decimals,
+        first_sell_timestamp: trade.first_sell_timestamp,
+        first_sell_amount: trade.first_sell_amount,
+        first_sell_mcap: trade.first_sell_mcap,
+        first_sell_supply: trade.first_sell_supply,
+        first_sell_price: trade.first_sell_price,
+        first_sell_decimals: trade.first_sell_decimals,
+        total_sells: totalSellsAmount,
+        total_buy_amount: totalBuyAmount, // Total SOL spent in buy transactions
+        total_buy_tokens: totalBuyTokens, // Total token amount received in buy transactions
+        holding_duration: formatHoldingDuration(trade.first_buy_timestamp, trade.first_sell_timestamp),
+        created_at: trade.created_at,
+        // Add token metadata from tokens table
+        token_name: tokenInfo[trade.token_address]?.token_name || null,
+        symbol: tokenInfo[trade.token_address]?.symbol || null,
+        image: tokenInfo[trade.token_address]?.image || null,
+        creator: tokenInfo[trade.token_address]?.creator || null,
+        // Add dev buy information
+        dev_buy_amount: tokenInfo[trade.token_address]?.dev_buy_amount || null,
+        dev_buy_amount_decimal: tokenInfo[trade.token_address]?.dev_buy_amount_decimal || null,
+        dev_buy_token_amount: tokenInfo[trade.token_address]?.dev_buy_token_amount || null,
+        dev_buy_token_amount_decimal: tokenInfo[trade.token_address]?.dev_buy_token_amount_decimal || null,
+        dev_buy_used_token: tokenInfo[trade.token_address]?.dev_buy_used_token || null,
+      };
     }));
     
     res.json({

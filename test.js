@@ -1,30 +1,27 @@
-const mintAddress = "DruhxNiKffgFDoXw2zJLz5qZM3UxP182XomfhxQHpump";
+const { Connection, PublicKey } = require('@solana/web3.js');
 
-async function main() {
-    const response = await fetch("https://mainnet.helius-rpc.com/?api-key=fbcf4553-f7c1-4fa8-b33d-36540cfc9676", {
-        
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: "find-first-mints",
-            method: "getTransactionsForAddress",
-            params: [
-                mintAddress,
-                {
-                    encoding: "jsonParsed",
-                    maxSupportedTransactionVersion: 0,
-                    sortOrder: "asc",
-                    limit: 20,
-                    transactionDetails: "signatures",
-                    filters: {
-                        status: "succeeded"
-                    }
-                },
-            ],
-        }),
-    });
-    const data = await response.json();
-    console.log(data);
+async function checkTokenSupply(mintAddress) {
+  // Replace with your RPC endpoint
+  const connection = new Connection('https://mainnet.helius-rpc.com/?api-key=fbcf4553-f7c1-4fa8-b33d-36540cfc9676');
+  const mintPublicKey = new PublicKey(mintAddress);
+
+  try {
+    const tokenSupply = await connection.getTokenSupply(mintPublicKey);
+    console.log(`Token Supply for Mint ${mintAddress}:`);
+    console.log(`  UI Amount: ${tokenSupply.value.uiAmountString}`);
+    console.log(`  Raw Amount: ${tokenSupply.value.amount}`);
+    console.log(`  Decimals: ${tokenSupply.value.decimals}`);
+    // For full details:
+    // console.log(JSON.stringify(tokenSupply, null, 2));
+  } catch (error) {
+    console.error(`Error fetching token supply for mint ${mintAddress}:`, error);
+  }
 }
-main()
+
+// Replace with the actual token mint public key you want to query
+const exampleTokenMint = 'F9JSH6iHhSv7yYkKndfhHw6Zt4QNALHGMmbq1z1Tybu2'; // USDC mint
+checkTokenSupply(exampleTokenMint);
+
+// Example with a different mint (e.g., Raydium)
+// const raydiumMint = '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R';
+// checkTokenSupply(raydiumMint);
