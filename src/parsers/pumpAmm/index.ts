@@ -25,6 +25,8 @@ export function parsePumpAmmTransaction(tx: any) {
   //   `New transaction https://translator.shyft.to/tx/${txn.transaction.signatures[0]} \n`,
   //   JSON.stringify(formattedSwapTxn, null, 2) + "\n",
   // );
+  //Reverted buy/sell
+  formattedSwapTxn.type = formattedSwapTxn.type === 'buy' ? 'sell' : 'buy'
   const result = {
     platform : "PumpAmm",
     type : formattedSwapTxn.type,
