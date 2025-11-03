@@ -113,8 +113,8 @@ class TransactionTracker {
 
           const result = parseTransaction(data.transaction);
 
-          // Save to database asynchronously (non-blocking)
-          if (result) {
+            // Save to database asynchronously (non-blocking)
+            if (result) {
             dbService.saveTransaction(sig, {
               platform: result.platform,
               type: result.type,
@@ -125,7 +125,7 @@ class TransactionTracker {
               feePayer: result.feePayer,
             });
 
-            // Process buy/sell events
+            // Extract token from buy/sell events
             const txType = result.type?.toUpperCase();
             console.log(`📝 Transaction type: ${result.type} (normalized: ${txType})`);
             

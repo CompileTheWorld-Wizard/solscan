@@ -61,7 +61,6 @@ export class MarketCapService {
     if (!this.solscanApiKey) {
       console.warn('⚠️ Warning: SOLSCAN_API_KEY not set in environment variables');
     }
-
     // Initialize Shyft RPC connection
     const shyftApiKey = process.env.SHYFT_API_KEY;
     if (shyftApiKey) {
@@ -135,6 +134,7 @@ export class MarketCapService {
       };
     } catch (error) {
       console.error("Error fetching token supply via RPC:", error);
+
       return {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
@@ -200,6 +200,7 @@ export class MarketCapService {
       }
 
       // Step 2: Get transaction details
+      
       const transactionResult = await this.getTransactionDetail(signature);
       
       if (!transactionResult.success || !transactionResult.data) {
@@ -212,7 +213,6 @@ export class MarketCapService {
       const parsed_instructions = transactionResult.data.parsed_instructions || [];
       const sol_bal_change = transactionResult.data.sol_bal_change || [];
       const token_bal_change = transactionResult.data.token_bal_change || [];
-
       // Step 3: Find AMM ID from swap activity
       let amm_id: string | null = null;
       for (const instruction of parsed_instructions) {
