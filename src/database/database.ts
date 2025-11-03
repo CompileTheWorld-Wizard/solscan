@@ -247,22 +247,14 @@ class DatabaseService {
   }
 
   /**
-<<<<<<< HEAD
    * Get SOL price (USD) from solPrice table
    * Note: solPrice table only has price field (no time field)
-=======
-   * Get latest SOL price (USD) from solPrice table
->>>>>>> 54d95e275e5c8eff8bb2d99fd26e710ad0639ee0
    */
   async getLatestSolPrice(): Promise<number | null> {
     try {
       const query = `
         SELECT price
         FROM solPrice
-<<<<<<< HEAD
-=======
-        ORDER BY updated_at DESC
->>>>>>> 54d95e275e5c8eff8bb2d99fd26e710ad0639ee0
         LIMIT 1
       `;
       const result = await this.pool.query(query);
@@ -273,21 +265,13 @@ class DatabaseService {
       const price = raw !== null && raw !== undefined ? parseFloat(raw.toString()) : NaN;
       return Number.isNaN(price) ? null : price;
     } catch (error) {
-<<<<<<< HEAD
       console.error('Failed to fetch SOL price:', error);
-=======
-      console.error('Failed to fetch latest SOL price:', error);
->>>>>>> 54d95e275e5c8eff8bb2d99fd26e710ad0639ee0
       return null;
     }
   }
 
   /**
-<<<<<<< HEAD
    * Get recent transactions with pagination and optional date/wallet filtering
-=======
-   * Get recent transactions with pagination and optional date filtering
->>>>>>> 54d95e275e5c8eff8bb2d99fd26e710ad0639ee0
    */
   async getTransactions(
     limit: number = 50, 
