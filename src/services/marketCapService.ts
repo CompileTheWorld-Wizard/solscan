@@ -216,8 +216,17 @@ export class MarketCapService {
       // Step 3: Find AMM ID from swap activity
       let amm_id: string | null = null;
       for (const instruction of parsed_instructions) {
-        if (instruction.activities) {
-          const swapResult = this.isInSwap(instruction.activities);
+        let activities = instruction.activities || [];
+        // Also check inner_instructions if available
+        if (Array.isArray(instruction.inner_instructions)) {
+          for (const inner of instruction.inner_instructions) {
+            if (inner.activities) {
+              activities = activities.concat(inner.activities);
+            }
+          }
+        }
+        if (activities.length) {
+          const swapResult = this.isInSwap(activities);
           if (swapResult) {
             amm_id = swapResult?.data?.amm_id;
             break;
