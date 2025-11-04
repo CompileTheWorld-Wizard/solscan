@@ -123,6 +123,8 @@ class TransactionTracker {
               in_amount: result.in_amount,
               out_amount: result.out_amount,
               feePayer: result.feePayer,
+              tipAmount: result.tipAmount,
+              feeAmount: result.feeAmount,
             });
 
             // Extract token from buy/sell events

@@ -29,6 +29,12 @@ export async function fetchStatus() {
         if (result.success) {
             state.isRunning = result.data.isRunning;
             await updateUIStatus(result.data.isRunning, result.data.addresses || [], true);
+        } else {
+            console.error('Failed to fetch status:', result.error);
+            // If unauthorized, redirect to login
+            if (result.error === 'Unauthorized') {
+                window.location.href = '/login.html';
+            }
         }
     } catch (error) {
         console.error('Failed to fetch status:', error);

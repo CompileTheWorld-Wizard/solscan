@@ -10,11 +10,22 @@ export async function fetchStatus() {
         const response = await fetch('/api/status', {
             credentials: 'include'
         });
+        
+        if (!response.ok) {
+            // If unauthorized, the session might have expired
+            if (response.status === 401) {
+                console.error('Unauthorized - session expired');
+                return { success: false, error: 'Unauthorized' };
+            }
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            return { success: false, error: errorData.error || 'Failed to fetch status' };
+        }
+        
         const data = await response.json();
         return { success: true, data };
     } catch (error) {
         console.error('Failed to fetch status:', error);
-        return { success: false, error };
+        return { success: false, error: error.message || 'Network error' };
     }
 }
 
@@ -178,6 +189,66 @@ export async function removeSkipToken(mintAddress) {
         const data = await response.json();
         return { success: data.success, error: data.error };
     } catch (error) {
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Fetch token data for export
+ */
+export async function fetchTokenExportData(walletAddress, tokenAddress) {
+    try {
+        const response = await fetch(`/api/export-token/${encodeURIComponent(walletAddress)}/${encodeURIComponent(tokenAddress)}`, {
+            credentials: 'include'
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to fetch token export data');
+        }
+        
+        const data = await response.json();
+        return { success: true, data: data.data || data };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+}
+
+export async function downloadTokenExcel(walletAddress, tokenAddress) {
+    try {
+        const response = await fetch(`/api/export-token-excel/${encodeURIComponent(walletAddress)}/${encodeURIComponent(tokenAddress)}`, {
+            method: 'GET',
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to download Excel file');
+        }
+
+        // Get filename from Content-Disposition header or generate one
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = `Token_${walletAddress.substring(0, 8)}_${Date.now()}.xlsx`;
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+            if (filenameMatch) {
+                filename = filenameMatch[1];
+            }
+        }
+
+        // Get blob and create download link
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        return { success: true };
+    } catch (error) {
+        console.error('Error downloading Excel file:', error);
         return { success: false, error: error.message };
     }
 }

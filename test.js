@@ -1,27 +1,25 @@
-const { Connection, PublicKey } = require('@solana/web3.js');
+import fetch from "node-fetch";
 
-async function checkTokenSupply(mintAddress) {
-  // Replace with your RPC endpoint
-  const connection = new Connection('https://mainnet.helius-rpc.com/?api-key=fbcf4553-f7c1-4fa8-b33d-36540cfc9676');
-  const mintPublicKey = new PublicKey(mintAddress);
-
-  try {
-    const tokenSupply = await connection.getTokenSupply(mintPublicKey);
-    console.log(`Token Supply for Mint ${mintAddress}:`);
-    console.log(`  UI Amount: ${tokenSupply.value.uiAmountString}`);
-    console.log(`  Raw Amount: ${tokenSupply.value.amount}`);
-    console.log(`  Decimals: ${tokenSupply.value.decimals}`);
-    // For full details:
-    // console.log(JSON.stringify(tokenSupply, null, 2));
-  } catch (error) {
-    console.error(`Error fetching token supply for mint ${mintAddress}:`, error);
-  }
+async function getSocials(mint) {
+  const apiKey = "C5WUfQxUvSmrEBES";
+  const query = `
+    query GetTokenMeta($mint: String!) {
+      solana {
+        tokens(where: { mint: { _eq: $mint } }) {
+          metadataUri
+        }
+      }
+    }`;
+  const res = await fetch(`https://programs.shyft.to/v0/graphql/?api_key=${apiKey}&network=mainnet-beta`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables: { mint } })
+  });
+  const data = await res.json();
+  const uri = data?.data?.solana?.tokens?.[0]?.metadataUri;
+  if (!uri) throw new Error("No metadata URI found");
+  const meta = await fetch(uri).then(r => r.json());
+  return meta.extensions || {};
 }
 
-// Replace with the actual token mint public key you want to query
-const exampleTokenMint = 'F9JSH6iHhSv7yYkKndfhHw6Zt4QNALHGMmbq1z1Tybu2'; // USDC mint
-checkTokenSupply(exampleTokenMint);
-
-// Example with a different mint (e.g., Raydium)
-// const raydiumMint = '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R';
-// checkTokenSupply(raydiumMint);
+getSocials("8zKRLUuJwMZyEv8rgr8mXgxqJdVuB2Lg84JGi8L4PuQe").then(console.log);

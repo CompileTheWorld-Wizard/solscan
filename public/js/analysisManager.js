@@ -6,6 +6,9 @@ import { state } from './state.js';
 import * as api from './api.js';
 import { showNotification, formatTimestamp, formatNum } from './utils.js';
 
+// Import XLSX library (loaded via CDN in HTML)
+// We'll use the global XLSX object
+
 /**
  * Initialize column resizing for analysis table
  */
@@ -244,10 +247,10 @@ export function displayWalletInfo(data) {
                 devBuyInfo = '<span style="color: #9ca3af; font-style: italic;">-</span>';
             }
 
-            // Total Sells (SOL amount)
+            // Total Sells (SOL amount) - centered
             const totalSells = trade.total_sells !== undefined && trade.total_sells !== null && trade.total_sells > 0
                 ? `<div style="font-size: 0.75rem; color: #667eea; font-weight: 600; text-align: center;">${formatNum(trade.total_sells)} SOL</div>`
-                : '<span style="color: #9ca3af; font-style: italic;">-</span>';
+                : '<div style="text-align: center;"><span style="color: #9ca3af; font-style: italic;">-</span></div>';
 
             // Wallet Buy Amount (total SOL spent in buy transactions)
             const totalBuyAmount = trade.total_buy_amount !== undefined && trade.total_buy_amount !== null && trade.total_buy_amount > 0
@@ -281,6 +284,18 @@ export function displayWalletInfo(data) {
                     <td style="font-size: 0.75rem;">${totalBuyTokens}</td>
                     <td style="font-size: 0.75rem;">${totalSells}</td>
                     <td class="token-dev-buy-cell" style="font-size: 0.75rem;">${devBuyInfo}</td>
+                    <td style="text-align: center;">
+                        <button 
+                            onclick="window.exportTokenData('${data.wallet.replace(/'/g, "\\'")}', '${trade.token_address.replace(/'/g, "\\'")}', '${tokenSymbol.replace(/'/g, "\\'")}')"
+                            class="btn-export"
+                            style="padding: 6px 12px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: 600; transition: all 0.2s;"
+                            onmouseover="this.style.background='#5568d3'"
+                            onmouseout="this.style.background='#667eea'"
+                            title="Export to Excel"
+                        >
+                            📥 Export
+                        </button>
+                    </td>
                 </tr>
             `;
         }).join('');
@@ -300,6 +315,7 @@ export function displayWalletInfo(data) {
                             <th>Wallet Buy Tokens<span class="resizer"></span></th>
                             <th>Total Sells<span class="resizer"></span></th>
                             <th>Dev Buy<span class="resizer"></span></th>
+                            <th>Action<span class="resizer"></span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -344,4 +360,28 @@ export function displayWalletInfo(data) {
         </div>
     `;
 }
+
+/**
+ * Export token data to XLSX
+ */
+async function exportTokenData(walletAddress, tokenAddress, tokenSymbol) {
+    try {
+        showNotification('Preparing export...', 'info');
+        
+        // Call server-side endpoint to generate Excel file with proper styling
+        const result = await api.downloadTokenExcel(walletAddress, tokenAddress);
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to download Excel file');
+        }
+        
+        showNotification('Export completed successfully!', 'success');
+    } catch (error) {
+        console.error('Export error:', error);
+        showNotification(`Export failed: ${error.message}`, 'error');
+    }
+}
+
+// Make export function available globally
+window.exportTokenData = exportTokenData;
 

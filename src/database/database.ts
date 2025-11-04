@@ -9,6 +9,8 @@ interface TransactionData {
   in_amount: string;
   out_amount: string;
   feePayer: string;
+  tipAmount?: number;
+  feeAmount?: number;
   mint_from_name?: string | null;
   mint_from_image?: string | null;
   mint_from_symbol?: string | null;
@@ -81,6 +83,8 @@ class DatabaseService {
           in_amount NUMERIC(40, 0) NOT NULL,
           out_amount NUMERIC(40, 0) NOT NULL,
           fee_payer VARCHAR(100) NOT NULL,
+          tip_amount NUMERIC(20, 9),
+          fee_amount NUMERIC(20, 9),
           market_cap NUMERIC(20, 2),
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -149,10 +153,12 @@ class DatabaseService {
 
       await this.pool.query(createTableQuery);
 
-      // Ensure market_cap column exists for existing installations
+      // Ensure additional columns exist for existing installations
       const alterTransactionsQuery = `
         ALTER TABLE transactions
-        ADD COLUMN IF NOT EXISTS market_cap NUMERIC(20, 2);
+        ADD COLUMN IF NOT EXISTS market_cap NUMERIC(20, 2),
+        ADD COLUMN IF NOT EXISTS tip_amount NUMERIC(20, 9),
+        ADD COLUMN IF NOT EXISTS fee_amount NUMERIC(20, 9);
       `;
       await this.pool.query(alterTransactionsQuery);
       this.isInitialized = true;
@@ -183,8 +189,10 @@ class DatabaseService {
             mint_to,
             in_amount,
             out_amount,
-            fee_payer
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            fee_payer,
+            tip_amount,
+            fee_amount
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
           ON CONFLICT (transaction_id) DO NOTHING
         `;
 
@@ -197,6 +205,8 @@ class DatabaseService {
           transactionData.in_amount?.toString() || '0',
           transactionData.out_amount?.toString() || '0',
           transactionData.feePayer,
+          transactionData.tipAmount ?? null,
+          transactionData.feeAmount ?? null,
         ];
 
         await this.pool.query(query, values);
@@ -291,6 +301,8 @@ class DatabaseService {
           t.in_amount,
           t.out_amount,
           t.fee_payer as "feePayer",
+          t.tip_amount as "tipAmount",
+          t.fee_amount as "feeAmount",
           t.market_cap as "marketCap",
           t.created_at,
           token_from.token_name as "mint_from_name",
@@ -422,6 +434,43 @@ class DatabaseService {
     } catch (error) {
       console.error('Failed to get earliest transaction for wallet:', error);
       return null;
+    }
+  }
+
+  /**
+   * Get all transactions for a specific wallet and token pair
+   */
+  async getTransactionsByWalletToken(walletAddress: string, tokenAddress: string): Promise<any[]> {
+    try {
+      const SOL_MINT = 'So11111111111111111111111111111111111111112';
+      const query = `
+        SELECT 
+          t.transaction_id,
+          t.platform,
+          t.type,
+          t.mint_from,
+          t.mint_to,
+          t.in_amount,
+          t.out_amount,
+          t.fee_payer as "feePayer",
+          t.tip_amount as "tipAmount",
+          t.fee_amount as "feeAmount",
+          t.market_cap as "marketCap",
+          t.created_at
+        FROM transactions t
+        WHERE t.fee_payer = $1
+          AND (
+            (t.mint_from = $2 AND t.mint_to = $3) OR
+            (t.mint_from = $3 AND t.mint_to = $2)
+          )
+        ORDER BY t.created_at DESC
+      `;
+
+      const result = await this.pool.query(query, [walletAddress, tokenAddress, SOL_MINT]);
+      return result.rows;
+    } catch (error) {
+      console.error('Failed to get transactions by wallet and token:', error);
+      throw error;
     }
   }
 

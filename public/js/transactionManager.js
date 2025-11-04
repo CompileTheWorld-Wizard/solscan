@@ -72,6 +72,13 @@ export async function fetchTransactions() {
         state.totalTransactions = result.data.total;
         document.getElementById('totalTransactions').textContent = state.totalTransactions;
 
+        // Debug: log first transaction to see structure
+        if (result.data.transactions && result.data.transactions.length > 0) {
+            console.log('Sample transaction data:', result.data.transactions[0]);
+            console.log('Has tipAmount?', 'tipAmount' in result.data.transactions[0]);
+            console.log('Has feeAmount?', 'feeAmount' in result.data.transactions[0]);
+        }
+
         renderTransactions(result.data.transactions);
         updatePagination();
     } catch (error) {
@@ -89,7 +96,7 @@ function renderTransactions(transactions) {
     if (transactions.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="10">
+                <td colspan="11">
                     <div class="empty-state">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
@@ -155,6 +162,50 @@ function renderTransactions(transactions) {
             return `${address.substring(0, startLength)}...${address.substring(address.length - endLength)}`;
         };
 
+        // Helper function to format SOL amount (for fee+tip)
+        const formatSOL = (value) => {
+            if (value === null || value === undefined || value === '') {
+                return '-';
+            }
+            const num = parseFloat(value);
+            if (isNaN(num) || num === 0) {
+                return '-';
+            }
+            // Format with up to 9 decimal places, but remove trailing zeros
+            return num.toFixed(9).replace(/\.?0+$/, '') + ' SOL';
+        };
+
+        // Calculate fee+tip
+        // Handle both null/undefined and string values from database
+        // Also handle potential case variations (tip_amount, tipAmount, etc.)
+        const tipAmount = (tx.tipAmount != null ? parseFloat(tx.tipAmount) : 
+                          tx.tip_amount != null ? parseFloat(tx.tip_amount) : 0) || 0;
+        const feeAmount = (tx.feeAmount != null ? parseFloat(tx.feeAmount) : 
+                          tx.fee_amount != null ? parseFloat(tx.fee_amount) : 0) || 0;
+        
+        // Debug logging (remove in production if needed)
+        if (tx.tipAmount != null || tx.feeAmount != null || tx.tip_amount != null || tx.fee_amount != null) {
+            console.log('Transaction fee data:', {
+                transaction_id: tx.transaction_id,
+                tipAmount: tx.tipAmount,
+                feeAmount: tx.feeAmount,
+                tip_amount: tx.tip_amount,
+                fee_amount: tx.fee_amount,
+                parsed_tipAmount: tipAmount,
+                parsed_feeAmount: feeAmount
+            });
+        }
+        
+        // Display fee and tip on separate lines
+        const feeDisplay = formatSOL(feeAmount);
+        const tipDisplay = formatSOL(tipAmount);
+        const feeTipDisplay = feeDisplay !== '-' || tipDisplay !== '-'
+            ? `<div style="line-height: 1.4;">
+                <div>Fee: ${feeDisplay}</div>
+                <div>Tip: ${tipDisplay}</div>
+               </div>`
+            : '-';
+
         return `
         <tr>
             <td class="mono" title="${tx.transaction_id}" style="display: flex; align-items: center; gap: 6px; min-width: 0;">
@@ -175,6 +226,7 @@ function renderTransactions(transactions) {
                 </a>
                 ${createCopyIcon(tx.feePayer)}
             </td>
+            <td style="white-space: nowrap;">${feeTipDisplay}</td>
             <td>${formatCurrency(tx.marketCap)}</td>
             <td>${formatTime(tx.created_at)}</td>
         </tr>
