@@ -22,12 +22,12 @@
             
             <div style="margin-bottom: 15px;">
                 <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                    <input type="text" id="newAddressInput" placeholder="Enter Solana address..." style="flex: 1; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 0.9rem; font-family: 'Courier New', monospace;">
-                    <button id="addAddressBtn" onclick="addWalletAddress()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem; transition: all 0.2s; white-space: nowrap;">
+                    <input type="text" id="newAddressInput" placeholder="Enter Solana address..." style="flex: 1; padding: 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.9rem; font-family: 'Courier New', monospace;">
+                    <button id="addAddressBtn" onclick="addWalletAddress()" style="padding: 10px 20px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem; transition: all 0.2s; white-space: nowrap; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);">
                         ➕ Add
                     </button>
                 </div>
-                <div id="walletAddressesList" style="display: flex; flex-direction: column; gap: 8px;">
+                <div id="walletAddressesList" style="display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px;">
                     <!-- Wallet addresses will be added here -->
                 </div>
             </div>
@@ -44,21 +44,26 @@
 
         <!-- Skip Tokens Configuration -->
         <div class="card">
-            <div class="section-title">🚫 Skip Tokens (For Analysis)</div>
-            <p style="color: #6b7280; font-size: 0.85rem; margin-bottom: 15px;">
-                Tokens in this list will be skipped when analyzing dev buy amounts. Add common tokens like SOL, USDC, USDT, etc.
-            </p>
-            
-            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                <input type="text" id="skipTokenMint" placeholder="Token mint address..." style="flex: 1; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 0.85rem;">
-                <input type="text" id="skipTokenSymbol" placeholder="Symbol (optional)" style="width: 120px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 0.85rem;">
-                <button onclick="addSkipToken()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem; transition: all 0.2s;">
-                    ➕ Add
-                </button>
+            <div class="section-title collapsible-header" onclick="toggleSkipTokensPanel()" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                <span>🚫 Skip Tokens (For Analysis)</span>
+                <span id="skipTokensToggleIcon" class="rotated" style="font-size: 1.2rem; transition: transform 0.3s;">▼</span>
             </div>
+            <div id="skipTokensContent" class="collapsible-content collapsed">
+                <p style="color: #94a3b8; font-size: 0.85rem; margin-bottom: 15px;">
+                    Tokens in this list will be skipped when analyzing dev buy amounts. Add common tokens like SOL, USDC, USDT, etc.
+                </p>
+                
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <input type="text" id="skipTokenMint" placeholder="Token mint address..." style="flex: 1; padding: 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
+                    <input type="text" id="skipTokenSymbol" placeholder="Symbol (optional)" style="width: 120px; padding: 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
+                    <button onclick="addSkipToken()" style="padding: 10px 20px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem; transition: all 0.2s; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);">
+                        ➕ Add
+                    </button>
+                </div>
 
-            <div id="skipTokensList" style="display: flex; flex-wrap: wrap; gap: 8px;">
-                <!-- Skip tokens will be loaded here -->
+                <div id="skipTokensList" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    <!-- Skip tokens will be loaded here -->
+                </div>
             </div>
         </div>
 
@@ -90,19 +95,19 @@
                 <div id="transactionsTab" class="tab-content active">
                     <div style="display: flex; gap: 10px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap;">
                         <div style="flex: 1; min-width: 250px;">
-                            <label for="walletFilterSelect" style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 0.9rem;">Filter by Wallet</label>
+                            <label for="walletFilterSelect" style="display: block; margin-bottom: 8px; font-weight: 600; color: #cbd5e1; font-size: 0.9rem;">Filter by Wallet</label>
                             <div style="position: relative;">
                                 <input type="text" 
                                        id="walletFilterSearch" 
                                        placeholder="Search wallet address..." 
-                                       style="width: 100%; padding: 10px 40px 10px 10px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 0.85rem; font-family: 'Courier New', monospace;"
+                                       style="width: 100%; padding: 10px 40px 10px 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem; font-family: 'Courier New', monospace;"
                                        oninput="window.filterWalletOptions()"
                                        onfocus="window.showWalletDropdown()"
                                        onclick="event.stopPropagation(); window.showWalletDropdown()">
-                                <button onclick="window.clearWalletFilter()" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; font-size: 1.2rem; color: #9ca3af; padding: 4px; display: none;" id="clearWalletFilterBtn">×</button>
-                                <div id="walletFilterDropdown" style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e5e7eb; border-radius: 6px; margin-top: 4px; max-height: 200px; overflow-y: auto; z-index: 1000; display: none; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                                <button onclick="window.clearWalletFilter()" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; font-size: 1.2rem; color: #64748b; padding: 4px; display: none;" id="clearWalletFilterBtn">×</button>
+                                <div id="walletFilterDropdown" style="position: absolute; top: 100%; left: 0; right: 0; background: #1a1f2e; border: 1px solid #334155; border-radius: 6px; margin-top: 4px; max-height: 200px; overflow-y: auto; z-index: 1000; display: none; box-shadow: 0 4px 6px rgba(0,0,0,0.5);">
                                     <div style="padding: 4px;">
-                                        <div onclick="window.selectWalletFilter('')" style="padding: 8px 12px; cursor: pointer; border-radius: 4px; font-size: 0.85rem;" class="wallet-filter-option" data-value="">
+                                        <div onclick="window.selectWalletFilter('')" style="padding: 8px 12px; cursor: pointer; border-radius: 4px; font-size: 0.85rem; color: #e0e7ff;" class="wallet-filter-option" data-value="">
                                             <strong>All Wallets</strong>
                                         </div>
                                     </div>
@@ -157,14 +162,19 @@
 
                 <!-- Analysis Tab -->
                 <div id="analysisTab" class="tab-content">
-                    <div style="display: flex; gap: 10px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap;">
-                        <div style="flex: 1; min-width: 250px;">
-                            <label for="walletSelectTab" style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 0.9rem;">Select Wallet for Analysis</label>
-                            <select id="walletSelectTab" onchange="window.updateAnalysisWalletFilter()" style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 0.85rem;">
-                                <option value="">-- Select a wallet --</option>
-                            </select>
+                    <div style="display: flex; gap: 10px; align-items: flex-end; margin-bottom: 20px; width: 100%;">
+                        <div style="display: flex; gap: 8px; align-items: flex-end; flex: 1;">
+                            <div style="flex: 1;">
+                                <label for="walletSelectTab" style="display: block; margin-bottom: 8px; font-weight: 600; color: #cbd5e1; font-size: 0.9rem;">Select Wallet for Analysis</label>
+                                <select id="walletSelectTab" onchange="window.updateAnalysisWalletFilter()" style="width: 100%; padding: 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem; height: 42px; box-sizing: border-box;">
+                                    <option value="">-- Select a wallet --</option>
+                                </select>
+                            </div>
+                            <button id="solscanLinkBtn" onclick="window.openSolscanFromSelect()" style="padding: 10px 12px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; display: flex; align-items: center; justify-content: center; height: 42px; width: 42px; box-sizing: border-box; margin-bottom: 0; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);" title="Open in Solscan">
+                                🔗
+                            </button>
                         </div>
-                        <button id="refreshAnalysisBtn" class="btn-refresh" style="margin-bottom: 0;" onclick="window.refreshAnalysis()">
+                        <button id="refreshAnalysisBtn" class="btn-refresh" style="margin-bottom: 0; height: 42px; padding: 10px 20px; display: flex; align-items: center; justify-content: center; box-sizing: border-box;" onclick="window.refreshAnalysis()">
                             <span>🔄</span> Refresh
                         </button>
                     </div>

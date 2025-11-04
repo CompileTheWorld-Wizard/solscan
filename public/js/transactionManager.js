@@ -92,7 +92,7 @@ export async function fetchTransactions() {
  */
 function renderTransactions(transactions) {
     const tbody = document.getElementById('transactionsBody');
-    
+
     if (transactions.length === 0) {
         tbody.innerHTML = `
             <tr>
@@ -142,7 +142,7 @@ function renderTransactions(transactions) {
             const tokenName = getTokenName(mintAddress, name);
             // For SOL, always show WSOL, otherwise prefer symbol over name
             const displayName = (mintAddress === SOL_MINT) ? 'WSOL' : (symbol || tokenName);
-            
+
             return `
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <img src="${tokenImage}" alt="${tokenName}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover; border: 1px solid #e5e7eb;" onerror="this.src='/img/unknown_coin.png'">
@@ -178,11 +178,11 @@ function renderTransactions(transactions) {
         // Calculate fee+tip
         // Handle both null/undefined and string values from database
         // Also handle potential case variations (tip_amount, tipAmount, etc.)
-        const tipAmount = (tx.tipAmount != null ? parseFloat(tx.tipAmount) : 
-                          tx.tip_amount != null ? parseFloat(tx.tip_amount) : 0) || 0;
-        const feeAmount = (tx.feeAmount != null ? parseFloat(tx.feeAmount) : 
-                          tx.fee_amount != null ? parseFloat(tx.fee_amount) : 0) || 0;
-        
+        const tipAmount = (tx.tipAmount != null ? parseFloat(tx.tipAmount) :
+            tx.tip_amount != null ? parseFloat(tx.tip_amount) : 0) || 0;
+        const feeAmount = (tx.feeAmount != null ? parseFloat(tx.feeAmount) :
+            tx.fee_amount != null ? parseFloat(tx.fee_amount) : 0) || 0;
+
         // Debug logging (remove in production if needed)
         if (tx.tipAmount != null || tx.feeAmount != null || tx.tip_amount != null || tx.fee_amount != null) {
             console.log('Transaction fee data:', {
@@ -195,7 +195,7 @@ function renderTransactions(transactions) {
                 parsed_feeAmount: feeAmount
             });
         }
-        
+
         // Display fee and tip on separate lines
         const feeDisplay = formatSOL(feeAmount);
         const tipDisplay = formatSOL(tipAmount);
@@ -208,11 +208,13 @@ function renderTransactions(transactions) {
 
         return `
         <tr>
-            <td class="mono" title="${tx.transaction_id}" style="display: flex; align-items: center; gap: 6px; min-width: 0;">
-                <a href="https://solscan.io/tx/${tx.transaction_id}" target="_blank" rel="noopener noreferrer" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                    ${truncateAddress(tx.transaction_id)}
-                </a>
-                ${createCopyIcon(tx.transaction_id)}
+            <td class="mono" title="${tx.transaction_id}" >
+                <div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
+                    <a href="https://solscan.io/tx/${tx.transaction_id}" target="_blank" rel="noopener noreferrer" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        ${truncateAddress(tx.transaction_id)}
+                    </a>
+                    ${createCopyIcon(tx.transaction_id)}
+                </div>
             </td>
             <td><span class="platform-badge ${getPlatformClass(tx.platform)}">${tx.platform}</span></td>
             <td>${tx.type}</td>
@@ -220,11 +222,13 @@ function renderTransactions(transactions) {
             <td>${renderTokenCell(tx.mint_to, tx.mint_to_name, tx.mint_to_image, tx.mint_to_symbol)}</td>
             <td>${formatNumber(tx.in_amount)}</td>
             <td>${formatNumber(tx.out_amount)}</td>
-            <td class="mono" title="${tx.feePayer}" style="display: flex; align-items: center; gap: 6px; min-width: 0;">
-                <a href="https://solscan.io/account/${tx.feePayer}" target="_blank" rel="noopener noreferrer" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                    ${truncateAddress(tx.feePayer)}
-                </a>
-                ${createCopyIcon(tx.feePayer)}
+            <td class="mono" title="${tx.feePayer}" >
+                <div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
+                    <a href="https://solscan.io/account/${tx.feePayer}" target="_blank" rel="noopener noreferrer" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        ${truncateAddress(tx.feePayer)}
+                    </a>
+                    ${createCopyIcon(tx.feePayer)}
+                </div>
             </td>
             <td style="white-space: nowrap;">${feeTipDisplay}</td>
             <td>${formatCurrency(tx.marketCap)}</td>
@@ -240,7 +244,7 @@ function renderTransactions(transactions) {
 function updatePagination() {
     const totalPages = Math.ceil(state.totalTransactions / state.pageSize);
     document.getElementById('pageInfo').textContent = `Page ${state.currentPage} of ${totalPages || 1}`;
-    
+
     document.getElementById('prevBtn').disabled = state.currentPage === 1;
     document.getElementById('nextBtn').disabled = state.currentPage >= totalPages;
 }
@@ -271,7 +275,7 @@ export function nextPage() {
  */
 export function startAutoRefresh() {
     if (state.autoRefreshInterval) return;
-    
+
     state.autoRefreshInterval = setInterval(() => {
         fetchTransactions();
     }, 3000); // Refresh every 3 seconds

@@ -305,7 +305,7 @@ export function displayWalletInfo(data) {
                 <table class="token-table" id="analysisTable">
                     <thead>
                         <tr>
-                            <th>#<span class="resizer"></span></th>
+                            <th>🪙 #<span class="resizer"></span></th>
                             <th>Token<span class="resizer"></span></th>
                             <th>Creator<span class="resizer"></span></th>
                             <th>First Buy<span class="resizer"></span></th>
@@ -335,22 +335,6 @@ export function displayWalletInfo(data) {
 
     container.innerHTML = `
         <div class="wallet-info">
-            <div class="wallet-info-section">
-                <h3>💼 Wallet Address</h3>
-                <div class="wallet-address">
-                    <a href="https://solscan.io/account/${data.wallet}" target="_blank" rel="noopener noreferrer" style="color: #667eea; text-decoration: none;">
-                        ${data.wallet}
-                    </a>
-                </div>
-            </div>
-            
-            <div class="wallet-info-section" style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);">
-                <h3>📊 Trading History</h3>
-                <div style="font-size: 1.5rem; color: #667eea; font-weight: 600;">
-                    ${data.totalTrades || 0} tokens traded
-                </div>
-            </div>
-            
             <div class="wallet-info-section">
                 <h3 style="font-size: 1.1rem; margin-bottom: 15px;">🪙 Tokens Traded <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; margin-left: 8px;">${data.totalTrades || 0}</span></h3>
                 <div class="token-list">

@@ -73,6 +73,32 @@ window.copyAddressToClipboard = async function(text) {
     }
 };
 
+// Toggle skip tokens panel
+window.toggleSkipTokensPanel = function() {
+    const content = document.getElementById('skipTokensContent');
+    const icon = document.getElementById('skipTokensToggleIcon');
+    
+    if (content && icon) {
+        content.classList.toggle('collapsed');
+        icon.classList.toggle('rotated');
+    }
+};
+
+// Open Solscan link from wallet selector
+window.openSolscanFromSelect = async function() {
+    const select = document.getElementById('walletSelectTab');
+    const walletAddress = select ? select.value : null;
+    
+    if (!walletAddress) {
+        const { showNotification } = await import('./utils.js');
+        showNotification('Please select a wallet first', 'error');
+        return;
+    }
+    
+    const solscanUrl = `https://solscan.io/account/${walletAddress}`;
+    window.open(solscanUrl, '_blank', 'noopener,noreferrer');
+};
+
 // Make functions globally available for inline handlers
 window.switchTab = switchTab;
 window.previousPage = previousPage;
