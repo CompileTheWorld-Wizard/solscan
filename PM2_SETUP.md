@@ -59,6 +59,13 @@ SESSION_SECRET=your-random-secret-key-here
 
 # Server Port (optional, defaults to 3000)
 PORT=3000
+
+# Trust Proxy (set to 'true' if behind nginx/reverse proxy)
+TRUST_PROXY=true
+
+# Use HTTPS (set to 'true' only if using HTTPS/SSL)
+# If false or not set, secure cookies will be disabled even in production
+USE_HTTPS=false
 ```
 
 ### 4. Set Up Database

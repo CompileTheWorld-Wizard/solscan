@@ -28,6 +28,12 @@ const PORT = process.env.PORT || 3000;
 const HARDCODED_PASSWORD = 'admin123';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'your-secret-key-change-in-production';
 
+// Trust proxy (important if behind reverse proxy like nginx)
+// This ensures proper IP detection and cookie handling
+if (process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Middleware
 app.use(cors({
   origin: true,
@@ -42,10 +48,13 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production', // Use secure cookies in production (HTTPS)
+    secure: process.env.NODE_ENV === 'production' && process.env.USE_HTTPS === 'true', // Only use secure cookies if explicitly using HTTPS
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-  }
+    sameSite: 'lax', // Helpful for cross-site requests and ensures cookies work properly
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    path: '/' // Ensure cookie is available for all paths
+  },
+  name: 'solscan.sid' // Custom session name
 }));
 
 // HTML route handlers (must come BEFORE static middleware)
@@ -115,7 +124,14 @@ app.post("/api/login", (req, res) => {
   
   if (password === HARDCODED_PASSWORD) {
     req.session.authenticated = true;
-    res.json({ success: true, message: 'Login successful' });
+    // Save session explicitly to ensure it's persisted
+    req.session.save((err) => {
+      if (err) {
+        console.error('Session save error:', err);
+        return res.status(500).json({ success: false, error: 'Failed to save session' });
+      }
+      res.json({ success: true, message: 'Login successful' });
+    });
   } else {
     res.status(401).json({ success: false, error: 'Invalid password' });
   }
