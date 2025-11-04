@@ -402,6 +402,13 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       };
     });
     
+    // Calculate social links count
+    let socialCount = 0;
+    if (tokenInfo?.twitter) socialCount++;
+    if (tokenInfo?.website) socialCount++;
+    if (tokenInfo?.discord) socialCount++;
+    if (tokenInfo?.telegram) socialCount++;
+
     // Row 2: Token info data
     const tokenInfoRow = [
       tokenInfo?.token_name || 'Unknown',
@@ -414,7 +421,7 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       tokenInfo?.dev_buy_token_amount && tokenInfo?.dev_buy_token_amount_decimal !== null
         ? parseFloat(tokenInfo.dev_buy_token_amount) / Math.pow(10, tokenInfo.dev_buy_token_amount_decimal)
         : '',
-      0, // Number of Socials
+      socialCount, // Number of Socials
       totalSells || 0 // Total Sells
     ];
     
@@ -746,6 +753,13 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
         currentRow++;
       }
       
+      // Calculate social links count
+      let socialCount = 0;
+      if (tokenInfo?.twitter) socialCount++;
+      if (tokenInfo?.website) socialCount++;
+      if (tokenInfo?.discord) socialCount++;
+      if (tokenInfo?.telegram) socialCount++;
+
       // Row: Token info data
       const tokenInfoRow = [
         tokenInfo?.token_name || 'Unknown',
@@ -758,7 +772,7 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
         tokenInfo?.dev_buy_token_amount && tokenInfo?.dev_buy_token_amount_decimal !== null
           ? parseFloat(tokenInfo.dev_buy_token_amount) / Math.pow(10, tokenInfo.dev_buy_token_amount_decimal)
           : '',
-        0, // Number of Socials
+        socialCount, // Number of Socials
         totalSells || 0 // Total Sells
       ];
       
@@ -1063,6 +1077,11 @@ app.get("/api/analyze/:wallet", requireAuth, async (req, res) => {
         dev_buy_token_amount: tokenInfo[trade.token_address]?.dev_buy_token_amount || null,
         dev_buy_token_amount_decimal: tokenInfo[trade.token_address]?.dev_buy_token_amount_decimal || null,
         dev_buy_used_token: tokenInfo[trade.token_address]?.dev_buy_used_token || null,
+        // Add social links
+        twitter: tokenInfo[trade.token_address]?.twitter || null,
+        website: tokenInfo[trade.token_address]?.website || null,
+        discord: tokenInfo[trade.token_address]?.discord || null,
+        telegram: tokenInfo[trade.token_address]?.telegram || null,
       };
     }));
     

@@ -265,6 +265,41 @@ export function displayWalletInfo(data) {
                 ? `<div style="font-size: 0.75rem; color: #10b981; font-weight: 600; text-align: center;">${formatNum(trade.total_buy_tokens)}</div>`
                 : '<span style="color: #9ca3af; font-style: italic;">-</span>';
 
+            // Social Links
+            const socialLinks = [];
+            if (trade.twitter) {
+                socialLinks.push(`<a href="${trade.twitter}" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; gap: 4px; color: #60a5fa; text-decoration: none; font-size: 0.7rem; margin-bottom: 4px;" onmouseover="this.style.color='#93c5fd'" onmouseout="this.style.color='#60a5fa'">
+                    <img src="/img/x-icon.svg" alt="Twitter/X" style="width: 16px; height: 16px;">
+                    <span>Twitter/X</span>
+                </a>`);
+            }
+            if (trade.website) {
+                socialLinks.push(`<a href="${trade.website}" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; gap: 4px; color: #60a5fa; text-decoration: none; font-size: 0.7rem; margin-bottom: 4px;" onmouseover="this.style.color='#93c5fd'" onmouseout="this.style.color='#60a5fa'">
+                    <img src="/img/website.svg" alt="Website" style="width: 16px; height: 16px;">
+                    <span>Website</span>
+                </a>`);
+            }
+            if (trade.discord) {
+                socialLinks.push(`<a href="${trade.discord}" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; gap: 4px; color: #60a5fa; text-decoration: none; font-size: 0.7rem; margin-bottom: 4px;" onmouseover="this.style.color='#93c5fd'" onmouseout="this.style.color='#60a5fa'">
+                    <img src="/img/discord.svg" alt="Discord" style="width: 16px; height: 16px;">
+                    <span>Discord</span>
+                </a>`);
+            }
+            if (trade.telegram) {
+                socialLinks.push(`<a href="${trade.telegram}" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; gap: 4px; color: #60a5fa; text-decoration: none; font-size: 0.7rem; margin-bottom: 4px;" onmouseover="this.style.color='#93c5fd'" onmouseout="this.style.color='#60a5fa'">
+                    <img src="/img/telegram.svg" alt="Telegram" style="width: 16px; height: 16px;">
+                    <span>Telegram</span>
+                </a>`);
+            }
+            
+            const socialCell = socialLinks.length > 0
+                ? `<td style="font-size: 0.7rem;">
+                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                        ${socialLinks.join('')}
+                    </div>
+                </td>`
+                : '<td style="color: #9ca3af; font-style: italic; text-align: center;">-</td>';
+
             return `
                 <tr>
                     <td class="token-index-cell">${index + 1}</td>
@@ -284,6 +319,7 @@ export function displayWalletInfo(data) {
                     <td style="font-size: 0.75rem;">${totalBuyTokens}</td>
                     <td style="font-size: 0.75rem;">${totalSells}</td>
                     <td class="token-dev-buy-cell" style="font-size: 0.75rem;">${devBuyInfo}</td>
+                    ${socialCell}
                     <td style="text-align: center;">
                         <button 
                             onclick="window.exportTokenData('${data.wallet.replace(/'/g, "\\'")}', '${trade.token_address.replace(/'/g, "\\'")}', '${tokenSymbol.replace(/'/g, "\\'")}')"
@@ -315,6 +351,7 @@ export function displayWalletInfo(data) {
                             <th>Wallet Buy Tokens<span class="resizer"></span></th>
                             <th>Total Sells<span class="resizer"></span></th>
                             <th>Dev Buy<span class="resizer"></span></th>
+                            <th>Social<span class="resizer"></span></th>
                             <th>Action<span class="resizer"></span></th>
                         </tr>
                     </thead>

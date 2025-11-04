@@ -241,6 +241,10 @@ export class TokenQueueService {
         dev_buy_used_token: creatorInfo?.devBuyUsedToken || null,
         dev_buy_token_amount: creatorInfo?.devBuyTokenAmount || null,
         dev_buy_token_amount_decimal: creatorInfo?.devBuyTokenAmountDecimal || null,
+        twitter: tokenMetadata?.twitter || null,
+        website: tokenMetadata?.website || null,
+        discord: tokenMetadata?.discord || null,
+        telegram: tokenMetadata?.telegram || null,
       };
 
       await dbService.saveToken(tokenData);
@@ -260,6 +264,10 @@ export class TokenQueueService {
     name: string;
     symbol: string;
     image: string | null;
+    twitter?: string;
+    website?: string;
+    discord?: string;
+    telegram?: string;
   } | null> {
     try {
       const headers = new Headers();
@@ -288,13 +296,107 @@ export class TokenQueueService {
         return null;
       }
 
-      return {
+      const result: {
+        name: string;
+        symbol: string;
+        image: string | null;
+        twitter?: string;
+        website?: string;
+        discord?: string;
+        telegram?: string;
+      } = {
         name: data.result.name || 'Unknown Token',
         symbol: data.result.symbol || '???',
         image: data.result.image || null,
       };
+
+      // Extract metadata_uri and fetch social links
+      const metadataUri = data.result.metadata_uri;
+      if (metadataUri) {
+        try {
+          const socialLinks = await this.fetchSocialLinksFromMetadata(metadataUri);
+          if (socialLinks) {
+            result.twitter = socialLinks.twitter;
+            result.website = socialLinks.website;
+            result.discord = socialLinks.discord;
+            result.telegram = socialLinks.telegram;
+          }
+        } catch (error: any) {
+          console.log(`⚠️ Failed to fetch social links from metadata URI: ${error.message}`);
+          // Continue without social links if fetching fails
+        }
+      }
+
+      return result;
     } catch (error) {
       console.error('Failed to fetch token metadata:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch social links from metadata JSON URI
+   */
+  private async fetchSocialLinksFromMetadata(metadataUri: string): Promise<{
+    twitter?: string;
+    website?: string;
+    discord?: string;
+    telegram?: string;
+  } | null> {
+    try {
+      const response = await fetch(metadataUri, {
+        method: 'GET',
+        redirect: 'follow'
+      });
+
+      if (!response.ok) {
+        console.log(`Failed to fetch metadata JSON: ${response.statusText}`);
+        return null;
+      }
+
+      const metadata = await response.json();
+
+      // Extract social links from metadata JSON
+      // Support common field names: twitter, website, discord, telegram
+      const socialLinks: {
+        twitter?: string;
+        website?: string;
+        discord?: string;
+        telegram?: string;
+      } = {};
+
+      if (metadata.twitter) {
+        socialLinks.twitter = metadata.twitter;
+      }
+      if (metadata.website) {
+        socialLinks.website = metadata.website;
+      }
+      if (metadata.discord) {
+        socialLinks.discord = metadata.discord;
+      }
+      if (metadata.telegram) {
+        socialLinks.telegram = metadata.telegram;
+      }
+
+      // Also check extensions object (common in some metadata formats)
+      if (metadata.extensions) {
+        if (metadata.extensions.twitter) {
+          socialLinks.twitter = metadata.extensions.twitter;
+        }
+        if (metadata.extensions.website) {
+          socialLinks.website = metadata.extensions.website;
+        }
+        if (metadata.extensions.discord) {
+          socialLinks.discord = metadata.extensions.discord;
+        }
+        if (metadata.extensions.telegram) {
+          socialLinks.telegram = metadata.extensions.telegram;
+        }
+      }
+
+      return Object.keys(socialLinks).length > 0 ? socialLinks : null;
+    } catch (error: any) {
+      console.log(`Error fetching social links from metadata: ${error.message}`);
       return null;
     }
   }

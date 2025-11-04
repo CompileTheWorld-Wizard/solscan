@@ -37,6 +37,10 @@ CREATE TABLE IF NOT EXISTS tokens (
     token_name VARCHAR(200),
     symbol VARCHAR(50),
     image TEXT,
+    twitter TEXT,
+    website TEXT,
+    discord TEXT,
+    telegram TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

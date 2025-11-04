@@ -1,4 +1,6 @@
 import { Pool, PoolClient } from 'pg';
+import * as fs from 'fs';
+import * as path from 'path';
 
 interface TransactionData {
   transaction_id: string;
@@ -30,6 +32,10 @@ interface TokenData {
   token_name?: string;
   symbol?: string;
   image?: string;
+  twitter?: string;
+  website?: string;
+  discord?: string;
+  telegram?: string;
 }
 
 interface SkipToken {
@@ -106,6 +112,10 @@ class DatabaseService {
           token_name VARCHAR(200),
           symbol VARCHAR(50),
           image TEXT,
+          twitter TEXT,
+          website TEXT,
+          discord TEXT,
+          telegram TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -153,14 +163,12 @@ class DatabaseService {
 
       await this.pool.query(createTableQuery);
 
-      // Ensure additional columns exist for existing installations
-      const alterTransactionsQuery = `
-        ALTER TABLE transactions
-        ADD COLUMN IF NOT EXISTS market_cap NUMERIC(20, 2),
-        ADD COLUMN IF NOT EXISTS tip_amount NUMERIC(20, 9),
-        ADD COLUMN IF NOT EXISTS fee_amount NUMERIC(20, 9);
-      `;
-      await this.pool.query(alterTransactionsQuery);
+      // Create migrations tracking table
+      await this.createMigrationsTable();
+
+      // Run all pending migrations
+      await this.runMigrations();
+
       this.isInitialized = true;
       console.log('✅ Database initialized successfully');
     } catch (error) {
@@ -479,35 +487,27 @@ class DatabaseService {
    */
   async saveToken(tokenData: TokenData): Promise<void> {
     try {
-      const query = `
-        INSERT INTO tokens (
-          mint_address,
-          creator,
-          dev_buy_amount,
-          dev_buy_amount_decimal,
-          dev_buy_used_token,
-          dev_buy_token_amount,
-          dev_buy_token_amount_decimal,
-          token_name,
-          symbol,
-          image,
-          updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
-        ON CONFLICT (mint_address) 
-        DO UPDATE SET
-          creator = COALESCE(EXCLUDED.creator, tokens.creator),
-          dev_buy_amount = COALESCE(EXCLUDED.dev_buy_amount, tokens.dev_buy_amount),
-          dev_buy_amount_decimal = COALESCE(EXCLUDED.dev_buy_amount_decimal, tokens.dev_buy_amount_decimal),
-          dev_buy_used_token = COALESCE(EXCLUDED.dev_buy_used_token, tokens.dev_buy_used_token),
-          dev_buy_token_amount = COALESCE(EXCLUDED.dev_buy_token_amount, tokens.dev_buy_token_amount),
-          dev_buy_token_amount_decimal = COALESCE(EXCLUDED.dev_buy_token_amount_decimal, tokens.dev_buy_token_amount_decimal),
-          token_name = COALESCE(EXCLUDED.token_name, tokens.token_name),
-          symbol = COALESCE(EXCLUDED.symbol, tokens.symbol),
-          image = COALESCE(EXCLUDED.image, tokens.image),
-          updated_at = CURRENT_TIMESTAMP
-      `;
+      // Check if social link columns exist
+      const hasTwitter = await this.columnExists('tokens', 'twitter');
+      const hasWebsite = await this.columnExists('tokens', 'website');
+      const hasDiscord = await this.columnExists('tokens', 'discord');
+      const hasTelegram = await this.columnExists('tokens', 'telegram');
 
-      const values = [
+      // Build columns and values dynamically
+      const columns: string[] = [
+        'mint_address',
+        'creator',
+        'dev_buy_amount',
+        'dev_buy_amount_decimal',
+        'dev_buy_used_token',
+        'dev_buy_token_amount',
+        'dev_buy_token_amount_decimal',
+        'token_name',
+        'symbol',
+        'image',
+      ];
+
+      const values: any[] = [
         tokenData.mint_address,
         tokenData.creator || null,
         tokenData.dev_buy_amount || null,
@@ -519,6 +519,72 @@ class DatabaseService {
         tokenData.symbol || null,
         tokenData.image || null,
       ];
+
+      // Add social links if columns exist
+      if (hasTwitter) {
+        columns.push('twitter');
+        values.push(tokenData.twitter || null);
+      }
+      if (hasWebsite) {
+        columns.push('website');
+        values.push(tokenData.website || null);
+      }
+      if (hasDiscord) {
+        columns.push('discord');
+        values.push(tokenData.discord || null);
+      }
+      if (hasTelegram) {
+        columns.push('telegram');
+        values.push(tokenData.telegram || null);
+      }
+
+      columns.push('updated_at');
+      
+      // Build placeholders (exclude updated_at from parameter count)
+      const paramCount = columns.length - 1; // Exclude updated_at
+      const placeholders = columns.map((col, index) => {
+        if (col === 'updated_at') {
+          return 'CURRENT_TIMESTAMP';
+        }
+        return `$${index + 1}`;
+      }).join(', ');
+
+      // Build UPDATE clause
+      const updateClauses: string[] = [
+        'creator = COALESCE(EXCLUDED.creator, tokens.creator)',
+        'dev_buy_amount = COALESCE(EXCLUDED.dev_buy_amount, tokens.dev_buy_amount)',
+        'dev_buy_amount_decimal = COALESCE(EXCLUDED.dev_buy_amount_decimal, tokens.dev_buy_amount_decimal)',
+        'dev_buy_used_token = COALESCE(EXCLUDED.dev_buy_used_token, tokens.dev_buy_used_token)',
+        'dev_buy_token_amount = COALESCE(EXCLUDED.dev_buy_token_amount, tokens.dev_buy_token_amount)',
+        'dev_buy_token_amount_decimal = COALESCE(EXCLUDED.dev_buy_token_amount_decimal, tokens.dev_buy_token_amount_decimal)',
+        'token_name = COALESCE(EXCLUDED.token_name, tokens.token_name)',
+        'symbol = COALESCE(EXCLUDED.symbol, tokens.symbol)',
+        'image = COALESCE(EXCLUDED.image, tokens.image)',
+      ];
+
+      if (hasTwitter) {
+        updateClauses.push('twitter = COALESCE(EXCLUDED.twitter, tokens.twitter)');
+      }
+      if (hasWebsite) {
+        updateClauses.push('website = COALESCE(EXCLUDED.website, tokens.website)');
+      }
+      if (hasDiscord) {
+        updateClauses.push('discord = COALESCE(EXCLUDED.discord, tokens.discord)');
+      }
+      if (hasTelegram) {
+        updateClauses.push('telegram = COALESCE(EXCLUDED.telegram, tokens.telegram)');
+      }
+
+      updateClauses.push('updated_at = CURRENT_TIMESTAMP');
+
+      const query = `
+        INSERT INTO tokens (
+          ${columns.join(', ')}
+        ) VALUES (${placeholders})
+        ON CONFLICT (mint_address) 
+        DO UPDATE SET
+          ${updateClauses.join(',\n          ')}
+      `;
 
       await this.pool.query(query, values);
       console.log(`💾 Token info saved to DB: ${tokenData.mint_address}`);
@@ -545,6 +611,10 @@ class DatabaseService {
           token_name,
           symbol,
           image,
+          twitter,
+          website,
+          discord,
+          telegram,
           created_at,
           updated_at
         FROM tokens
@@ -585,6 +655,10 @@ class DatabaseService {
           token_name,
           symbol,
           image,
+          twitter,
+          website,
+          discord,
+          telegram,
           created_at,
           updated_at
         FROM tokens
@@ -1223,6 +1297,195 @@ class DatabaseService {
     } catch (error) {
       console.error('Failed to fetch wallet-token pairs:', error);
       return [];
+    }
+  }
+
+  /**
+   * Create migrations tracking table
+   */
+  private async createMigrationsTable(): Promise<void> {
+    try {
+      const query = `
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          id SERIAL PRIMARY KEY,
+          migration_name VARCHAR(255) UNIQUE NOT NULL,
+          applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_migration_name ON schema_migrations(migration_name);
+      `;
+      await this.pool.query(query);
+    } catch (error) {
+      console.error('Failed to create migrations table:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get list of applied migrations
+   */
+  private async getAppliedMigrations(): Promise<string[]> {
+    try {
+      const query = `SELECT migration_name FROM schema_migrations ORDER BY migration_name`;
+      const result = await this.pool.query(query);
+      return result.rows.map((row: any) => row.migration_name);
+    } catch (error) {
+      console.error('Failed to get applied migrations:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get list of migration files from migrations directory
+   * Tries multiple locations to handle both development and production builds
+   */
+  private getMigrationFiles(): string[] {
+    try {
+      // Try multiple possible locations
+      const possiblePaths = [
+        path.join(__dirname, 'migrations'), // Compiled location (dist/database/migrations)
+        path.join(process.cwd(), 'src', 'database', 'migrations'), // Source location
+        path.join(process.cwd(), 'dist', 'src', 'database', 'migrations'), // Alternative compiled location
+      ];
+
+      let migrationsDir: string | null = null;
+      for (const possiblePath of possiblePaths) {
+        if (fs.existsSync(possiblePath)) {
+          migrationsDir = possiblePath;
+          break;
+        }
+      }
+
+      if (!migrationsDir) {
+        console.warn(`⚠️ Migrations directory not found. Tried: ${possiblePaths.join(', ')}`);
+        return [];
+      }
+
+      const files = fs.readdirSync(migrationsDir)
+        .filter(file => file.endsWith('.sql'))
+        .sort(); // Sort alphabetically to ensure order
+
+      return files.map(file => path.join(migrationsDir!, file));
+    } catch (error) {
+      console.error('Failed to read migration files:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Run all pending migrations
+   */
+  private async runMigrations(): Promise<void> {
+    try {
+      const appliedMigrations = await this.getAppliedMigrations();
+      const migrationFiles = this.getMigrationFiles();
+
+      if (migrationFiles.length === 0) {
+        console.log('📋 No migration files found');
+        return;
+      }
+
+      console.log(`📋 Found ${migrationFiles.length} migration file(s)`);
+
+      let appliedCount = 0;
+      let skippedCount = 0;
+
+      for (const migrationFile of migrationFiles) {
+        const fileName = path.basename(migrationFile);
+        
+        // Check if migration already applied
+        if (appliedMigrations.includes(fileName)) {
+          skippedCount++;
+          continue;
+        }
+
+        try {
+          console.log(`🔄 Applying migration: ${fileName}`);
+          
+          // Read migration file
+          const migrationSQL = fs.readFileSync(migrationFile, 'utf8');
+          
+          if (!migrationSQL.trim()) {
+            console.warn(`⚠️ Migration file is empty: ${fileName}`);
+            continue;
+          }
+
+          // Execute migration in a transaction
+          const client = await this.pool.connect();
+          try {
+            await client.query('BEGIN');
+            
+            // Execute the migration SQL
+            await client.query(migrationSQL);
+            
+            // Record migration as applied
+            await client.query(
+              'INSERT INTO schema_migrations (migration_name) VALUES ($1)',
+              [fileName]
+            );
+            
+            await client.query('COMMIT');
+            
+            console.log(`✅ Migration applied: ${fileName}`);
+            appliedCount++;
+          } catch (error: any) {
+            await client.query('ROLLBACK');
+            throw error;
+          } finally {
+            client.release();
+          }
+        } catch (error: any) {
+          console.error(`❌ Failed to apply migration ${fileName}:`, error.message);
+          // Continue with other migrations even if one fails
+          // This allows fixing issues and re-running
+        }
+      }
+
+      if (appliedCount > 0) {
+        console.log(`✅ Applied ${appliedCount} migration(s)`);
+      }
+      if (skippedCount > 0) {
+        console.log(`⏭️  Skipped ${skippedCount} already applied migration(s)`);
+      }
+    } catch (error) {
+      console.error('❌ Failed to run migrations:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if a column exists in a table
+   */
+  async columnExists(tableName: string, columnName: string): Promise<boolean> {
+    try {
+      const query = `
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = $1 AND column_name = $2
+      `;
+      const result = await this.pool.query(query, [tableName, columnName]);
+      return result.rows.length > 0;
+    } catch (error) {
+      console.error(`Failed to check column existence: ${tableName}.${columnName}`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Check if a table exists
+   */
+  async tableExists(tableName: string): Promise<boolean> {
+    try {
+      const query = `
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_name = $1
+      `;
+      const result = await this.pool.query(query, [tableName]);
+      return result.rows.length > 0;
+    } catch (error) {
+      console.error(`Failed to check table existence: ${tableName}`, error);
+      return false;
     }
   }
 }
