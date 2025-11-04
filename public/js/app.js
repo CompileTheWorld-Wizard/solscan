@@ -2,6 +2,7 @@
  * Main application initialization
  */
 
+import { isAuthenticated, logout } from './auth.js';
 import { state } from './state.js';
 import { fetchStatus } from './uiState.js';
 import { fetchTransactions } from './transactionManager.js';
@@ -84,9 +85,16 @@ window.addSkipToken = addSkipToken;
 window.refreshAnalysis = refreshAnalysis;
 
 // Initialize when DOM is ready
+// Server handles authentication and redirects - no need to check here
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', () => {
+        init();
+    });
 } else {
+    // DOM already loaded, initialize immediately
     init();
 }
+
+// Make logout available globally
+window.logout = logout;
 

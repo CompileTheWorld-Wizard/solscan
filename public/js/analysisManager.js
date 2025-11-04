@@ -269,19 +269,9 @@ export function displayWalletInfo(data) {
                         <div>
                             ${tokenImage}
                         <a href="https://solscan.io/token/${trade.token_address}" target="_blank" rel="noopener noreferrer" class="token-name-text" style="text-decoration: none; color: #667eea;">
-                            ${tokenName}
-                        </a>
-                        </div>
-                    </td>
-                    <td class="token-symbol-cell">
-                        <a href="https://solscan.io/token/${trade.token_address}" target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: inherit;">
                             ${tokenSymbol}
                         </a>
-                    </td>
-                    <td class="token-mint-cell">
-                        <a href="https://solscan.io/token/${trade.token_address}" target="_blank" rel="noopener noreferrer" style="font-family: 'Courier New', monospace; font-size: 0.7rem; color: #667eea; text-decoration: none; white-space: nowrap;">
-                            ${trade.token_address}
-                        </a>
+                        </div>
                     </td>
                     ${creatorCell}
                     <td style="font-size: 0.75rem;">${firstBuyInfo}</td>
@@ -301,9 +291,7 @@ export function displayWalletInfo(data) {
                     <thead>
                         <tr>
                             <th>#<span class="resizer"></span></th>
-                            <th>Token Name<span class="resizer"></span></th>
-                            <th>Symbol<span class="resizer"></span></th>
-                            <th>Token Address<span class="resizer"></span></th>
+                            <th>Token<span class="resizer"></span></th>
                             <th>Creator<span class="resizer"></span></th>
                             <th>First Buy<span class="resizer"></span></th>
                             <th>First Sell<span class="resizer"></span></th>

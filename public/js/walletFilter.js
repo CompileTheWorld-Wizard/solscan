@@ -92,15 +92,21 @@ export function hideWalletDropdown() {
 /**
  * Filter wallet options based on search input
  */
-export function filterWalletOptions() {
+export async function filterWalletOptions() {
     const searchInput = document.getElementById('walletFilterSearch');
     const dropdown = document.getElementById('walletFilterDropdown');
     if (!searchInput || !dropdown) return;
     
-    const searchTerm = searchInput.value.toLowerCase();
+    // Ensure dropdown is populated before filtering
     const options = dropdown.querySelectorAll('.wallet-filter-option');
+    if (options.length <= 1) { // Only "All Wallets" option exists
+        await updateWalletFilterDropdown();
+    }
     
-    options.forEach(option => {
+    const searchTerm = searchInput.value.toLowerCase();
+    const updatedOptions = dropdown.querySelectorAll('.wallet-filter-option');
+    
+    updatedOptions.forEach(option => {
         const value = option.getAttribute('data-value') || '';
         const text = option.textContent.toLowerCase();
         
@@ -112,9 +118,11 @@ export function filterWalletOptions() {
     });
     
     // Show dropdown if there are visible options
-    const visibleOptions = Array.from(options).filter(opt => opt.style.display !== 'none');
+    const visibleOptions = Array.from(updatedOptions).filter(opt => opt.style.display !== 'none');
     if (visibleOptions.length > 0) {
-        showWalletDropdown();
+        dropdown.style.display = 'block';
+    } else {
+        dropdown.style.display = 'none';
     }
 }
 
@@ -151,7 +159,7 @@ export function clearWalletFilter() {
 }
 
 // Make functions globally available for inline handlers
-window.filterWalletOptions = filterWalletOptions;
+window.filterWalletOptions = () => filterWalletOptions().catch(console.error);
 window.showWalletDropdown = () => showWalletDropdown().catch(console.error);
 window.selectWalletFilter = selectWalletFilter;
 window.clearWalletFilter = clearWalletFilter;

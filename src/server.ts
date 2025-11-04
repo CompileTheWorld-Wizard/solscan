@@ -3,18 +3,93 @@ import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
 import path from "path";
+import session from "express-session";
+import { setupFileLogging } from "./utils/logger";
 import { dbService } from "./database";
 import { tracker } from "./tracker";
 import { tokenService } from "./services/tokenService";
 import { walletTrackingService } from "./services/walletTrackingService";
 
+// Extend session type to include authenticated property
+declare module "express-session" {
+  interface SessionData {
+    authenticated?: boolean;
+  }
+}
+
+// Setup file logging (must be done early, before any console.log calls)
+setupFileLogging();
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Session configuration
+const HARDCODED_PASSWORD = 'admin123';
+const SESSION_SECRET = process.env.SESSION_SECRET || 'your-secret-key-change-in-production';
+
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// Session middleware
+app.use(session({
+  secret: SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // Use secure cookies in production (HTTPS)
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// HTML route handlers (must come BEFORE static middleware)
+/**
+ * GET /login.html - Serve the login page (public)
+ */
+app.get("/login.html", (req, res) => {
+  // If already authenticated, redirect to main app
+  if (isAuthenticated(req)) {
+    return res.redirect('/');
+  }
+  res.sendFile(path.join(__dirname, "../public/login.html"));
+});
+
+/**
+ * GET / - Serve the main HTML page (protected)
+ */
+app.get("/", (req, res) => {
+  // If not authenticated, redirect to login
+  if (!isAuthenticated(req)) {
+    return res.redirect('/login.html');
+  }
+  res.sendFile(path.join(__dirname, "../public/index.html"));
+});
+
+// Serve static files (CSS, JS, images, etc.)
 app.use(express.static(path.join(__dirname, "../public")));
+
+/**
+ * Authentication middleware
+ */
+function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (req.session && req.session.authenticated) {
+    next();
+  } else {
+    res.status(401).json({ error: 'Unauthorized' });
+  }
+}
+
+/**
+ * Check if user is authenticated (for API routes)
+ */
+function isAuthenticated(req: express.Request): boolean {
+  return req.session && req.session.authenticated === true;
+}
 
 // Initialize database and tracker
 async function initializeApp() {
@@ -29,29 +104,51 @@ async function initializeApp() {
   }
 }
 
-// API Routes
+// Authentication Routes
 
 /**
- * GET /api/status - Get tracker status
+ * POST /api/login - Login endpoint
  */
-app.get("/api/status", (req, res) => {
-  res.json({
-    isRunning: tracker.isTrackerRunning(),
-    addresses: tracker.getAddresses(),
+app.post("/api/login", (req, res) => {
+  const { password } = req.body;
+  
+  if (password === HARDCODED_PASSWORD) {
+    req.session.authenticated = true;
+    res.json({ success: true, message: 'Login successful' });
+  } else {
+    res.status(401).json({ success: false, error: 'Invalid password' });
+  }
+});
+
+/**
+ * POST /api/logout - Logout endpoint
+ */
+app.post("/api/logout", (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      res.status(500).json({ error: 'Failed to logout' });
+    } else {
+      res.json({ success: true, message: 'Logout successful' });
+    }
   });
 });
 
 /**
+ * GET /api/auth/status - Check authentication status
+ */
+app.get("/api/auth/status", (req, res) => {
+  res.json({ authenticated: isAuthenticated(req) });
+});
+
+// API Routes (protected)
+
+/**
  * POST /api/addresses - Set addresses to track
  */
-app.post("/api/addresses", (req, res) => {
+app.post("/api/addresses", requireAuth, (req, res) => {
   try {
     const { addresses } = req.body;
-    
-    console.log('\n' + '📥 '.repeat(30));
-    console.log('RECEIVED ADDRESSES FROM WEB INTERFACE:');
-    console.log('📥 '.repeat(30));
-    
+        
     if (!Array.isArray(addresses)) {
       console.log('❌ Error: Addresses must be an array');
       return res.status(400).json({ error: "Addresses must be an array" });
@@ -64,11 +161,6 @@ app.post("/api/addresses", (req, res) => {
       console.log('❌ Error: No valid addresses provided');
       return res.status(400).json({ error: "At least one valid address is required" });
     }
-
-    validAddresses.forEach((addr, index) => {
-      console.log(`   Input Field ${index + 1}: ${addr}`);
-    });
-    console.log('\n➡️  Passing addresses to tracker...');
     
     tracker.setAddresses(validAddresses);
     
@@ -87,7 +179,7 @@ app.post("/api/addresses", (req, res) => {
 /**
  * POST /api/start - Start tracking
  */
-app.post("/api/start", async (req, res) => {
+app.post("/api/start", requireAuth, async (req, res) => {
   try {
     const result = await tracker.start();
     
@@ -104,7 +196,7 @@ app.post("/api/start", async (req, res) => {
 /**
  * POST /api/stop - Stop tracking
  */
-app.post("/api/stop", async (req, res) => {
+app.post("/api/stop", requireAuth, async (req, res) => {
   try {
     const result = await tracker.stop();
     
@@ -121,7 +213,7 @@ app.post("/api/stop", async (req, res) => {
 /**
  * GET /api/transactions - Get transactions with pagination and date filtering
  */
-app.get("/api/transactions", async (req, res) => {
+app.get("/api/transactions", requireAuth, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = parseInt(req.query.offset as string) || 0;
@@ -153,7 +245,7 @@ app.get("/api/transactions", async (req, res) => {
 /**
  * GET /api/wallets - Get all unique wallet addresses from transactions table
  */
-app.get("/api/wallets", async (req, res) => {
+app.get("/api/wallets", requireAuth, async (req, res) => {
   try {
     const wallets = await dbService.getAllWalletsFromTransactions();
     res.json({ success: true, wallets });
@@ -165,7 +257,7 @@ app.get("/api/wallets", async (req, res) => {
 /**
  * GET /api/analyze/:wallet - Analyze wallet information (shows trading history from wallets table)
  */
-app.get("/api/analyze/:wallet", async (req, res) => {
+app.get("/api/analyze/:wallet", requireAuth, async (req, res) => {
   try {
     const { wallet } = req.params;
     
@@ -330,7 +422,7 @@ app.get("/api/analyze/:wallet", async (req, res) => {
  * POST /api/tokens/fetch-info - Fetch and cache token mint info
  * Request body: { mints: string[] }
  */
-app.post("/api/tokens/fetch-info", async (req, res) => {
+app.post("/api/tokens/fetch-info", requireAuth, async (req, res) => {
   try {
     const { mints } = req.body;
     
@@ -405,7 +497,7 @@ app.post("/api/tokens/fetch-info", async (req, res) => {
 /**
  * GET /api/skip-tokens - Get all skip tokens
  */
-app.get("/api/skip-tokens", async (req, res) => {
+app.get("/api/skip-tokens", requireAuth, async (req, res) => {
   try {
     const skipTokens = await dbService.getSkipTokens();
     res.json({ 
@@ -421,7 +513,7 @@ app.get("/api/skip-tokens", async (req, res) => {
  * POST /api/skip-tokens - Add a token to skip list
  * Request body: { mint_address: string, symbol?: string, description?: string }
  */
-app.post("/api/skip-tokens", async (req, res) => {
+app.post("/api/skip-tokens", requireAuth, async (req, res) => {
   try {
     const { mint_address, symbol, description } = req.body;
     
@@ -450,7 +542,7 @@ app.post("/api/skip-tokens", async (req, res) => {
 /**
  * DELETE /api/skip-tokens/:mintAddress - Remove a token from skip list
  */
-app.delete("/api/skip-tokens/:mintAddress", async (req, res) => {
+app.delete("/api/skip-tokens/:mintAddress", requireAuth, async (req, res) => {
   try {
     const { mintAddress } = req.params;
     
@@ -468,29 +560,83 @@ app.delete("/api/skip-tokens/:mintAddress", async (req, res) => {
   }
 });
 
-/**
- * GET / - Serve the main HTML page
- */
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "../public/index.html"));
-});
-
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error("Server error:", err);
   res.status(500).json({ error: "Internal server error" });
 });
 
+// Handle uncaught exceptions to prevent crashes
+process.on('uncaughtException', (error: Error) => {
+  // Log the error (to file, not console to avoid EPIPE)
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const logDir = path.join(process.cwd(), 'logs');
+    const today = new Date().toISOString().split('T')[0];
+    const logFile = path.join(logDir, `app-${today}.log`);
+    const timestamp = new Date().toISOString();
+    const errorMessage = `[${timestamp}] [FATAL] Uncaught Exception: ${error.message}\n${error.stack}\n`;
+    fs.appendFileSync(logFile, errorMessage, 'utf8');
+  } catch {
+    // If logging fails, silently ignore
+  }
+  
+  // Try to log to console (but don't crash if it fails)
+  try {
+    console.error('Fatal: Uncaught exception:', error);
+  } catch {
+    // Ignore EPIPE and other console errors
+  }
+  
+  // Give some time for cleanup, then exit
+  setTimeout(() => {
+    process.exit(1);
+  }, 1000);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+  // Log the error (to file, not console to avoid EPIPE)
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const logDir = path.join(process.cwd(), 'logs');
+    const today = new Date().toISOString().split('T')[0];
+    const logFile = path.join(logDir, `app-${today}.log`);
+    const timestamp = new Date().toISOString();
+    const errorMessage = `[${timestamp}] [FATAL] Unhandled Rejection: ${reason}\n${reason?.stack || ''}\n`;
+    fs.appendFileSync(logFile, errorMessage, 'utf8');
+  } catch {
+    // If logging fails, silently ignore
+  }
+  
+  // Try to log to console (but don't crash if it fails)
+  try {
+    console.error('Fatal: Unhandled rejection:', reason);
+  } catch {
+    // Ignore EPIPE and other console errors
+  }
+});
+
 // Handle graceful shutdown
 process.on('SIGINT', async () => {
-  console.log('\n⏸️  Shutting down gracefully...');
+  try {
+    console.log('\n⏸️  Shutting down gracefully...');
+  } catch {
+    // Ignore EPIPE errors during shutdown
+  }
   await tracker.stop();
   await dbService.close();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  console.log('\n⏸️  Shutting down gracefully...');
+  try {
+    console.log('\n⏸️  Shutting down gracefully...');
+  } catch {
+    // Ignore EPIPE errors during shutdown
+  }
   await tracker.stop();
   await dbService.close();
   process.exit(0);

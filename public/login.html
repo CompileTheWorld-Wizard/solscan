@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Solana Transaction Tracker</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <!-- Login Page -->
+    <div id="loginContainer">
+        <div class="login-card">
+            <h1>🔒 Solana Transaction Tracker</h1>
+            <p>Please enter your password to access the application</p>
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <div class="login-form-group">
+                    <label for="passwordInput">Password</label>
+                    <input 
+                        type="password" 
+                        id="passwordInput" 
+                        placeholder="Enter password"
+                        required
+                        autocomplete="current-password"
+                    >
+                    <div id="loginError" class="login-error"></div>
+                </div>
+                <button type="submit" class="btn-login" id="loginBtn">
+                    🔓 Login
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script type="module" src="/js/auth.js"></script>
+</body>
+</html>
+
+
+

@@ -29,10 +29,17 @@ export function parseSwapTransactionOutput(parsedInstruction) {
   const tradeEvent = parsedInstruction?.events?.find(e => e.name === 'TradeEvent');
   const solEventAmount = tradeEvent?.data?.sol_amount;
   const tokenEventAmount = tradeEvent?.data?.token_amount;
+  const feeAmount = tradeEvent?.data?.fee;
+  const creatorFeeAmount = tradeEvent?.data?.creator_fee;
 
   const isBuy = type === 'buy';
   let inAmount = isBuy ? solEventAmount : tokenEventAmount;
   let finalOutAmount = isBuy ? tokenEventAmount : (solEventAmount ?? alternativeAmountOut);
+
+  // Consider fee amount
+  if(isBuy) inAmount = inAmount + feeAmount + creatorFeeAmount;
+  else finalOutAmount = finalOutAmount - feeAmount - creatorFeeAmount;
+
   return {
     type,
     user: userPubkey,

@@ -7,7 +7,9 @@
  */
 export async function fetchStatus() {
     try {
-        const response = await fetch('/api/status');
+        const response = await fetch('/api/status', {
+            credentials: 'include'
+        });
         const data = await response.json();
         return { success: true, data };
     } catch (error) {
@@ -25,6 +27,7 @@ export async function startTracking(addresses) {
         const setResponse = await fetch('/api/addresses', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify({ addresses })
         });
 
@@ -35,7 +38,8 @@ export async function startTracking(addresses) {
 
         // Start tracking
         const startResponse = await fetch('/api/start', {
-            method: 'POST'
+            method: 'POST',
+            credentials: 'include'
         });
 
         const result = await startResponse.json();
@@ -51,7 +55,8 @@ export async function startTracking(addresses) {
 export async function stopTracking() {
     try {
         const response = await fetch('/api/stop', {
-            method: 'POST'
+            method: 'POST',
+            credentials: 'include'
         });
 
         const result = await response.json();
@@ -74,7 +79,9 @@ export async function fetchTransactions(page, pageSize, selectedWallets = []) {
             queryString += `&wallets=${selectedWallets.join(',')}`;
         }
         
-        const response = await fetch(`/api/transactions?${queryString}`);
+        const response = await fetch(`/api/transactions?${queryString}`, {
+            credentials: 'include'
+        });
         const data = await response.json();
         return { success: true, data };
     } catch (error) {
@@ -88,7 +95,9 @@ export async function fetchTransactions(page, pageSize, selectedWallets = []) {
  */
 export async function analyzeWallet(walletAddress) {
     try {
-        const response = await fetch(`/api/analyze/${walletAddress}`);
+        const response = await fetch(`/api/analyze/${walletAddress}`, {
+            credentials: 'include'
+        });
         
         if (!response.ok) {
             throw new Error('Failed to analyze wallet');
@@ -106,7 +115,9 @@ export async function analyzeWallet(walletAddress) {
  */
 export async function fetchSkipTokens() {
     try {
-        const response = await fetch('/api/skip-tokens');
+        const response = await fetch('/api/skip-tokens', {
+            credentials: 'include'
+        });
         const data = await response.json();
         return { success: data.success, data: data.skipTokens };
     } catch (error) {
@@ -123,6 +134,7 @@ export async function addSkipToken(mintAddress, symbol) {
         const response = await fetch('/api/skip-tokens', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify({
                 mint_address: mintAddress,
                 symbol: symbol || null,
@@ -142,7 +154,9 @@ export async function addSkipToken(mintAddress, symbol) {
  */
 export async function fetchAllWallets() {
     try {
-        const response = await fetch('/api/wallets');
+        const response = await fetch('/api/wallets', {
+            credentials: 'include'
+        });
         const data = await response.json();
         return { success: data.success, wallets: data.wallets || [] };
     } catch (error) {
@@ -157,7 +171,8 @@ export async function fetchAllWallets() {
 export async function removeSkipToken(mintAddress) {
     try {
         const response = await fetch(`/api/skip-tokens/${encodeURIComponent(mintAddress)}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            credentials: 'include'
         });
         
         const data = await response.json();
