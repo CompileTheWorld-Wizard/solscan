@@ -76,9 +76,16 @@ export class MarketCapService {
   }
 
   /**
-   * Get transaction details from Solscan API
+   * Sleep helper function for retry delays
    */
-  private async getTransactionDetail(signature: string): Promise<TransactionDetailResponse> {
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Get transaction details from Solscan API with retry logic
+   */
+  private async getTransactionDetail(signature: string, retryCount: number = 0, maxRetries: number = 1): Promise<TransactionDetailResponse> {
     if (!this.solscanApiKey) {
       throw new Error("SOLSCAN_API_KEY environment variable is not set. Please check your .env file.");
     }
@@ -94,21 +101,43 @@ export class MarketCapService {
 
     try {
       const response = await fetch(url, requestOptions);
+      
+      // Check if response is not OK
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
       const data = await response.json() as TransactionDetailResponse;
+      
+      // Check if API returned an error
+      if (!data.success && data.error) {
+        throw new Error(data.error);
+      }
+      
       return data;
     } catch (error) {
-      console.error("Error fetching transaction detail:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      
+      // Retry if we haven't exceeded max retries
+      if (retryCount < maxRetries) {
+        console.log(`⚠️ Failed to fetch transaction detail for ${signature.substring(0, 8)}... (attempt ${retryCount + 1}/${maxRetries + 1}): ${errorMessage}. Retrying in 10 seconds...`);
+        await this.sleep(10000); // Wait 10 seconds before retry
+        return this.getTransactionDetail(signature, retryCount + 1, maxRetries);
+      }
+      
+      // Max retries exceeded, return error
+      console.error(`❌ Failed to fetch transaction detail for ${signature.substring(0, 8)}... after ${maxRetries + 1} attempts:`, errorMessage);
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: errorMessage,
       };
     }
   }
 
   /**
-   * Get token metadata using getTokenSupply from web3.js via Shyft RPC
+   * Get token metadata using getTokenSupply from web3.js via Shyft RPC with retry logic
    */
-  private async getTokenSupply(address: string): Promise<TokenMetaResponse> {
+  private async getTokenSupply(address: string, retryCount: number = 0, maxRetries: number = 2): Promise<TokenMetaResponse> {
     if (!this.shyftConnection) {
       return {
         success: false,
@@ -133,11 +162,22 @@ export class MarketCapService {
         }
       };
     } catch (error) {
-      console.error("Error fetching token supply via RPC:", error);
-
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      
+      // Retry if we haven't exceeded max retries
+      if (retryCount < maxRetries) {
+        // Random delay between 1-2 seconds
+        const delayMs = 1000 + Math.random() * 1000; // 1000-2000ms
+        console.log(`⚠️ Failed to fetch token supply for ${address.substring(0, 8)}... (attempt ${retryCount + 1}/${maxRetries + 1}): ${errorMessage}. Retrying in ${(delayMs / 1000).toFixed(1)} seconds...`);
+        await this.sleep(delayMs);
+        return this.getTokenSupply(address, retryCount + 1, maxRetries);
+      }
+      
+      // Max retries exceeded, return error
+      console.error(`❌ Failed to fetch token supply for ${address.substring(0, 8)}... after ${maxRetries + 1} attempts:`, errorMessage);
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: errorMessage,
       };
     }
   }
