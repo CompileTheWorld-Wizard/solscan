@@ -369,3 +369,35 @@ async function exportTokenData(walletAddress, tokenAddress, tokenSymbol) {
 // Make export function available globally
 window.exportTokenData = exportTokenData;
 
+/**
+ * Export all tokens data to XLSX
+ */
+async function exportAllTokenData() {
+    const select = document.getElementById('walletSelectTab') || document.getElementById('walletSelect');
+    const walletAddress = select ? select.value : null;
+
+    if (!walletAddress) {
+        showNotification('Please select a wallet first', 'error');
+        return;
+    }
+
+    try {
+        showNotification('Preparing export for all tokens...', 'info');
+        
+        // Call server-side endpoint to generate Excel file with all tokens
+        const result = await api.downloadAllTokensExcel(walletAddress);
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to download Excel file');
+        }
+        
+        showNotification('Export completed successfully!', 'success');
+    } catch (error) {
+        console.error('Export error:', error);
+        showNotification(`Export failed: ${error.message}`, 'error');
+    }
+}
+
+// Make export all function available globally
+window.exportAllTokenData = exportAllTokenData;
+

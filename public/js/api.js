@@ -253,3 +253,43 @@ export async function downloadTokenExcel(walletAddress, tokenAddress) {
     }
 }
 
+export async function downloadAllTokensExcel(walletAddress) {
+    try {
+        const response = await fetch(`/api/export-all-tokens-excel/${encodeURIComponent(walletAddress)}`, {
+            method: 'GET',
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to download Excel file');
+        }
+
+        // Get filename from Content-Disposition header or generate one
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = `AllTokens_${walletAddress.substring(0, 8)}_${Date.now()}.xlsx`;
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+            if (filenameMatch) {
+                filename = filenameMatch[1];
+            }
+        }
+
+        // Get blob and create download link
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        return { success: true };
+    } catch (error) {
+        console.error('Error downloading Excel file:', error);
+        return { success: false, error: error.message };
+    }
+}
+

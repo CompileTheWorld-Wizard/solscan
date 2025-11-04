@@ -329,14 +329,12 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
     };
     
-    // Helper function to format token amounts
+    // Helper function to format token amounts (without trillion option)
     const formatTokenAmount = (amount: number | string): string => {
       const num = parseFloat(String(amount));
       if (!num || isNaN(num)) return '';
       
-      if (num >= 1e12) {
-        return `${(num / 1e12).toFixed(0)}T`;
-      } else if (num >= 1e9) {
+      if (num >= 1e9) {
         return `${(num / 1e9).toFixed(0)}B`;
       } else if (num >= 1e6) {
         return `${(num / 1e6).toFixed(0)}M`;
@@ -409,12 +407,12 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       tokenInfo?.token_name || 'Unknown',
       tokenInfo?.symbol || '???',
       token,
-      tokenInfo?.creator || walletTokenInfo?.creator || '',
-      walletTokenInfo?.dev_buy_amount && walletTokenInfo?.dev_buy_amount_decimal !== null
-        ? parseFloat(walletTokenInfo.dev_buy_amount) / Math.pow(10, walletTokenInfo.dev_buy_amount_decimal)
+      tokenInfo?.creator || '',
+      tokenInfo?.dev_buy_amount && tokenInfo?.dev_buy_amount_decimal !== null
+        ? parseFloat(tokenInfo.dev_buy_amount) / Math.pow(10, tokenInfo.dev_buy_amount_decimal)
         : '',
-      walletTokenInfo?.dev_buy_token_amount && walletTokenInfo?.dev_buy_token_amount_decimal !== null
-        ? parseFloat(walletTokenInfo.dev_buy_token_amount) / Math.pow(10, walletTokenInfo.dev_buy_token_amount_decimal)
+      tokenInfo?.dev_buy_token_amount && tokenInfo?.dev_buy_token_amount_decimal !== null
+        ? parseFloat(tokenInfo.dev_buy_token_amount) / Math.pow(10, tokenInfo.dev_buy_token_amount_decimal)
         : '',
       0, // Number of Socials
       totalSells || 0 // Total Sells
@@ -475,22 +473,26 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       const signature = tx.transaction_id || '';
       const timestamp = formatTimestamp(tx.created_at);
       
-      // Calculate time from last transaction
+      // Calculate time from last transaction (in seconds/milliseconds)
+      // Transactions are sorted DESC (newest first)
+      // For each transaction, calculate the difference to the next (older) transaction
+      // The oldest transaction (last in array) will have nothing filled
       let timeFromLast = '';
-      if (index > 0) {
-        const prevTime = new Date(transactions[index - 1].created_at);
-        const currentTime = new Date(tx.created_at);
-        const diffMs = prevTime.getTime() - currentTime.getTime();
-        const diffMins = Math.floor(diffMs / 60000);
-        const diffHours = Math.floor(diffMins / 60);
-        const diffDays = Math.floor(diffHours / 24);
+      if (index < transactions.length - 1) {
+        // Next transaction (index+1 is older when sorted DESC)
+        const nextTx = transactions[index + 1];
+        const currentTime = new Date(tx.created_at); // Current transaction (newer)
+        const nextTime = new Date(nextTx.created_at); // Next transaction (older)
+        // Calculate: time FROM current (newer) TO next (older) = currentTime - nextTime
+        const diffMs = currentTime.getTime() - nextTime.getTime();
         
-        if (diffDays > 0) {
-          timeFromLast = `${diffDays}d ${diffHours % 24}h`;
-        } else if (diffHours > 0) {
-          timeFromLast = `${diffHours}h ${diffMins % 60}m`;
+        if (diffMs < 1000) {
+          // Show milliseconds if below 1 second
+          timeFromLast = `${diffMs}ms`;
         } else {
-          timeFromLast = `${diffMins}m`;
+          // Show seconds
+          const diffSeconds = (diffMs / 1000).toFixed(3);
+          timeFromLast = `${diffSeconds}s`;
         }
       }
       
@@ -499,8 +501,13 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       const solAmount = isBuy ? (parseFloat(tx.in_amount) || 0) : (parseFloat(tx.out_amount) || 0);
       const transactionSizeSOL = `${(solAmount / 1000000000).toFixed(3)} SOL`;
       
-      // Transaction size in Tokens
-      const tokenAmount = isBuy ? (parseFloat(tx.out_amount) || 0) : (parseFloat(tx.in_amount) || 0);
+      // Transaction size in Tokens (consider decimals)
+      const tokenAmountRaw = isBuy ? (parseFloat(tx.out_amount) || 0) : (parseFloat(tx.in_amount) || 0);
+      // Use dev_buy_token_amount_decimal from tokens table for token decimals
+      const tokenDecimals = tokenInfo?.dev_buy_token_amount_decimal !== null && tokenInfo?.dev_buy_token_amount_decimal !== undefined
+        ? tokenInfo.dev_buy_token_amount_decimal
+        : 9; // Default to 9 if not available
+      const tokenAmount = tokenAmountRaw / Math.pow(10, tokenDecimals);
       const transactionSizeTokens = formatTokenAmount(tokenAmount);
       
       // Transaction Gas & Tips
@@ -557,6 +564,339 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
     res.end();
   } catch (error: any) {
     console.error('Export error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/export-all-tokens-excel/:wallet - Generate Excel file with all tokens data
+ */
+app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) => {
+  try {
+    const { wallet } = req.params;
+    
+    // Get all wallet trades
+    const walletTrades = await walletTrackingService.getWalletTokens(wallet);
+    
+    if (!walletTrades || walletTrades.length === 0) {
+      return res.status(404).json({ success: false, error: 'No tokens found for this wallet' });
+    }
+    
+    // Get all token mints
+    const tokenMints = walletTrades.map((trade: any) => trade.token_address);
+    
+    // Get token information for all tokens
+    const tokens = await dbService.getTokensByMints(tokenMints);
+    const tokenInfoMap = new Map();
+    tokens.forEach((token: any) => {
+      tokenInfoMap.set(token.mint_address, token);
+    });
+    
+    // Create workbook
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('All Tokens Data');
+    
+    // Helper function to format timestamp
+    const formatTimestamp = (dateString: string | null | undefined): string => {
+      if (!dateString) return '';
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return dateString;
+      
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+      
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    };
+    
+    // Helper function to format token amounts (without trillion option)
+    const formatTokenAmount = (amount: number | string): string => {
+      const num = parseFloat(String(amount));
+      if (!num || isNaN(num)) return '';
+      
+      if (num >= 1e9) {
+        return `${(num / 1e9).toFixed(0)}B`;
+      } else if (num >= 1e6) {
+        return `${(num / 1e6).toFixed(0)}M`;
+      } else if (num >= 1e3) {
+        return `${(num / 1e3).toFixed(0)}K`;
+      }
+      return num.toString();
+    };
+    
+    // Helper function to format market cap with 3 decimals
+    const formatMarketCap = (amount: number | string | null | undefined): string => {
+      if (!amount) return '';
+      const num = parseFloat(String(amount));
+      if (!num || isNaN(num)) return '';
+      
+      if (num >= 1e12) {
+        return `$${(num / 1e12).toFixed(3)}T`;
+      } else if (num >= 1e9) {
+        return `$${(num / 1e9).toFixed(3)}B`;
+      } else if (num >= 1e6) {
+        return `$${(num / 1e6).toFixed(3)}M`;
+      } else if (num >= 1e3) {
+        return `$${(num / 1e3).toFixed(3)}K`;
+      }
+      return `$${num.toFixed(3)}`;
+    };
+    
+    // Define colors
+    const darkGreen = { argb: 'FF006400' };
+    const white = { argb: 'FFFFFFFF' };
+    const black = { argb: 'FF000000' };
+    
+    // Token info headers
+    const tokenInfoHeaders = [
+      'Token Name',
+      'Symbol',
+      'Token Address',
+      'Creator Address',
+      'Dev Buy Amount SOL',
+      'Dev Buy Amount Tokens',
+      'Number of Socials',
+      'Total Sells'
+    ];
+    
+    // Transaction headers
+    const transactionHeaders = [
+      '', // Empty column
+      'Event',
+      'Market Cap',
+      'Solscan transaction signature',
+      'Timestamp',
+      'Time from last transaction',
+      'Transaction size in SOL',
+      'Transaction Size in Tokens',
+      'Transaction Gas & Tips'
+    ];
+    
+    const SOL_MINT = 'So11111111111111111111111111111111111111112';
+    let currentRow = 1;
+    
+    // Process each token
+    for (let tokenIndex = 0; tokenIndex < walletTrades.length; tokenIndex++) {
+      const trade = walletTrades[tokenIndex];
+      const token = trade.token_address;
+      const tokenInfo = tokenInfoMap.get(token) || null;
+      
+      // Get all transactions for this wallet+token pair
+      const transactions = await dbService.getTransactionsByWalletToken(wallet, token);
+      
+      // Count total sells
+      const totalSells = transactions.filter((tx: any) => tx.type?.toLowerCase() === 'sell').length;
+      
+      // Add token info headers (only for first token)
+      if (tokenIndex === 0) {
+        const headerRow1 = worksheet.addRow(tokenInfoHeaders);
+        headerRow1.eachCell((cell) => {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: darkGreen
+          };
+          cell.font = {
+            color: white,
+            bold: true
+          };
+          cell.alignment = {
+            horizontal: 'center',
+            vertical: 'middle'
+          };
+          cell.border = {
+            top: { style: 'thin', color: black },
+            bottom: { style: 'thin', color: black },
+            left: { style: 'thin', color: black },
+            right: { style: 'thin', color: black }
+          };
+        });
+        currentRow = 2;
+      } else {
+        // Add empty row before next token (except first)
+        worksheet.addRow([]);
+        currentRow++;
+        
+        // Add token info headers again for subsequent tokens
+        const headerRow1 = worksheet.addRow(tokenInfoHeaders);
+        headerRow1.eachCell((cell) => {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: darkGreen
+          };
+          cell.font = {
+            color: white,
+            bold: true
+          };
+          cell.alignment = {
+            horizontal: 'center',
+            vertical: 'middle'
+          };
+          cell.border = {
+            top: { style: 'thin', color: black },
+            bottom: { style: 'thin', color: black },
+            left: { style: 'thin', color: black },
+            right: { style: 'thin', color: black }
+          };
+        });
+        currentRow++;
+      }
+      
+      // Row: Token info data
+      const tokenInfoRow = [
+        tokenInfo?.token_name || 'Unknown',
+        tokenInfo?.symbol || '???',
+        token,
+        tokenInfo?.creator || '',
+        tokenInfo?.dev_buy_amount && tokenInfo?.dev_buy_amount_decimal !== null
+          ? parseFloat(tokenInfo.dev_buy_amount) / Math.pow(10, tokenInfo.dev_buy_amount_decimal)
+          : '',
+        tokenInfo?.dev_buy_token_amount && tokenInfo?.dev_buy_token_amount_decimal !== null
+          ? parseFloat(tokenInfo.dev_buy_token_amount) / Math.pow(10, tokenInfo.dev_buy_token_amount_decimal)
+          : '',
+        0, // Number of Socials
+        totalSells || 0 // Total Sells
+      ];
+      
+      const dataRow1 = worksheet.addRow(tokenInfoRow);
+      dataRow1.eachCell((cell) => {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: darkGreen
+        };
+        cell.font = {
+          color: white
+        };
+        cell.alignment = {
+          horizontal: 'center',
+          vertical: 'middle'
+        };
+        cell.border = {
+          top: { style: 'thin', color: black },
+          bottom: { style: 'thin', color: black },
+          left: { style: 'thin', color: black },
+          right: { style: 'thin', color: black }
+        };
+      });
+      currentRow++;
+      
+      // Row: Transaction headers
+      const headerRow2 = worksheet.addRow(transactionHeaders);
+      headerRow2.eachCell((cell) => {
+        cell.font = {
+          bold: true
+        };
+        cell.alignment = {
+          horizontal: 'center',
+          vertical: 'middle'
+        };
+      });
+      currentRow++;
+      
+      // Transaction rows
+      transactions.forEach((tx: any, index: number) => {
+        const event = tx.type?.charAt(0).toUpperCase() + tx.type?.slice(1).toLowerCase() || 'Unknown';
+        const marketCap = formatMarketCap(tx.marketCap);
+        const signature = tx.transaction_id || '';
+        const timestamp = formatTimestamp(tx.created_at);
+        
+        // Calculate time from last transaction (within same token, in seconds/milliseconds)
+        // Transactions are sorted DESC (newest first)
+        // For each transaction, calculate the difference to the next (older) transaction
+        // The oldest transaction (last in array) will have nothing filled
+        let timeFromLast = '';
+        if (index < transactions.length - 1) {
+          // Next transaction (index+1 is older when sorted DESC)
+          const nextTx = transactions[index + 1];
+          const currentTime = new Date(tx.created_at); // Current transaction (newer)
+          const nextTime = new Date(nextTx.created_at); // Next transaction (older)
+          // Calculate: time FROM current (newer) TO next (older) = currentTime - nextTime
+          const diffMs = currentTime.getTime() - nextTime.getTime();
+          
+          if (diffMs < 1000) {
+            // Show milliseconds if below 1 second
+            timeFromLast = `${diffMs}ms`;
+          } else {
+            // Show seconds
+            const diffSeconds = (diffMs / 1000).toFixed(3);
+            timeFromLast = `${diffSeconds}s`;
+          }
+        }
+        
+        // Transaction size in SOL
+        const isBuy = tx.mint_from === SOL_MINT;
+        const solAmount = isBuy ? (parseFloat(tx.in_amount) || 0) : (parseFloat(tx.out_amount) || 0);
+        const transactionSizeSOL = `${(solAmount / 1000000000).toFixed(3)} SOL`;
+        
+        // Transaction size in Tokens (consider decimals)
+        const tokenAmountRaw = isBuy ? (parseFloat(tx.out_amount) || 0) : (parseFloat(tx.in_amount) || 0);
+        // Use dev_buy_token_amount_decimal from tokens table for token decimals
+        const tokenDecimals = tokenInfo?.dev_buy_token_amount_decimal !== null && tokenInfo?.dev_buy_token_amount_decimal !== undefined
+          ? tokenInfo.dev_buy_token_amount_decimal
+          : 9; // Default to 9 if not available
+        const tokenAmount = tokenAmountRaw / Math.pow(10, tokenDecimals);
+        const transactionSizeTokens = formatTokenAmount(tokenAmount);
+        
+        // Transaction Gas & Tips
+        const tipAmount = (tx.tipAmount != null ? parseFloat(tx.tipAmount) : 0) || 0;
+        const feeAmount = (tx.feeAmount != null ? parseFloat(tx.feeAmount) : 0) || 0;
+        const totalGasAndTips = feeAmount + tipAmount;
+        const tipLabel = tipAmount > 0 ? 'Priority Tip' : 'No Tip';
+        const gasAndTips = `${feeAmount.toFixed(9)} (Fee) + ${tipAmount.toFixed(9)} (${tipLabel}) = ${totalGasAndTips.toFixed(9)} SOL`;
+        
+        const row = worksheet.addRow([
+          '', // Empty column
+          event,
+          marketCap,
+          signature,
+          timestamp,
+          timeFromLast,
+          transactionSizeSOL,
+          transactionSizeTokens,
+          gasAndTips
+        ]);
+        
+        // Center align all cells in transaction rows
+        row.eachCell((cell) => {
+          cell.alignment = {
+            horizontal: 'center',
+            vertical: 'middle'
+          };
+        });
+        currentRow++;
+      });
+    }
+    
+    // Auto-size columns
+    worksheet.columns.forEach((column) => {
+      if (column && column.eachCell) {
+        let maxLength = 10;
+        column.eachCell({ includeEmpty: true }, (cell) => {
+          const cellValue = cell.value ? String(cell.value) : '';
+          if (cellValue.length > maxLength) {
+            maxLength = Math.min(cellValue.length + 2, 50);
+          }
+        });
+        column.width = maxLength;
+      }
+    });
+    
+    // Set response headers
+    const filename = `AllTokens_${wallet.substring(0, 8)}_${Date.now()}.xlsx`;
+    
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    
+    // Write workbook to response
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error: any) {
+    console.error('Export all tokens error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
