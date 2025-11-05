@@ -9,6 +9,9 @@ import { tokenQueueService } from "../services/tokenQueueService";
 import { walletTrackingService } from "../services/walletTrackingService";
 import { marketCapService } from "../services";
 
+const RETRY_DELAY_MS = 1000
+const MAX_RETRY_WITH_LAST_SLOT = 5
+
 type StreamResult = {
   lastSlot?: string;
   hasRcvdMSg: boolean;
@@ -39,6 +42,7 @@ class TransactionTracker {
       "grpc.keepalive_time_ms": 10000,
       "grpc.keepalive_timeout_ms": 1000,
       "grpc.default_compression_algorithm": 2,
+      "grpc.max_receive_message_length": 1024*1024*1024
     });
 
     // Initialize Solana RPC connection for wallet analysis
@@ -208,6 +212,7 @@ class TransactionTracker {
    */
   private async subscribeCommand(args: SubscribeRequest) {
     let lastSlot: string | undefined;
+    let retryCount = 0;
 
     while (this.isRunning && !this.shouldStop) {
       try {
@@ -227,18 +232,31 @@ class TransactionTracker {
         if (this.shouldStop) {
           break;
         }
+        
+        console.error(
+          `Stream error, retrying in ${RETRY_DELAY_MS} second...`,
+        );
 
-        console.log(err)
-        console.error("Stream error occurred");
+        //in case the stream is interrupted, it waits for a while before retrying
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
 
         lastSlot = err.lastSlot;
+        if (err.hasRcvdMSg) retryCount = 0;
 
-        if (lastSlot) {
-          console.log(`Reconnecting with last slot ${lastSlot}`);
+        if (lastSlot && retryCount < MAX_RETRY_WITH_LAST_SLOT) {
+          console.log(
+            `#${retryCount} retrying with last slot ${lastSlot}, remaining retries ${
+              MAX_RETRY_WITH_LAST_SLOT - retryCount
+            }`,
+          );
+          // sets the fromSlot to the last slot received before the stream was interrupted, if it exists
           args.fromSlot = lastSlot;
+          retryCount++;
         } else {
-          console.log("Reconnecting from latest slot");
+          //when there is no last slot available, it starts the stream from the latest slot
+          console.log("Retrying from latest slot (no last slot available)");
           delete args.fromSlot;
+          retryCount = 0;
           lastSlot = undefined;
         }
       }
