@@ -113,6 +113,10 @@ export class MarketCapService {
       if (!data.success && data.error) {
         throw new Error(data.error);
       }
+
+      if (!data.data.parsed_instructions || data.data.parsed_instructions.length === 0) {
+        throw new Error("No parsed instructions found");
+      }
       
       return data;
     } catch (error) {
