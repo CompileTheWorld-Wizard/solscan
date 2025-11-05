@@ -159,6 +159,13 @@ class DatabaseService {
         CREATE INDEX IF NOT EXISTS idx_wallet_token ON wallets(wallet_address, token_address);
         CREATE INDEX IF NOT EXISTS idx_wallets_first_buy ON wallets(first_buy_timestamp);
         CREATE INDEX IF NOT EXISTS idx_wallets_first_sell ON wallets(first_sell_timestamp);
+
+        CREATE TABLE IF NOT EXISTS credentials (
+          id SERIAL PRIMARY KEY,
+          password_hash VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
       `;
 
       await this.pool.query(createTableQuery);
@@ -1486,6 +1493,57 @@ class DatabaseService {
     } catch (error) {
       console.error(`Failed to check table existence: ${tableName}`, error);
       return false;
+    }
+  }
+
+  /**
+   * Get the current password hash from credentials table
+   */
+  async getPasswordHash(): Promise<string | null> {
+    try {
+      const query = `
+        SELECT password_hash 
+        FROM credentials 
+        ORDER BY id DESC 
+        LIMIT 1
+      `;
+      const result = await this.pool.query(query);
+      return result.rows.length > 0 ? result.rows[0].password_hash : null;
+    } catch (error) {
+      console.error('Failed to get password hash:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Update password hash in credentials table
+   */
+  async updatePasswordHash(passwordHash: string): Promise<void> {
+    try {
+      // Check if any credentials exist
+      const checkQuery = `SELECT COUNT(*) as count FROM credentials`;
+      const checkResult = await this.pool.query(checkQuery);
+      const count = parseInt(checkResult.rows[0].count);
+
+      if (count === 0) {
+        // Insert first password
+        const insertQuery = `
+          INSERT INTO credentials (password_hash) 
+          VALUES ($1)
+        `;
+        await this.pool.query(insertQuery, [passwordHash]);
+      } else {
+        // Update existing password
+        const updateQuery = `
+          UPDATE credentials 
+          SET password_hash = $1, updated_at = CURRENT_TIMESTAMP 
+          WHERE id = (SELECT id FROM credentials ORDER BY id DESC LIMIT 1)
+        `;
+        await this.pool.query(updateQuery, [passwordHash]);
+      }
+    } catch (error) {
+      console.error('Failed to update password hash:', error);
+      throw error;
     }
   }
 }

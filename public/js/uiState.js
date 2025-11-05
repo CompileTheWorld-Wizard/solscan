@@ -51,7 +51,7 @@ export async function updateUIStatus(running, addresses = [], fromPeriodicCheck 
     const statusBadge = document.getElementById('statusBadge');
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
-    const trackedAddressesCount = document.getElementById('trackedAddresses');
+    const trackedAddressesCount = document.getElementById('trackedAddresses'); // May be null if stats-grid removed
     
     // Normalize addresses array
     const normalizedAddresses = addresses || [];
@@ -103,7 +103,9 @@ export async function updateUIStatus(running, addresses = [], fromPeriodicCheck 
         // Don't overwrite local state with server state during periodic checks
         // Just update the count based on DOM state
         const currentAddresses = getAddresses();
-        trackedAddressesCount.textContent = currentAddresses.length;
+        if (trackedAddressesCount) {
+            trackedAddressesCount.textContent = currentAddresses.length;
+        }
         
         // If stopped and addresses didn't change, just re-enable remove buttons without full re-render
         if (runningStateChanged) {
@@ -120,7 +122,9 @@ export async function updateUIStatus(running, addresses = [], fromPeriodicCheck 
     // Only update wallet list and filters if addresses actually changed (or not from periodic check)
     if (addressesChanged) {
         // Update tracked addresses count
-        trackedAddressesCount.textContent = normalizedAddresses.length;
+        if (trackedAddressesCount) {
+            trackedAddressesCount.textContent = normalizedAddresses.length;
+        }
         
         // Update wallet filters when addresses change
             if (normalizedAddresses.length > 0) {
@@ -143,6 +147,13 @@ export async function updateUIStatus(running, addresses = [], fromPeriodicCheck 
     }
     
     // Always update count (it's cheap and doesn't cause re-renders)
-    trackedAddressesCount.textContent = normalizedAddresses.length;
+    if (trackedAddressesCount) {
+        trackedAddressesCount.textContent = normalizedAddresses.length;
+    }
+    
+    // Update header stats
+    if (window.updateHeaderStats) {
+        window.updateHeaderStats();
+    }
 }
 

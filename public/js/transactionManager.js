@@ -70,13 +70,14 @@ export async function fetchTransactions() {
         }
 
         state.totalTransactions = result.data.total;
-        document.getElementById('totalTransactions').textContent = state.totalTransactions;
-
-        // Debug: log first transaction to see structure
-        if (result.data.transactions && result.data.transactions.length > 0) {
-            console.log('Sample transaction data:', result.data.transactions[0]);
-            console.log('Has tipAmount?', 'tipAmount' in result.data.transactions[0]);
-            console.log('Has feeAmount?', 'feeAmount' in result.data.transactions[0]);
+        const totalTransactionsEl = document.getElementById('totalTransactions');
+        if (totalTransactionsEl) {
+            totalTransactionsEl.textContent = state.totalTransactions;
+        }
+        
+        // Update header stats
+        if (window.updateHeaderStats) {
+            window.updateHeaderStats();
         }
 
         renderTransactions(result.data.transactions);
@@ -182,19 +183,6 @@ function renderTransactions(transactions) {
             tx.tip_amount != null ? parseFloat(tx.tip_amount) : 0) || 0;
         const feeAmount = (tx.feeAmount != null ? parseFloat(tx.feeAmount) :
             tx.fee_amount != null ? parseFloat(tx.fee_amount) : 0) || 0;
-
-        // Debug logging (remove in production if needed)
-        if (tx.tipAmount != null || tx.feeAmount != null || tx.tip_amount != null || tx.fee_amount != null) {
-            console.log('Transaction fee data:', {
-                transaction_id: tx.transaction_id,
-                tipAmount: tx.tipAmount,
-                feeAmount: tx.feeAmount,
-                tip_amount: tx.tip_amount,
-                fee_amount: tx.fee_amount,
-                parsed_tipAmount: tipAmount,
-                parsed_feeAmount: feeAmount
-            });
-        }
 
         // Display fee and tip on separate lines
         const feeDisplay = formatSOL(feeAmount);

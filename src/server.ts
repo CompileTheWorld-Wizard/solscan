@@ -5,6 +5,7 @@ import bodyParser from "body-parser";
 import path from "path";
 import session from "express-session";
 import ExcelJS from "exceljs";
+import crypto from "crypto";
 import { setupFileLogging } from "./utils/logger";
 import { dbService } from "./database";
 import { tracker } from "./tracker";
@@ -25,8 +26,23 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Session configuration
-const HARDCODED_PASSWORD = 'admin123';
+const HARDCODED_PASSWORD = 'admin123'; // Fallback for initial setup
 const SESSION_SECRET = process.env.SESSION_SECRET || 'your-secret-key-change-in-production';
+
+/**
+ * Hash a password using SHA-256
+ */
+function hashPassword(password: string): string {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+/**
+ * Verify a password against a hash
+ */
+function verifyPassword(password: string, hash: string): boolean {
+  const passwordHash = hashPassword(password);
+  return passwordHash === hash;
+}
 
 // Trust proxy (important if behind reverse proxy like nginx)
 // This ensures proper IP detection and cookie handling
@@ -119,21 +135,46 @@ async function initializeApp() {
 /**
  * POST /api/login - Login endpoint
  */
-app.post("/api/login", (req, res) => {
+app.post("/api/login", async (req, res) => {
   const { password } = req.body;
   
-  if (password === HARDCODED_PASSWORD) {
-    req.session.authenticated = true;
-    // Save session explicitly to ensure it's persisted
-    req.session.save((err) => {
-      if (err) {
-        console.error('Session save error:', err);
-        return res.status(500).json({ success: false, error: 'Failed to save session' });
+  try {
+    // Check database for password hash
+    const passwordHash = await dbService.getPasswordHash();
+    
+    let isValid = false;
+    
+    if (passwordHash) {
+      // Verify against database hash
+      isValid = verifyPassword(password, passwordHash);
+    } else {
+      // Fallback to hardcoded password for initial setup
+      isValid = password === HARDCODED_PASSWORD;
+      
+      // If login successful with hardcoded password, save it to database
+      if (isValid) {
+        const hash = hashPassword(password);
+        await dbService.updatePasswordHash(hash);
+        console.log('✅ Initial password saved to database');
       }
-      res.json({ success: true, message: 'Login successful' });
-    });
-  } else {
-    res.status(401).json({ success: false, error: 'Invalid password' });
+    }
+    
+    if (isValid) {
+      req.session.authenticated = true;
+      // Save session explicitly to ensure it's persisted
+      req.session.save((err) => {
+        if (err) {
+          console.error('Session save error:', err);
+          return res.status(500).json({ success: false, error: 'Failed to save session' });
+        }
+        res.json({ success: true, message: 'Login successful' });
+      });
+    } else {
+      res.status(401).json({ success: false, error: 'Invalid password' });
+    }
+  } catch (error: any) {
+    console.error('Login error:', error);
+    res.status(500).json({ success: false, error: 'Login failed. Please try again.' });
   }
 });
 
@@ -155,6 +196,58 @@ app.post("/api/logout", (req, res) => {
  */
 app.get("/api/auth/status", (req, res) => {
   res.json({ authenticated: isAuthenticated(req) });
+});
+
+/**
+ * POST /api/change-password - Change password endpoint (protected)
+ */
+app.post("/api/change-password", requireAuth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, error: 'Current password and new password are required' });
+    }
+    
+    // Validate new password requirements
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, error: 'New password must be at least 6 characters long' });
+    }
+    
+    if (!/[A-Z]/.test(newPassword)) {
+      return res.status(400).json({ success: false, error: 'New password must contain at least one uppercase letter' });
+    }
+    
+    if (!/[0-9]/.test(newPassword)) {
+      return res.status(400).json({ success: false, error: 'New password must contain at least one number' });
+    }
+    
+    // Get current password hash from database
+    const passwordHash = await dbService.getPasswordHash();
+    
+    // Verify current password
+    let currentPasswordValid = false;
+    if (passwordHash) {
+      currentPasswordValid = verifyPassword(currentPassword, passwordHash);
+    } else {
+      // Fallback to hardcoded password if no hash in database
+      currentPasswordValid = currentPassword === HARDCODED_PASSWORD;
+    }
+    
+    if (!currentPasswordValid) {
+      return res.status(401).json({ success: false, error: 'Current password is incorrect' });
+    }
+    
+    // Hash and save new password
+    const newPasswordHash = hashPassword(newPassword);
+    await dbService.updatePasswordHash(newPasswordHash);
+    
+    console.log('✅ Password changed successfully');
+    res.json({ success: true, message: 'Password changed successfully' });
+  } catch (error: any) {
+    console.error('Change password error:', error);
+    res.status(500).json({ success: false, error: 'Failed to change password. Please try again.' });
+  }
 });
 
 // API Routes (protected)
@@ -537,8 +630,7 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       const tipAmount = (tx.tipAmount != null ? parseFloat(tx.tipAmount) : 0) || 0;
       const feeAmount = (tx.feeAmount != null ? parseFloat(tx.feeAmount) : 0) || 0;
       const totalGasAndTips = feeAmount + tipAmount;
-      const tipLabel = tipAmount > 0 ? 'Priority Tip' : 'No Tip';
-      const gasAndTips = `${feeAmount.toFixed(9)} (Fee) + ${tipAmount.toFixed(9)} (${tipLabel}) = ${totalGasAndTips.toFixed(9)} SOL`;
+      const gasAndTips = `${totalGasAndTips.toFixed(9)} SOL`;
       
       const row = worksheet.addRow([
         '', // Empty column
@@ -876,8 +968,7 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
         const tipAmount = (tx.tipAmount != null ? parseFloat(tx.tipAmount) : 0) || 0;
         const feeAmount = (tx.feeAmount != null ? parseFloat(tx.feeAmount) : 0) || 0;
         const totalGasAndTips = feeAmount + tipAmount;
-        const tipLabel = tipAmount > 0 ? 'Priority Tip' : 'No Tip';
-        const gasAndTips = `${feeAmount.toFixed(9)} (Fee) + ${tipAmount.toFixed(9)} (${tipLabel}) = ${totalGasAndTips.toFixed(9)} SOL`;
+        const gasAndTips = `${totalGasAndTips.toFixed(9)} SOL`;
         
         const row = worksheet.addRow([
           '', // Empty column

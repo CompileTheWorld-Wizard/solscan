@@ -16,6 +16,7 @@ import { switchTab, refreshAnalysis } from './tabManager.js';
 import { analyzeSelectedWallet } from './analysisManager.js';
 import { addSkipToken } from './skipTokens.js';
 import './walletFilter.js'; // Initialize wallet filter
+import './headerStats.js'; // Initialize header stats
 
 /**
  * Initialize the application
@@ -41,6 +42,11 @@ export function init() {
     fetchStatus();
     fetchTransactions();
     fetchSkipTokens();
+    
+    // Initialize header stats
+    if (window.updateHeaderStats) {
+        window.updateHeaderStats();
+    }
     
     // Check status periodically (only update if something actually changed)
     // Increased interval to 10 seconds to reduce unnecessary checks
