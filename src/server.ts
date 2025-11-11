@@ -601,8 +601,8 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       const buyTokenAmountRaw = parseFloat(firstBuy.out_amount) || 0;
       rowData[14] = buyTokenAmountRaw / Math.pow(10, tokenDecimals); // Wallet Buy Amount in Tokens
       
-      // Market cap
-      rowData[15] = formatMarketCap(firstBuy.marketCap); // Wallet Buy Market Cap
+      // Market cap (raw value, not formatted)
+      rowData[15] = firstBuy.marketCap || ''; // Wallet Buy Market Cap
     }
     
     // Get all sells (sorted by block timestamp ASC, fallback to created_at)
@@ -630,7 +630,7 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
         sell.transaction_id || '', // Transaction Signature
         (parseFloat(sell.out_amount) || 0) / 1000000000, // Wallet Sell Amount in SOL
         (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals), // Wallet Sell Amount in Tokens
-        formatMarketCap(sell.marketCap) // Wallet Sell Market Cap
+        sell.marketCap || '' // Wallet Sell Market Cap (raw value, not formatted)
       );
     }
     
@@ -896,8 +896,8 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
         const buyTokenAmountRaw = parseFloat(firstBuy.out_amount) || 0;
         rowData[14] = buyTokenAmountRaw / Math.pow(10, tokenDecimals); // Wallet Buy Amount in Tokens
         
-        // Market cap
-        rowData[15] = formatMarketCap(firstBuy.marketCap); // Wallet Buy Market Cap
+        // Market cap (raw value, not formatted)
+        rowData[15] = firstBuy.marketCap || ''; // Wallet Buy Market Cap
       }
       
       // Get all sells (sorted by timestamp ASC)
@@ -926,7 +926,7 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
             sell.transaction_id || '', // Transaction Signature
             (parseFloat(sell.out_amount) || 0) / 1000000000, // Wallet Sell Amount in SOL
             (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals), // Wallet Sell Amount in Tokens
-            formatMarketCap(sell.marketCap) // Wallet Sell Market Cap
+            sell.marketCap || '' // Wallet Sell Market Cap (raw value, not formatted)
           );
         } else {
           // Empty cells for missing sells
