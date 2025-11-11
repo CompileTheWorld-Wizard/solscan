@@ -13,7 +13,7 @@ import { toggleWalletSelection } from './walletManager.js';
 import { startTracking, stopTracking } from './tracking.js';
 import { previousPage, nextPage } from './transactionManager.js';
 import { switchTab, refreshAnalysis } from './tabManager.js';
-import { analyzeSelectedWallet } from './analysisManager.js';
+import { analyzeSelectedWallet, analysisPreviousPage, analysisNextPage } from './analysisManager.js';
 import { addSkipToken } from './skipTokens.js';
 import './walletFilter.js'; // Initialize wallet filter
 import './headerStats.js'; // Initialize header stats
@@ -110,6 +110,8 @@ window.switchTab = switchTab;
 window.previousPage = previousPage;
 window.nextPage = nextPage;
 window.analyzeSelectedWallet = analyzeSelectedWallet;
+window.analysisPreviousPage = analysisPreviousPage;
+window.analysisNextPage = analysisNextPage;
 window.addWalletAddress = addWalletAddress;
 window.removeWalletAddress = removeWalletAddress;
 window.toggleWalletSelection = toggleWalletSelection;

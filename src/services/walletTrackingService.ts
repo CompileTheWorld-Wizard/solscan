@@ -179,12 +179,12 @@ export class WalletTrackingService {
   /**
    * Get all tokens traded by a wallet
    */
-  async getWalletTokens(walletAddress: string): Promise<any[]> {
+  async getWalletTokens(walletAddress: string, limit?: number, offset?: number): Promise<{ data: any[], total: number }> {
     try {
-      return await dbService.getWalletTokens(walletAddress);
+      return await dbService.getWalletTokens(walletAddress, limit, offset);
     } catch (error: any) {
       console.error(`❌ Error fetching wallet tokens:`, error.message);
-      return [];
+      return { data: [], total: 0 };
     }
   }
 

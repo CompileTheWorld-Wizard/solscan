@@ -101,7 +101,7 @@ export async function analyzeSelectedWallet() {
     }
 
     try {
-        const result = await api.analyzeWallet(walletAddress);
+        const result = await api.analyzeWallet(walletAddress, state.analysisPage, state.analysisPageSize);
 
         if (!result.success) {
             throw new Error(result.error);
@@ -135,6 +135,17 @@ export function displayWalletInfo(data) {
 
     // Store data globally for fetchTokenInfo function (if needed)
     window.currentWalletData = data;
+    
+    // Update pagination state
+    if (data.totalTrades !== undefined) {
+        state.totalAnalysisTrades = data.totalTrades;
+    }
+    if (data.page !== undefined) {
+        state.analysisPage = data.page;
+    }
+    if (data.pageSize !== undefined) {
+        state.analysisPageSize = data.pageSize;
+    }
 
     let tradesHTML = '';
     if (data.trades && data.trades.length > 0) {
@@ -370,6 +381,37 @@ export function displayWalletInfo(data) {
         tradesHTML = '<div class="empty-tokens" style="padding: 20px; text-align: center; color: #9ca3af;">No trading history found for this wallet</div>';
     }
 
+    // Build pagination HTML
+    const totalPages = data.totalPages || Math.ceil((data.totalTrades || 0) / (data.pageSize || 50));
+    const currentPage = data.page || 1;
+    const paginationHTML = totalPages > 1 ? `
+        <div class="pagination" style="display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 20px; padding: 12px; background: #1a1f2e; border-radius: 8px; border: 1px solid #334155;">
+            <button 
+                id="analysisPrevBtn" 
+                onclick="window.analysisPreviousPage()"
+                style="padding: 8px 16px; background: ${currentPage === 1 ? '#334155' : '#667eea'}; color: white; border: none; border-radius: 6px; cursor: ${currentPage === 1 ? 'not-allowed' : 'pointer'}; font-size: 0.85rem; font-weight: 600; transition: all 0.2s;"
+                ${currentPage === 1 ? 'disabled' : ''}
+                onmouseover="${currentPage !== 1 ? "this.style.background='#5568d3'" : ''}"
+                onmouseout="${currentPage !== 1 ? "this.style.background='#667eea'" : ''}"
+            >
+                ← Previous
+            </button>
+            <span id="analysisPageInfo" style="color: #cbd5e1; font-size: 0.9rem; font-weight: 600;">
+                Page ${currentPage} of ${totalPages || 1}
+            </span>
+            <button 
+                id="analysisNextBtn" 
+                onclick="window.analysisNextPage()"
+                style="padding: 8px 16px; background: ${currentPage >= totalPages ? '#334155' : '#667eea'}; color: white; border: none; border-radius: 6px; cursor: ${currentPage >= totalPages ? 'not-allowed' : 'pointer'}; font-size: 0.85rem; font-weight: 600; transition: all 0.2s;"
+                ${currentPage >= totalPages ? 'disabled' : ''}
+                onmouseover="${currentPage < totalPages ? "this.style.background='#5568d3'" : ''}"
+                onmouseout="${currentPage < totalPages ? "this.style.background='#667eea'" : ''}"
+            >
+                Next →
+            </button>
+        </div>
+    ` : '';
+
     container.innerHTML = `
         <div class="wallet-info">
             <div class="wallet-info-section">
@@ -377,9 +419,57 @@ export function displayWalletInfo(data) {
                 <div class="token-list">
                     ${tradesHTML}
                 </div>
+                ${paginationHTML}
             </div>
         </div>
     `;
+}
+
+/**
+ * Update pagination UI for analysis
+ */
+export function updateAnalysisPagination() {
+    const totalPages = Math.ceil(state.totalAnalysisTrades / state.analysisPageSize);
+    const pageInfo = document.getElementById('analysisPageInfo');
+    const prevBtn = document.getElementById('analysisPrevBtn');
+    const nextBtn = document.getElementById('analysisNextBtn');
+    
+    if (pageInfo) {
+        pageInfo.textContent = `Page ${state.analysisPage} of ${totalPages || 1}`;
+    }
+    
+    if (prevBtn) {
+        prevBtn.disabled = state.analysisPage === 1;
+        prevBtn.style.background = state.analysisPage === 1 ? '#334155' : '#667eea';
+        prevBtn.style.cursor = state.analysisPage === 1 ? 'not-allowed' : 'pointer';
+    }
+    
+    if (nextBtn) {
+        nextBtn.disabled = state.analysisPage >= totalPages;
+        nextBtn.style.background = state.analysisPage >= totalPages ? '#334155' : '#667eea';
+        nextBtn.style.cursor = state.analysisPage >= totalPages ? 'not-allowed' : 'pointer';
+    }
+}
+
+/**
+ * Go to previous page in analysis
+ */
+export function analysisPreviousPage() {
+    if (state.analysisPage > 1) {
+        state.analysisPage--;
+        analyzeSelectedWallet();
+    }
+}
+
+/**
+ * Go to next page in analysis
+ */
+export function analysisNextPage() {
+    const totalPages = Math.ceil(state.totalAnalysisTrades / state.analysisPageSize);
+    if (state.analysisPage < totalPages) {
+        state.analysisPage++;
+        analyzeSelectedWallet();
+    }
 }
 
 /**

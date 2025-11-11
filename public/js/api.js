@@ -104,9 +104,10 @@ export async function fetchTransactions(page, pageSize, selectedWallets = []) {
 /**
  * Analyze wallet
  */
-export async function analyzeWallet(walletAddress) {
+export async function analyzeWallet(walletAddress, page = 1, pageSize = 50) {
     try {
-        const response = await fetch(`/api/analyze/${walletAddress}`, {
+        const queryString = `page=${page}&pageSize=${pageSize}`;
+        const response = await fetch(`/api/analyze/${walletAddress}?${queryString}`, {
             credentials: 'include'
         });
         

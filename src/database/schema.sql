@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS transactions (
     in_amount NUMERIC(40, 0) NOT NULL,
     out_amount NUMERIC(40, 0) NOT NULL,
     fee_payer VARCHAR(100) NOT NULL,
+    tip_amount NUMERIC(20, 9),
+    fee_amount NUMERIC(20, 9),
+    market_cap NUMERIC(20, 2),
+    block_number BIGINT,
+    block_timestamp TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -23,6 +28,8 @@ CREATE INDEX IF NOT EXISTS idx_transaction_id ON transactions(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_platform ON transactions(platform);
 CREATE INDEX IF NOT EXISTS idx_created_at ON transactions(created_at);
 CREATE INDEX IF NOT EXISTS idx_fee_payer ON transactions(fee_payer);
+CREATE INDEX IF NOT EXISTS idx_block_number ON transactions(block_number);
+CREATE INDEX IF NOT EXISTS idx_block_timestamp ON transactions(block_timestamp);
 
 -- Create the tokens table for storing token creator and first buy info
 CREATE TABLE IF NOT EXISTS tokens (
@@ -34,6 +41,8 @@ CREATE TABLE IF NOT EXISTS tokens (
     dev_buy_used_token VARCHAR(100),
     dev_buy_token_amount VARCHAR(100),
     dev_buy_token_amount_decimal INTEGER,
+    dev_buy_timestamp TIMESTAMP,
+    dev_buy_block_number BIGINT,
     token_name VARCHAR(200),
     symbol VARCHAR(50),
     image TEXT,
@@ -49,6 +58,8 @@ CREATE TABLE IF NOT EXISTS tokens (
 CREATE INDEX IF NOT EXISTS idx_mint_address ON tokens(mint_address);
 CREATE INDEX IF NOT EXISTS idx_creator ON tokens(creator);
 CREATE INDEX IF NOT EXISTS idx_tokens_created_at ON tokens(created_at);
+CREATE INDEX IF NOT EXISTS idx_dev_buy_timestamp ON tokens(dev_buy_timestamp);
+CREATE INDEX IF NOT EXISTS idx_dev_buy_block_number ON tokens(dev_buy_block_number);
 
 -- Create the skip_tokens table for tokens to skip when analyzing
 CREATE TABLE IF NOT EXISTS skip_tokens (
@@ -61,6 +72,42 @@ CREATE TABLE IF NOT EXISTS skip_tokens (
 
 -- Create indexes for skip_tokens table
 CREATE INDEX IF NOT EXISTS idx_skip_mint_address ON skip_tokens(mint_address);
+
+-- Create the wallets table for tracking wallet-token pairs
+CREATE TABLE IF NOT EXISTS wallets (
+    id SERIAL PRIMARY KEY,
+    wallet_address VARCHAR(100) NOT NULL,
+    token_address VARCHAR(100) NOT NULL,
+    first_buy_timestamp TIMESTAMP,
+    first_buy_amount VARCHAR(100),
+    first_buy_mcap NUMERIC(20, 2),
+    first_buy_supply VARCHAR(100),
+    first_buy_price NUMERIC(20, 8),
+    first_buy_decimals INTEGER,
+    first_sell_timestamp TIMESTAMP,
+    first_sell_amount VARCHAR(100),
+    first_sell_mcap NUMERIC(20, 2),
+    first_sell_supply VARCHAR(100),
+    first_sell_price NUMERIC(20, 8),
+    first_sell_decimals INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(wallet_address, token_address)
+);
+
+-- Create indexes for wallets table
+CREATE INDEX IF NOT EXISTS idx_wallet_address ON wallets(wallet_address);
+CREATE INDEX IF NOT EXISTS idx_token_address ON wallets(token_address);
+CREATE INDEX IF NOT EXISTS idx_wallet_token ON wallets(wallet_address, token_address);
+CREATE INDEX IF NOT EXISTS idx_wallets_first_buy ON wallets(first_buy_timestamp);
+CREATE INDEX IF NOT EXISTS idx_wallets_first_sell ON wallets(first_sell_timestamp);
+
+-- Create the credentials table
+CREATE TABLE IF NOT EXISTS credentials (
+    id SERIAL PRIMARY KEY,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 -- Optional: Create a view for transaction statistics
 CREATE OR REPLACE VIEW transaction_stats AS

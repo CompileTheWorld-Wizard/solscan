@@ -374,7 +374,8 @@ app.get("/api/export-token/:wallet/:token", requireAuth, async (req, res) => {
     const tokenInfo = tokens.length > 0 ? tokens[0] : null;
     
     // Get wallet token info
-    const walletTrades = await walletTrackingService.getWalletTokens(wallet);
+    const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
+    const walletTrades = walletTradesResult.data;
     const walletTokenInfo = walletTrades.find((t: any) => t.token_address === token) || null;
     
     // Get all transactions for this wallet+token pair
@@ -410,7 +411,8 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
     const tokenInfo = tokens.length > 0 ? tokens[0] : null;
     
     // Get wallet token info
-    const walletTrades = await walletTrackingService.getWalletTokens(wallet);
+    const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
+    const walletTrades = walletTradesResult.data;
     const walletTokenInfo = walletTrades.find((t: any) => t.token_address === token) || null;
     
     // Get all transactions for this wallet+token pair
@@ -679,7 +681,8 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
     const { wallet } = req.params;
     
     // Get all wallet trades
-    const walletTrades = await walletTrackingService.getWalletTokens(wallet);
+    const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
+    const walletTrades = walletTradesResult.data;
     
     if (!walletTrades || walletTrades.length === 0) {
       return res.status(404).json({ success: false, error: 'No tokens found for this wallet' });
@@ -989,8 +992,16 @@ app.get("/api/analyze/:wallet", requireAuth, async (req, res) => {
   try {
     const { wallet } = req.params;
     
-    // Get wallet trading history from wallets table
-    const walletTrades = await walletTrackingService.getWalletTokens(wallet);
+    // Get pagination parameters
+    const page = parseInt(req.query.page as string) || 1;
+    const pageSize = parseInt(req.query.pageSize as string) || 50;
+    const limit = pageSize;
+    const offset = (page - 1) * pageSize;
+    
+    // Get wallet trading history from wallets table with pagination
+    const walletTradesResult = await walletTrackingService.getWalletTokens(wallet, limit, offset);
+    const walletTrades = walletTradesResult.data;
+    const totalTrades = walletTradesResult.total;
     
     // Get unique token addresses
     const tokenAddresses = walletTrades.map((trade: any) => trade.token_address);
@@ -1143,7 +1154,10 @@ app.get("/api/analyze/:wallet", requireAuth, async (req, res) => {
     res.json({
       wallet: wallet,
       trades: tradingData,
-      totalTrades: tradingData.length,
+      totalTrades: totalTrades,
+      page: page,
+      pageSize: pageSize,
+      totalPages: Math.ceil(totalTrades / pageSize),
       tokenInfo
     });
   } catch (error: any) {

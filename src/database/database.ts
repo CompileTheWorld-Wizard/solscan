@@ -1,6 +1,4 @@
 import { Pool, PoolClient } from 'pg';
-import * as fs from 'fs';
-import * as path from 'path';
 
 interface TransactionData {
   transaction_id: string;
@@ -96,6 +94,8 @@ class DatabaseService {
           tip_amount NUMERIC(20, 9),
           fee_amount NUMERIC(20, 9),
           market_cap NUMERIC(20, 2),
+          block_number BIGINT,
+          block_timestamp TIMESTAMP,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -103,6 +103,8 @@ class DatabaseService {
         CREATE INDEX IF NOT EXISTS idx_platform ON transactions(platform);
         CREATE INDEX IF NOT EXISTS idx_created_at ON transactions(created_at);
         CREATE INDEX IF NOT EXISTS idx_fee_payer ON transactions(fee_payer);
+        CREATE INDEX IF NOT EXISTS idx_block_number ON transactions(block_number);
+        CREATE INDEX IF NOT EXISTS idx_block_timestamp ON transactions(block_timestamp);
 
         CREATE TABLE IF NOT EXISTS tokens (
           id SERIAL PRIMARY KEY,
@@ -113,6 +115,8 @@ class DatabaseService {
           dev_buy_used_token VARCHAR(100),
           dev_buy_token_amount VARCHAR(100),
           dev_buy_token_amount_decimal INTEGER,
+          dev_buy_timestamp TIMESTAMP,
+          dev_buy_block_number BIGINT,
           token_name VARCHAR(200),
           symbol VARCHAR(50),
           image TEXT,
@@ -127,6 +131,8 @@ class DatabaseService {
         CREATE INDEX IF NOT EXISTS idx_mint_address ON tokens(mint_address);
         CREATE INDEX IF NOT EXISTS idx_creator ON tokens(creator);
         CREATE INDEX IF NOT EXISTS idx_tokens_created_at ON tokens(created_at);
+        CREATE INDEX IF NOT EXISTS idx_dev_buy_timestamp ON tokens(dev_buy_timestamp);
+        CREATE INDEX IF NOT EXISTS idx_dev_buy_block_number ON tokens(dev_buy_block_number);
 
         CREATE TABLE IF NOT EXISTS skip_tokens (
           id SERIAL PRIMARY KEY,
@@ -173,12 +179,6 @@ class DatabaseService {
       `;
 
       await this.pool.query(createTableQuery);
-
-      // Create migrations tracking table
-      await this.createMigrationsTable();
-
-      // Run all pending migrations
-      await this.runMigrations();
 
       this.isInitialized = true;
       console.log('✅ Database initialized successfully');
@@ -1071,11 +1071,21 @@ class DatabaseService {
   }
 
   /**
-   * Get wallet-token pairs by wallet address
+   * Get wallet-token pairs by wallet address with pagination
    */
-  async getWalletTokens(walletAddress: string): Promise<any[]> {
+  async getWalletTokens(walletAddress: string, limit?: number, offset?: number): Promise<{ data: any[], total: number }> {
     try {
-      const query = `
+      // Get total count
+      const countQuery = `
+        SELECT COUNT(*) as count
+        FROM wallets
+        WHERE wallet_address = $1
+      `;
+      const countResult = await this.pool.query(countQuery, [walletAddress]);
+      const total = parseInt(countResult.rows[0].count);
+
+      // Get paginated data
+      let query = `
         SELECT 
           wallet_address,
           token_address,
@@ -1097,11 +1107,18 @@ class DatabaseService {
         ORDER BY created_at DESC
       `;
 
-      const result = await this.pool.query(query, [walletAddress]);
-      return result.rows;
+      const params: any[] = [walletAddress];
+      
+      if (limit !== undefined && offset !== undefined) {
+        query += ` LIMIT $2 OFFSET $3`;
+        params.push(limit, offset);
+      }
+
+      const result = await this.pool.query(query, params);
+      return { data: result.rows, total };
     } catch (error) {
       console.error('Failed to fetch wallet tokens:', error);
-      return [];
+      return { data: [], total: 0 };
     }
   }
 
@@ -1338,158 +1355,6 @@ class DatabaseService {
     }
   }
 
-  /**
-   * Create migrations tracking table
-   */
-  private async createMigrationsTable(): Promise<void> {
-    try {
-      const query = `
-        CREATE TABLE IF NOT EXISTS schema_migrations (
-          id SERIAL PRIMARY KEY,
-          migration_name VARCHAR(255) UNIQUE NOT NULL,
-          applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        
-        CREATE INDEX IF NOT EXISTS idx_migration_name ON schema_migrations(migration_name);
-      `;
-      await this.pool.query(query);
-    } catch (error) {
-      console.error('Failed to create migrations table:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get list of applied migrations
-   */
-  private async getAppliedMigrations(): Promise<string[]> {
-    try {
-      const query = `SELECT migration_name FROM schema_migrations ORDER BY migration_name`;
-      const result = await this.pool.query(query);
-      return result.rows.map((row: any) => row.migration_name);
-    } catch (error) {
-      console.error('Failed to get applied migrations:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Get list of migration files from migrations directory
-   * Tries multiple locations to handle both development and production builds
-   */
-  private getMigrationFiles(): string[] {
-    try {
-      // Try multiple possible locations
-      const possiblePaths = [
-        path.join(__dirname, 'migrations'), // Compiled location (dist/database/migrations)
-        path.join(process.cwd(), 'src', 'database', 'migrations'), // Source location
-        path.join(process.cwd(), 'dist', 'src', 'database', 'migrations'), // Alternative compiled location
-      ];
-
-      let migrationsDir: string | null = null;
-      for (const possiblePath of possiblePaths) {
-        if (fs.existsSync(possiblePath)) {
-          migrationsDir = possiblePath;
-          break;
-        }
-      }
-
-      if (!migrationsDir) {
-        console.warn(`⚠️ Migrations directory not found. Tried: ${possiblePaths.join(', ')}`);
-        return [];
-      }
-
-      const files = fs.readdirSync(migrationsDir)
-        .filter(file => file.endsWith('.sql'))
-        .sort(); // Sort alphabetically to ensure order
-
-      return files.map(file => path.join(migrationsDir!, file));
-    } catch (error) {
-      console.error('Failed to read migration files:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Run all pending migrations
-   */
-  private async runMigrations(): Promise<void> {
-    try {
-      const appliedMigrations = await this.getAppliedMigrations();
-      const migrationFiles = this.getMigrationFiles();
-
-      if (migrationFiles.length === 0) {
-        console.log('📋 No migration files found');
-        return;
-      }
-
-      console.log(`📋 Found ${migrationFiles.length} migration file(s)`);
-
-      let appliedCount = 0;
-      let skippedCount = 0;
-
-      for (const migrationFile of migrationFiles) {
-        const fileName = path.basename(migrationFile);
-        
-        // Check if migration already applied
-        if (appliedMigrations.includes(fileName)) {
-          skippedCount++;
-          continue;
-        }
-
-        try {
-          console.log(`🔄 Applying migration: ${fileName}`);
-          
-          // Read migration file
-          const migrationSQL = fs.readFileSync(migrationFile, 'utf8');
-          
-          if (!migrationSQL.trim()) {
-            console.warn(`⚠️ Migration file is empty: ${fileName}`);
-            continue;
-          }
-
-          // Execute migration in a transaction
-          const client = await this.pool.connect();
-          try {
-            await client.query('BEGIN');
-            
-            // Execute the migration SQL
-            await client.query(migrationSQL);
-            
-            // Record migration as applied
-            await client.query(
-              'INSERT INTO schema_migrations (migration_name) VALUES ($1)',
-              [fileName]
-            );
-            
-            await client.query('COMMIT');
-            
-            console.log(`✅ Migration applied: ${fileName}`);
-            appliedCount++;
-          } catch (error: any) {
-            await client.query('ROLLBACK');
-            throw error;
-          } finally {
-            client.release();
-          }
-        } catch (error: any) {
-          console.error(`❌ Failed to apply migration ${fileName}:`, error.message);
-          // Continue with other migrations even if one fails
-          // This allows fixing issues and re-running
-        }
-      }
-
-      if (appliedCount > 0) {
-        console.log(`✅ Applied ${appliedCount} migration(s)`);
-      }
-      if (skippedCount > 0) {
-        console.log(`⏭️  Skipped ${skippedCount} already applied migration(s)`);
-      }
-    } catch (error) {
-      console.error('❌ Failed to run migrations:', error);
-      throw error;
-    }
-  }
 
   /**
    * Check if a column exists in a table

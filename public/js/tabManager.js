@@ -113,7 +113,13 @@ export async function updateTransactionWalletFilter() {
  */
 export async function updateAnalysisWalletFilter() {
     const select = document.getElementById('walletSelectTab');
+    const previousWallet = state.selectedWalletForAnalysis;
     state.selectedWalletForAnalysis = select ? select.value : null;
+    
+    // Reset pagination to page 1 when wallet changes
+    if (previousWallet !== state.selectedWalletForAnalysis) {
+        state.analysisPage = 1;
+    }
     
     // Update wallet list to reflect selection
     const { renderWalletAddressesList, getAddresses } = await import('./walletManager.js');
