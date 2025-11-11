@@ -128,6 +128,9 @@ class TransactionTracker {
             const blockNumber = currentSlot ? parseInt(currentSlot, 10) : null;
             const blockNumberValue = (blockNumber !== null && !isNaN(blockNumber)) ? blockNumber : null;
             
+            // Record current time when transaction is received (Unix epoch in seconds, UTC)
+            const blockTimestamp = Math.floor(Date.now() / 1000);
+            
             dbService.saveTransaction(sig, {
               platform: result.platform,
               type: result.type,
@@ -139,6 +142,7 @@ class TransactionTracker {
               tipAmount: result.tipAmount,
               feeAmount: result.feeAmount,
               blockNumber: blockNumberValue,
+              blockTimestamp: blockTimestamp,
             });
 
             // Extract token from buy/sell events

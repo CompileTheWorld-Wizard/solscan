@@ -508,10 +508,10 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       };
     });
     
-    // Sort transactions by timestamp ASC to find first buy after dev buy
+    // Sort transactions by block timestamp ASC (fallback to created_at if block_timestamp not available)
     transactions.sort((a: any, b: any) => {
-      const timeA = new Date(a.created_at).getTime();
-      const timeB = new Date(b.created_at).getTime();
+      const timeA = a.blockTimestamp ? new Date(a.blockTimestamp).getTime() : new Date(a.created_at).getTime();
+      const timeB = b.blockTimestamp ? new Date(b.blockTimestamp).getTime() : new Date(b.created_at).getTime();
       return timeA - timeB;
     });
     
@@ -534,19 +534,9 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
     const devBuyTimestamp = tokenInfo?.dev_buy_timestamp ? new Date(tokenInfo.dev_buy_timestamp).getTime() : null;
     const devBuyBlockNumber = tokenInfo?.dev_buy_block_number || null;
     
-    // Find first buy transaction (after dev buy if dev buy exists)
+    // Find first buy transaction for this wallet-token pair (sorted by timestamp ASC)
     const buys = transactions.filter((tx: any) => tx.type?.toLowerCase() === 'buy' && tx.mint_from === SOL_MINT);
-    let firstBuy = null;
-    if (devBuyTimestamp && devBuyBlockNumber) {
-      // Find first buy after dev buy
-      firstBuy = buys.find((tx: any) => {
-        const txTime = new Date(tx.created_at).getTime();
-        return txTime > devBuyTimestamp;
-      });
-    } else if (buys.length > 0) {
-      // If no dev buy info, use first buy
-      firstBuy = buys[0];
-    }
+    const firstBuy = buys.length > 0 ? buys[0] : null; // First buy is already first in sorted array
     
     // Get token decimals
     const tokenDecimals = tokenInfo?.dev_buy_token_amount_decimal !== null && tokenInfo?.dev_buy_token_amount_decimal !== undefined
@@ -581,11 +571,12 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       const totalGasAndTips = feeAmount + tipAmount;
       rowData[7] = totalGasAndTips; // Wallet Gas & Fees Amount
       
-      // Calculate position after dev (seconds)
+      // Calculate position after dev (seconds) - only if buy happens after dev buy
       if (devBuyTimestamp) {
         const buyTime = new Date(firstBuy.created_at).getTime();
         const secondsDiff = Math.floor((buyTime - devBuyTimestamp) / 1000);
-        rowData[8] = secondsDiff; // Wallet Buy Position After Dev
+        // Only show if buy happened after dev buy (positive value)
+        rowData[8] = secondsDiff >= 0 ? secondsDiff : ''; // Wallet Buy Position After Dev
       }
       
       // Block number
@@ -614,12 +605,12 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       rowData[15] = formatMarketCap(firstBuy.marketCap); // Wallet Buy Market Cap
     }
     
-    // Get all sells (sorted by timestamp ASC)
+    // Get all sells (sorted by block timestamp ASC, fallback to created_at)
     const sortedSells = transactions
       .filter((tx: any) => tx.type?.toLowerCase() === 'sell')
       .sort((a: any, b: any) => {
-        const timeA = new Date(a.created_at).getTime();
-        const timeB = new Date(b.created_at).getTime();
+        const timeA = a.blockTimestamp ? new Date(a.blockTimestamp).getTime() : new Date(a.created_at).getTime();
+        const timeB = b.blockTimestamp ? new Date(b.blockTimestamp).getTime() : new Date(b.created_at).getTime();
         return timeA - timeB;
       });
     
@@ -635,7 +626,7 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       const sell = sortedSells[i];
       rowData.push(
         formatOrdinal(i + 1), // Wallet Sell Number (1st, 2nd, 3rd, etc.)
-        formatTimestamp(sell.created_at), // Wallet Sell Timestamp
+        formatTimestamp(sell.blockTimestamp || sell.created_at), // Wallet Sell Timestamp (use block_timestamp if available)
         sell.transaction_id || '', // Transaction Signature
         (parseFloat(sell.out_amount) || 0) / 1000000000, // Wallet Sell Amount in SOL
         (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals), // Wallet Sell Amount in Tokens
@@ -807,13 +798,13 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
       const token = trade.token_address;
       const tokenInfo = tokenInfoMap.get(token) || null;
       
-      // Get all transactions for this wallet+token pair (sorted by created_at ASC to find first buy)
+      // Get all transactions for this wallet+token pair (sorted by block_timestamp ASC)
       const transactions = await dbService.getTransactionsByWalletToken(wallet, token);
       
-      // Sort transactions by timestamp ASC to find first buy after dev buy
+      // Sort transactions by block timestamp ASC (fallback to created_at if block_timestamp not available)
       transactions.sort((a: any, b: any) => {
-        const timeA = new Date(a.created_at).getTime();
-        const timeB = new Date(b.created_at).getTime();
+        const timeA = a.blockTimestamp ? new Date(a.blockTimestamp).getTime() : new Date(a.created_at).getTime();
+        const timeB = b.blockTimestamp ? new Date(b.blockTimestamp).getTime() : new Date(b.created_at).getTime();
         return timeA - timeB;
       });
       
@@ -836,19 +827,9 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
       const devBuyTimestamp = tokenInfo?.dev_buy_timestamp ? new Date(tokenInfo.dev_buy_timestamp).getTime() : null;
       const devBuyBlockNumber = tokenInfo?.dev_buy_block_number || null;
       
-      // Find first buy transaction (after dev buy if dev buy exists)
+      // Find first buy transaction for this wallet-token pair (sorted by timestamp ASC)
       const buys = transactions.filter((tx: any) => tx.type?.toLowerCase() === 'buy' && tx.mint_from === SOL_MINT);
-      let firstBuy = null;
-      if (devBuyTimestamp && devBuyBlockNumber) {
-        // Find first buy after dev buy
-        firstBuy = buys.find((tx: any) => {
-          const txTime = new Date(tx.created_at).getTime();
-          return txTime > devBuyTimestamp;
-        });
-      } else if (buys.length > 0) {
-        // If no dev buy info, use first buy
-        firstBuy = buys[0];
-      }
+      const firstBuy = buys.length > 0 ? buys[0] : null; // First buy is already first in sorted array
       
       // Get token decimals
       const tokenDecimals = tokenInfo?.dev_buy_token_amount_decimal !== null && tokenInfo?.dev_buy_token_amount_decimal !== undefined
@@ -883,23 +864,26 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
         const totalGasAndTips = feeAmount + tipAmount;
         rowData[7] = totalGasAndTips; // Wallet Gas & Fees Amount
         
-        // Calculate position after dev (seconds)
-        if (devBuyTimestamp) {
-          const buyTime = new Date(firstBuy.created_at).getTime();
-          const secondsDiff = Math.floor((buyTime - devBuyTimestamp) / 1000);
-          rowData[8] = secondsDiff; // Wallet Buy Position After Dev
-        }
-        
-        // Block number
-        rowData[9] = firstBuy.blockNumber || ''; // Wallet Buy Block #
-        
-        // Block number after dev
-        if (devBuyBlockNumber && firstBuy.blockNumber) {
-          rowData[10] = firstBuy.blockNumber - devBuyBlockNumber; // Wallet Buy Block # After Dev
-        }
-        
-        // Timestamp
-        rowData[11] = formatTimestamp(firstBuy.created_at); // Wallet Buy Timestamp
+      // Calculate position after dev (seconds) - only if buy happens after dev buy
+      // Use block_timestamp if available, otherwise fallback to created_at
+      const buyTimestamp = firstBuy.blockTimestamp || firstBuy.created_at;
+      if (devBuyTimestamp && buyTimestamp) {
+        const buyTime = new Date(buyTimestamp).getTime();
+        const secondsDiff = Math.floor((buyTime - devBuyTimestamp) / 1000);
+        // Only show if buy happened after dev buy (positive value)
+        rowData[8] = secondsDiff >= 0 ? secondsDiff : ''; // Wallet Buy Position After Dev
+      }
+      
+      // Block number
+      rowData[9] = firstBuy.blockNumber || ''; // Wallet Buy Block #
+      
+      // Block number after dev
+      if (devBuyBlockNumber && firstBuy.blockNumber) {
+        rowData[10] = firstBuy.blockNumber - devBuyBlockNumber; // Wallet Buy Block # After Dev
+      }
+      
+      // Timestamp (use block_timestamp if available)
+      rowData[11] = formatTimestamp(buyTimestamp); // Wallet Buy Timestamp
         
         // Transaction signature
         rowData[12] = firstBuy.transaction_id || ''; // Transaction Signature
@@ -938,7 +922,7 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
           const sell = sells[i];
           rowData.push(
             formatOrdinal(i + 1), // Wallet Sell Number (1st, 2nd, 3rd, etc.)
-            formatTimestamp(sell.created_at), // Wallet Sell Timestamp
+            formatTimestamp(sell.blockTimestamp || sell.created_at), // Wallet Sell Timestamp (use block_timestamp if available)
             sell.transaction_id || '', // Transaction Signature
             (parseFloat(sell.out_amount) || 0) / 1000000000, // Wallet Sell Amount in SOL
             (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals), // Wallet Sell Amount in Tokens

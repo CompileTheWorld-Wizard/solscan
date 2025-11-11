@@ -14,6 +14,7 @@ interface TransactionData {
   tipAmount?: number;
   feeAmount?: number;
   blockNumber?: number | null;
+  blockTimestamp?: number | null;
   mint_from_name?: string | null;
   mint_from_image?: string | null;
   mint_from_symbol?: string | null;
@@ -198,6 +199,11 @@ class DatabaseService {
     // Use setImmediate to ensure this is truly async and non-blocking
     setImmediate(async () => {
       try {
+        // Convert block timestamp from Unix timestamp (seconds) to PostgreSQL TIMESTAMP
+        const blockTimestamp = transactionData.blockTimestamp 
+          ? new Date(transactionData.blockTimestamp * 1000).toISOString() 
+          : null;
+
         const query = `
           INSERT INTO transactions (
             transaction_id,
@@ -210,8 +216,9 @@ class DatabaseService {
             fee_payer,
             tip_amount,
             fee_amount,
-            block_number
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            block_number,
+            block_timestamp
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           ON CONFLICT (transaction_id) DO NOTHING
         `;
 
@@ -227,6 +234,7 @@ class DatabaseService {
           transactionData.tipAmount ?? null,
           transactionData.feeAmount ?? null,
           transactionData.blockNumber ?? null,
+          blockTimestamp,
         ];
 
         await this.pool.query(query, values);
@@ -478,6 +486,7 @@ class DatabaseService {
           t.fee_amount as "feeAmount",
           t.market_cap as "marketCap",
           t.block_number as "blockNumber",
+          t.block_timestamp as "blockTimestamp",
           t.created_at
         FROM transactions t
         WHERE t.fee_payer = $1
@@ -485,7 +494,7 @@ class DatabaseService {
             (t.mint_from = $2 AND t.mint_to = $3) OR
             (t.mint_from = $3 AND t.mint_to = $2)
           )
-        ORDER BY t.created_at DESC
+        ORDER BY COALESCE(t.block_timestamp, t.created_at) ASC
       `;
 
       const result = await this.pool.query(query, [walletAddress, tokenAddress, SOL_MINT]);
