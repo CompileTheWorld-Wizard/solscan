@@ -49,6 +49,8 @@ interface TokenCreatorInfo {
   devBuyUsedToken: string;
   devBuyTokenAmount: string;
   devBuyTokenAmountDecimal: number;
+  devBuyTimestamp?: number | null;
+  devBuyBlockNumber?: number | null;
 }
 
 export class TokenService {
@@ -226,6 +228,17 @@ export class TokenService {
     console.log(`  🎉 Creator: ${swapper}`);
     console.log(`  💰 Dev Buy: ${humanAmountIn} for ${humanAmountOut} tokens`);
     console.log(`  📊 Raw amounts: ${amountIn} (decimal: ${decimalIn}) -> ${amountOut} (decimal: ${decimalOut})`);
+    
+    // Extract timestamp and block number from the activity
+    const devBuyTimestamp = firstSwap.block_time ? firstSwap.block_time * 1000 : null; // Convert to milliseconds
+    const devBuyBlockNumber = firstSwap.block_id || null;
+    
+    if (devBuyTimestamp) {
+      console.log(`  📅 Dev Buy Timestamp: ${new Date(devBuyTimestamp).toISOString()}`);
+    }
+    if (devBuyBlockNumber) {
+      console.log(`  🔢 Dev Buy Block Number: ${devBuyBlockNumber}`);
+    }
 
     return {
       creator: swapper,
@@ -234,6 +247,8 @@ export class TokenService {
       devBuyUsedToken: tokenIn,
       devBuyTokenAmount: amountOut.toString(),
       devBuyTokenAmountDecimal: decimalOut,
+      devBuyTimestamp: devBuyTimestamp,
+      devBuyBlockNumber: devBuyBlockNumber,
     };
   }
 

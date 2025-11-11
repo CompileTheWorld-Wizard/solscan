@@ -241,6 +241,8 @@ export class TokenQueueService {
         dev_buy_used_token: creatorInfo?.devBuyUsedToken || null,
         dev_buy_token_amount: creatorInfo?.devBuyTokenAmount || null,
         dev_buy_token_amount_decimal: creatorInfo?.devBuyTokenAmountDecimal || null,
+        dev_buy_timestamp: creatorInfo?.devBuyTimestamp || null,
+        dev_buy_block_number: creatorInfo?.devBuyBlockNumber || null,
         twitter: tokenMetadata?.twitter || null,
         website: tokenMetadata?.website || null,
         discord: tokenMetadata?.discord || null,

@@ -13,6 +13,7 @@ interface TransactionData {
   feePayer: string;
   tipAmount?: number;
   feeAmount?: number;
+  blockNumber?: number | null;
   mint_from_name?: string | null;
   mint_from_image?: string | null;
   mint_from_symbol?: string | null;
@@ -29,6 +30,8 @@ interface TokenData {
   dev_buy_used_token?: string;
   dev_buy_token_amount?: string;
   dev_buy_token_amount_decimal?: number;
+  dev_buy_timestamp?: number | null;
+  dev_buy_block_number?: number | null;
   token_name?: string;
   symbol?: string;
   image?: string;
@@ -206,8 +209,9 @@ class DatabaseService {
             out_amount,
             fee_payer,
             tip_amount,
-            fee_amount
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            fee_amount,
+            block_number
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           ON CONFLICT (transaction_id) DO NOTHING
         `;
 
@@ -222,6 +226,7 @@ class DatabaseService {
           transactionData.feePayer,
           transactionData.tipAmount ?? null,
           transactionData.feeAmount ?? null,
+          transactionData.blockNumber ?? null,
         ];
 
         await this.pool.query(query, values);
@@ -319,6 +324,7 @@ class DatabaseService {
           t.tip_amount as "tipAmount",
           t.fee_amount as "feeAmount",
           t.market_cap as "marketCap",
+          t.block_number as "blockNumber",
           t.created_at,
           token_from.token_name as "mint_from_name",
           token_from.image as "mint_from_image",
@@ -471,6 +477,7 @@ class DatabaseService {
           t.tip_amount as "tipAmount",
           t.fee_amount as "feeAmount",
           t.market_cap as "marketCap",
+          t.block_number as "blockNumber",
           t.created_at
         FROM transactions t
         WHERE t.fee_payer = $1
@@ -509,10 +516,17 @@ class DatabaseService {
         'dev_buy_used_token',
         'dev_buy_token_amount',
         'dev_buy_token_amount_decimal',
+        'dev_buy_timestamp',
+        'dev_buy_block_number',
         'token_name',
         'symbol',
         'image',
       ];
+
+      // Convert timestamp from milliseconds to PostgreSQL TIMESTAMP
+      const devBuyTimestamp = tokenData.dev_buy_timestamp 
+        ? new Date(tokenData.dev_buy_timestamp).toISOString() 
+        : null;
 
       const values: any[] = [
         tokenData.mint_address,
@@ -522,6 +536,8 @@ class DatabaseService {
         tokenData.dev_buy_used_token || null,
         tokenData.dev_buy_token_amount || null,
         tokenData.dev_buy_token_amount_decimal || null,
+        devBuyTimestamp,
+        tokenData.dev_buy_block_number || null,
         tokenData.token_name || null,
         tokenData.symbol || null,
         tokenData.image || null,
@@ -564,6 +580,8 @@ class DatabaseService {
         'dev_buy_used_token = COALESCE(EXCLUDED.dev_buy_used_token, tokens.dev_buy_used_token)',
         'dev_buy_token_amount = COALESCE(EXCLUDED.dev_buy_token_amount, tokens.dev_buy_token_amount)',
         'dev_buy_token_amount_decimal = COALESCE(EXCLUDED.dev_buy_token_amount_decimal, tokens.dev_buy_token_amount_decimal)',
+        'dev_buy_timestamp = COALESCE(EXCLUDED.dev_buy_timestamp, tokens.dev_buy_timestamp)',
+        'dev_buy_block_number = COALESCE(EXCLUDED.dev_buy_block_number, tokens.dev_buy_block_number)',
         'token_name = COALESCE(EXCLUDED.token_name, tokens.token_name)',
         'symbol = COALESCE(EXCLUDED.symbol, tokens.symbol)',
         'image = COALESCE(EXCLUDED.image, tokens.image)',
@@ -615,6 +633,8 @@ class DatabaseService {
           dev_buy_used_token,
           dev_buy_token_amount,
           dev_buy_token_amount_decimal,
+          dev_buy_timestamp,
+          dev_buy_block_number,
           token_name,
           symbol,
           image,
@@ -659,6 +679,8 @@ class DatabaseService {
           dev_buy_used_token,
           dev_buy_token_amount,
           dev_buy_token_amount_decimal,
+          dev_buy_timestamp,
+          dev_buy_block_number,
           token_name,
           symbol,
           image,

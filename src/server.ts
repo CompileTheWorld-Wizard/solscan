@@ -399,6 +399,7 @@ app.get("/api/export-token/:wallet/:token", requireAuth, async (req, res) => {
 
 /**
  * GET /api/export-token-excel/:wallet/:token - Generate Excel file with styling
+ * New format: One row per token with all information in that row
  */
 app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) => {
   try {
@@ -414,9 +415,6 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
     
     // Get all transactions for this wallet+token pair
     const transactions = await dbService.getTransactionsByWalletToken(wallet, token);
-    
-    // Count total sells
-    const totalSells = transactions.filter(tx => tx.type?.toLowerCase() === 'sell').length;
     
     // Create workbook
     const workbook = new ExcelJS.Workbook();
@@ -438,77 +436,83 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
     };
     
-    // Helper function to format token amounts (without trillion option)
-    const formatTokenAmount = (amount: number | string): string => {
-      const num = parseFloat(String(amount));
+    // Helper function to format market cap with K and M
+    const formatMarketCap = (marketCap: number | string | null | undefined): string => {
+      if (!marketCap) return '';
+      const num = parseFloat(String(marketCap));
       if (!num || isNaN(num)) return '';
       
-      if (num >= 1e9) {
-        return `${(num / 1e9).toFixed(0)}B`;
-      } else if (num >= 1e6) {
-        return `${(num / 1e6).toFixed(0)}M`;
-      } else if (num >= 1e3) {
-        return `${(num / 1e3).toFixed(0)}K`;
+      if (num >= 1000000) {
+        return `${(num / 1000000).toFixed(2)}M`;
+      } else if (num >= 1000) {
+        return `${(num / 1000).toFixed(2)}K`;
       }
-      return num.toString();
+      return num.toFixed(2);
     };
     
-    // Helper function to format market cap with 3 decimals
-    const formatMarketCap = (amount: number | string | null | undefined): string => {
-      if (!amount) return '';
-      const num = parseFloat(String(amount));
-      if (!num || isNaN(num)) return '';
-      
-      if (num >= 1e12) {
-        return `$${(num / 1e12).toFixed(3)}T`;
-      } else if (num >= 1e9) {
-        return `$${(num / 1e9).toFixed(3)}B`;
-      } else if (num >= 1e6) {
-        return `$${(num / 1e6).toFixed(3)}M`;
-      } else if (num >= 1e3) {
-        return `$${(num / 1e3).toFixed(3)}K`;
-      }
-      return `$${num.toFixed(3)}`;
-    };
+    const SOL_MINT = 'So11111111111111111111111111111111111111112';
     
-    // Define dark green color
-    const darkGreen = { argb: 'FF006400' };
-    const white = { argb: 'FFFFFFFF' };
-    const black = { argb: 'FF000000' };
+    // Count sells for this token
+    const sells = transactions.filter((tx: any) => tx.type?.toLowerCase() === 'sell');
+    const numSells = sells.length;
     
-    // Row 1: Token info headers
-    const tokenInfoHeaders = [
+    // Build header row
+    const baseHeaders = [
       'Token Name',
-      'Symbol',
+      'Token Symbol',
       'Token Address',
       'Creator Address',
-      'Dev Buy Amount SOL',
-      'Dev Buy Amount Tokens',
       'Number of Socials',
-      'Total Sells'
+      'Dev Buy Amount in SOL',
+      'Dev Buy Amount in Tokens',
+      'Wallet Gas & Fees Amount',
+      'Wallet Buy Position After Dev',
+      'Wallet Buy Block #',
+      'Wallet Buy Block # After Dev',
+      'Wallet Buy Timestamp',
+      'Transaction Signature',
+      'Wallet Buy Amount in SOL',
+      'Wallet Buy Amount in Tokens',
+      'Wallet Buy Market Cap'
     ];
     
-    const headerRow1 = worksheet.addRow(tokenInfoHeaders);
-    headerRow1.eachCell((cell) => {
+    // Add sell columns for each sell
+    const sellHeaders: string[] = [];
+    for (let i = 1; i <= numSells; i++) {
+      sellHeaders.push(
+        `Wallet Sell Number`,
+        `Wallet Sell Timestamp`,
+        `Transaction Signature`,
+        `Wallet Sell Amount in SOL`,
+        `Wallet Sell Amount in Tokens`,
+        `Wallet Sell Market Cap`
+      );
+    }
+    
+    const headers = [...baseHeaders, ...sellHeaders];
+    const headerRow = worksheet.addRow(headers);
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: darkGreen
+        fgColor: { argb: 'FF006400' }
       };
-      cell.font = {
-        color: white,
-        bold: true
-      };
-      cell.alignment = {
-        horizontal: 'center',
-        vertical: 'middle'
-      };
+      cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
       cell.border = {
-        top: { style: 'thin', color: black },
-        bottom: { style: 'thin', color: black },
-        left: { style: 'thin', color: black },
-        right: { style: 'thin', color: black }
+        top: { style: 'thin', color: { argb: 'FF000000' } },
+        bottom: { style: 'thin', color: { argb: 'FF000000' } },
+        left: { style: 'thin', color: { argb: 'FF000000' } },
+        right: { style: 'thin', color: { argb: 'FF000000' } }
       };
+    });
+    
+    // Sort transactions by timestamp ASC to find first buy after dev buy
+    transactions.sort((a: any, b: any) => {
+      const timeA = new Date(a.created_at).getTime();
+      const timeB = new Date(b.created_at).getTime();
+      return timeA - timeB;
     });
     
     // Calculate social links count
@@ -517,140 +521,132 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
     if (tokenInfo?.website) socialCount++;
     if (tokenInfo?.discord) socialCount++;
     if (tokenInfo?.telegram) socialCount++;
-
-    // Row 2: Token info data
-    const tokenInfoRow = [
+    
+    // Dev buy amounts
+    const devBuyAmountSOL = tokenInfo?.dev_buy_amount && tokenInfo?.dev_buy_amount_decimal !== null
+      ? parseFloat(tokenInfo.dev_buy_amount) / Math.pow(10, tokenInfo.dev_buy_amount_decimal)
+      : null;
+    const devBuyAmountTokens = tokenInfo?.dev_buy_token_amount && tokenInfo?.dev_buy_token_amount_decimal !== null
+      ? parseFloat(tokenInfo.dev_buy_token_amount) / Math.pow(10, tokenInfo.dev_buy_token_amount_decimal)
+      : null;
+    
+    // Get dev buy timestamp and block number
+    const devBuyTimestamp = tokenInfo?.dev_buy_timestamp ? new Date(tokenInfo.dev_buy_timestamp).getTime() : null;
+    const devBuyBlockNumber = tokenInfo?.dev_buy_block_number || null;
+    
+    // Find first buy transaction (after dev buy if dev buy exists)
+    const buys = transactions.filter((tx: any) => tx.type?.toLowerCase() === 'buy' && tx.mint_from === SOL_MINT);
+    let firstBuy = null;
+    if (devBuyTimestamp && devBuyBlockNumber) {
+      // Find first buy after dev buy
+      firstBuy = buys.find((tx: any) => {
+        const txTime = new Date(tx.created_at).getTime();
+        return txTime > devBuyTimestamp;
+      });
+    } else if (buys.length > 0) {
+      // If no dev buy info, use first buy
+      firstBuy = buys[0];
+    }
+    
+    // Get token decimals
+    const tokenDecimals = tokenInfo?.dev_buy_token_amount_decimal !== null && tokenInfo?.dev_buy_token_amount_decimal !== undefined
+      ? tokenInfo.dev_buy_token_amount_decimal
+      : 9;
+    
+    // Build base row data
+    const rowData: any[] = [
       tokenInfo?.token_name || 'Unknown',
       tokenInfo?.symbol || '???',
       token,
       tokenInfo?.creator || '',
-      tokenInfo?.dev_buy_amount && tokenInfo?.dev_buy_amount_decimal !== null
-        ? parseFloat(tokenInfo.dev_buy_amount) / Math.pow(10, tokenInfo.dev_buy_amount_decimal)
-        : '',
-      tokenInfo?.dev_buy_token_amount && tokenInfo?.dev_buy_token_amount_decimal !== null
-        ? parseFloat(tokenInfo.dev_buy_token_amount) / Math.pow(10, tokenInfo.dev_buy_token_amount_decimal)
-        : '',
-      socialCount, // Number of Socials
-      totalSells || 0 // Total Sells
+      socialCount,
+      devBuyAmountSOL !== null ? devBuyAmountSOL : '',
+      devBuyAmountTokens !== null ? devBuyAmountTokens : '',
+      '', // Wallet Gas & Fees Amount (will fill if firstBuy exists)
+      '', // Wallet Buy Position After Dev
+      '', // Wallet Buy Block #
+      '', // Wallet Buy Block # After Dev
+      '', // Wallet Buy Timestamp
+      '', // Transaction Signature
+      '', // Wallet Buy Amount in SOL
+      '', // Wallet Buy Amount in Tokens
+      ''  // Wallet Buy Market Cap
     ];
     
-    const dataRow1 = worksheet.addRow(tokenInfoRow);
-    dataRow1.eachCell((cell) => {
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: darkGreen
-      };
-      cell.font = {
-        color: white
-      };
-      cell.alignment = {
-        horizontal: 'center',
-        vertical: 'middle'
-      };
-      cell.border = {
-        top: { style: 'thin', color: black },
-        bottom: { style: 'thin', color: black },
-        left: { style: 'thin', color: black },
-        right: { style: 'thin', color: black }
-      };
-    });
-    
-    // Row 3: Transaction headers
-    const transactionHeaders = [
-      '', // Empty column
-      'Event',
-      'Market Cap',
-      'Solscan transaction signature',
-      'Timestamp',
-      'Time from last transaction',
-      'Transaction size in SOL',
-      'Transaction Size in Tokens',
-      'Transaction Gas & Tips'
-    ];
-    
-    const headerRow2 = worksheet.addRow(transactionHeaders);
-    headerRow2.eachCell((cell) => {
-      cell.font = {
-        bold: true
-      };
-      cell.alignment = {
-        horizontal: 'center',
-        vertical: 'middle'
-      };
-    });
-    
-    // Transaction rows
-    const SOL_MINT = 'So11111111111111111111111111111111111111112';
-    
-    transactions.forEach((tx: any, index: number) => {
-      const event = tx.type?.charAt(0).toUpperCase() + tx.type?.slice(1).toLowerCase() || 'Unknown';
-      const marketCap = formatMarketCap(tx.marketCap);
-      const signature = tx.transaction_id || '';
-      const timestamp = formatTimestamp(tx.created_at);
+    // Fill first buy data if exists
+    if (firstBuy) {
+      // Gas & Fees for first buy only
+      const tipAmount = (firstBuy.tipAmount != null ? parseFloat(firstBuy.tipAmount) : 0) || 0;
+      const feeAmount = (firstBuy.feeAmount != null ? parseFloat(firstBuy.feeAmount) : 0) || 0;
+      const totalGasAndTips = feeAmount + tipAmount;
+      rowData[7] = totalGasAndTips; // Wallet Gas & Fees Amount
       
-      // Calculate time from last transaction (in seconds/milliseconds)
-      // Transactions are sorted DESC (newest first)
-      // For each transaction, calculate the difference to the next (older) transaction
-      // The oldest transaction (last in array) will have nothing filled
-      let timeFromLast = '';
-      if (index < transactions.length - 1) {
-        // Next transaction (index+1 is older when sorted DESC)
-        const nextTx = transactions[index + 1];
-        const currentTime = new Date(tx.created_at); // Current transaction (newer)
-        const nextTime = new Date(nextTx.created_at); // Next transaction (older)
-        // Calculate: time FROM current (newer) TO next (older) = currentTime - nextTime
-        const diffMs = currentTime.getTime() - nextTime.getTime();
-        
-        if (diffMs < 1000) {
-          // Show milliseconds if below 1 second
-          timeFromLast = `${diffMs}ms`;
-        } else {
-          // Show seconds
-          const diffSeconds = (diffMs / 1000).toFixed(3);
-          timeFromLast = `${diffSeconds}s`;
-        }
+      // Calculate position after dev (seconds)
+      if (devBuyTimestamp) {
+        const buyTime = new Date(firstBuy.created_at).getTime();
+        const secondsDiff = Math.floor((buyTime - devBuyTimestamp) / 1000);
+        rowData[8] = secondsDiff; // Wallet Buy Position After Dev
       }
       
-      // Transaction size in SOL
-      const isBuy = tx.mint_from === SOL_MINT;
-      const solAmount = isBuy ? (parseFloat(tx.in_amount) || 0) : (parseFloat(tx.out_amount) || 0);
-      const transactionSizeSOL = `${(solAmount / 1000000000).toFixed(3)} SOL`;
+      // Block number
+      rowData[9] = firstBuy.blockNumber || ''; // Wallet Buy Block #
       
-      // Transaction size in Tokens (consider decimals)
-      const tokenAmountRaw = isBuy ? (parseFloat(tx.out_amount) || 0) : (parseFloat(tx.in_amount) || 0);
-      // Use dev_buy_token_amount_decimal from tokens table for token decimals
-      const tokenDecimals = tokenInfo?.dev_buy_token_amount_decimal !== null && tokenInfo?.dev_buy_token_amount_decimal !== undefined
-        ? tokenInfo.dev_buy_token_amount_decimal
-        : 9; // Default to 9 if not available
-      const tokenAmount = tokenAmountRaw / Math.pow(10, tokenDecimals);
-      const transactionSizeTokens = formatTokenAmount(tokenAmount);
+      // Block number after dev
+      if (devBuyBlockNumber && firstBuy.blockNumber) {
+        rowData[10] = firstBuy.blockNumber - devBuyBlockNumber; // Wallet Buy Block # After Dev
+      }
       
-      // Transaction Gas & Tips
-      const tipAmount = (tx.tipAmount != null ? parseFloat(tx.tipAmount) : 0) || 0;
-      const feeAmount = (tx.feeAmount != null ? parseFloat(tx.feeAmount) : 0) || 0;
-      const totalGasAndTips = feeAmount + tipAmount;
-      const gasAndTips = `${totalGasAndTips.toFixed(9)} SOL`;
+      // Timestamp
+      rowData[11] = formatTimestamp(firstBuy.created_at); // Wallet Buy Timestamp
       
-      const row = worksheet.addRow([
-        '', // Empty column
-        event,
-        marketCap,
-        signature,
-        timestamp,
-        timeFromLast,
-        transactionSizeSOL,
-        transactionSizeTokens,
-        gasAndTips
-      ]);
+      // Transaction signature
+      rowData[12] = firstBuy.transaction_id || ''; // Transaction Signature
       
-      // Center align all cells in transaction rows
-      row.eachCell((cell) => {
-        cell.alignment = {
-          horizontal: 'center',
-          vertical: 'middle'
-        };
+      // Buy amount in SOL
+      const buySolAmount = parseFloat(firstBuy.in_amount) || 0;
+      rowData[13] = buySolAmount / 1000000000; // Wallet Buy Amount in SOL
+      
+      // Buy amount in Tokens
+      const buyTokenAmountRaw = parseFloat(firstBuy.out_amount) || 0;
+      rowData[14] = buyTokenAmountRaw / Math.pow(10, tokenDecimals); // Wallet Buy Amount in Tokens
+      
+      // Market cap
+      rowData[15] = formatMarketCap(firstBuy.marketCap); // Wallet Buy Market Cap
+    }
+    
+    // Get all sells (sorted by timestamp ASC)
+    const sortedSells = transactions
+      .filter((tx: any) => tx.type?.toLowerCase() === 'sell')
+      .sort((a: any, b: any) => {
+        const timeA = new Date(a.created_at).getTime();
+        const timeB = new Date(b.created_at).getTime();
+        return timeA - timeB;
       });
+    
+    // Helper function to format ordinal numbers (1st, 2nd, 3rd, etc.)
+    const formatOrdinal = (n: number): string => {
+      const s = ['th', 'st', 'nd', 'rd'];
+      const v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    };
+    
+    // Add sell data (repeated columns)
+    for (let i = 0; i < numSells; i++) {
+      const sell = sortedSells[i];
+      rowData.push(
+        formatOrdinal(i + 1), // Wallet Sell Number (1st, 2nd, 3rd, etc.)
+        formatTimestamp(sell.created_at), // Wallet Sell Timestamp
+        sell.transaction_id || '', // Transaction Signature
+        (parseFloat(sell.out_amount) || 0) / 1000000000, // Wallet Sell Amount in SOL
+        (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals), // Wallet Sell Amount in Tokens
+        formatMarketCap(sell.marketCap) // Wallet Sell Market Cap
+      );
+    }
+    
+    // Add row to worksheet
+    const row = worksheet.addRow(rowData);
+    row.eachCell((cell) => {
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
     });
     
     // Auto-size columns
@@ -685,6 +681,7 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
 
 /**
  * GET /api/export-all-tokens-excel/:wallet - Generate Excel file with all tokens data
+ * New format: One row per token with all information in that row
  */
 app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) => {
   try {
@@ -727,139 +724,98 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
       return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
     };
     
-    // Helper function to format token amounts (without trillion option)
-    const formatTokenAmount = (amount: number | string): string => {
-      const num = parseFloat(String(amount));
+    // Helper function to format market cap with K and M
+    const formatMarketCap = (marketCap: number | string | null | undefined): string => {
+      if (!marketCap) return '';
+      const num = parseFloat(String(marketCap));
       if (!num || isNaN(num)) return '';
       
-      if (num >= 1e9) {
-        return `${(num / 1e9).toFixed(0)}B`;
-      } else if (num >= 1e6) {
-        return `${(num / 1e6).toFixed(0)}M`;
-      } else if (num >= 1e3) {
-        return `${(num / 1e3).toFixed(0)}K`;
+      if (num >= 1000000) {
+        return `${(num / 1000000).toFixed(2)}M`;
+      } else if (num >= 1000) {
+        return `${(num / 1000).toFixed(2)}K`;
       }
-      return num.toString();
+      return num.toFixed(2);
     };
-    
-    // Helper function to format market cap with 3 decimals
-    const formatMarketCap = (amount: number | string | null | undefined): string => {
-      if (!amount) return '';
-      const num = parseFloat(String(amount));
-      if (!num || isNaN(num)) return '';
-      
-      if (num >= 1e12) {
-        return `$${(num / 1e12).toFixed(3)}T`;
-      } else if (num >= 1e9) {
-        return `$${(num / 1e9).toFixed(3)}B`;
-      } else if (num >= 1e6) {
-        return `$${(num / 1e6).toFixed(3)}M`;
-      } else if (num >= 1e3) {
-        return `$${(num / 1e3).toFixed(3)}K`;
-      }
-      return `$${num.toFixed(3)}`;
-    };
-    
-    // Define colors
-    const darkGreen = { argb: 'FF006400' };
-    const white = { argb: 'FFFFFFFF' };
-    const black = { argb: 'FF000000' };
-    
-    // Token info headers
-    const tokenInfoHeaders = [
-      'Token Name',
-      'Symbol',
-      'Token Address',
-      'Creator Address',
-      'Dev Buy Amount SOL',
-      'Dev Buy Amount Tokens',
-      'Number of Socials',
-      'Total Sells'
-    ];
-    
-    // Transaction headers
-    const transactionHeaders = [
-      '', // Empty column
-      'Event',
-      'Market Cap',
-      'Solscan transaction signature',
-      'Timestamp',
-      'Time from last transaction',
-      'Transaction size in SOL',
-      'Transaction Size in Tokens',
-      'Transaction Gas & Tips'
-    ];
     
     const SOL_MINT = 'So11111111111111111111111111111111111111112';
-    let currentRow = 1;
     
-    // Process each token
-    for (let tokenIndex = 0; tokenIndex < walletTrades.length; tokenIndex++) {
-      const trade = walletTrades[tokenIndex];
+    // Find maximum number of sells across all tokens to determine column count
+    let maxSells = 0;
+    for (const trade of walletTrades) {
+      const transactions = await dbService.getTransactionsByWalletToken(wallet, trade.token_address);
+      const sells = transactions.filter((tx: any) => tx.type?.toLowerCase() === 'sell');
+      if (sells.length > maxSells) {
+        maxSells = sells.length;
+      }
+    }
+    
+    // Build header row
+    const baseHeaders = [
+      'Token Name',
+      'Token Symbol',
+      'Token Address',
+      'Creator Address',
+      'Number of Socials',
+      'Dev Buy Amount in SOL',
+      'Dev Buy Amount in Tokens',
+      'Wallet Gas & Fees Amount',
+      'Wallet Buy Position After Dev',
+      'Wallet Buy Block #',
+      'Wallet Buy Block # After Dev',
+      'Wallet Buy Timestamp',
+      'Transaction Signature',
+      'Wallet Buy Amount in SOL',
+      'Wallet Buy Amount in Tokens',
+      'Wallet Buy Market Cap'
+    ];
+    
+    // Add sell columns for each sell (up to maxSells)
+    const sellHeaders: string[] = [];
+    for (let i = 1; i <= maxSells; i++) {
+      sellHeaders.push(
+        `Wallet Sell Number`,
+        `Wallet Sell Timestamp`,
+        `Transaction Signature`,
+        `Wallet Sell Amount in SOL`,
+        `Wallet Sell Amount in Tokens`,
+        `Wallet Sell Market Cap`
+      );
+    }
+    
+    const headers = [...baseHeaders, ...sellHeaders];
+    const headerRow = worksheet.addRow(headers);
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF006400' }
+      };
+      cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FF000000' } },
+        bottom: { style: 'thin', color: { argb: 'FF000000' } },
+        left: { style: 'thin', color: { argb: 'FF000000' } },
+        right: { style: 'thin', color: { argb: 'FF000000' } }
+      };
+    });
+    
+    // Process each token - one row per token
+    for (const trade of walletTrades) {
       const token = trade.token_address;
       const tokenInfo = tokenInfoMap.get(token) || null;
       
-      // Get all transactions for this wallet+token pair
+      // Get all transactions for this wallet+token pair (sorted by created_at ASC to find first buy)
       const transactions = await dbService.getTransactionsByWalletToken(wallet, token);
       
-      // Count total sells
-      const totalSells = transactions.filter((tx: any) => tx.type?.toLowerCase() === 'sell').length;
-      
-      // Add token info headers (only for first token)
-      if (tokenIndex === 0) {
-        const headerRow1 = worksheet.addRow(tokenInfoHeaders);
-        headerRow1.eachCell((cell) => {
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: darkGreen
-          };
-          cell.font = {
-            color: white,
-            bold: true
-          };
-          cell.alignment = {
-            horizontal: 'center',
-            vertical: 'middle'
-          };
-          cell.border = {
-            top: { style: 'thin', color: black },
-            bottom: { style: 'thin', color: black },
-            left: { style: 'thin', color: black },
-            right: { style: 'thin', color: black }
-          };
-        });
-        currentRow = 2;
-      } else {
-        // Add empty row before next token (except first)
-        worksheet.addRow([]);
-        currentRow++;
-        
-        // Add token info headers again for subsequent tokens
-        const headerRow1 = worksheet.addRow(tokenInfoHeaders);
-        headerRow1.eachCell((cell) => {
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: darkGreen
-          };
-          cell.font = {
-            color: white,
-            bold: true
-          };
-          cell.alignment = {
-            horizontal: 'center',
-            vertical: 'middle'
-          };
-          cell.border = {
-            top: { style: 'thin', color: black },
-            bottom: { style: 'thin', color: black },
-            left: { style: 'thin', color: black },
-            right: { style: 'thin', color: black }
-          };
-        });
-        currentRow++;
-      }
+      // Sort transactions by timestamp ASC to find first buy after dev buy
+      transactions.sort((a: any, b: any) => {
+        const timeA = new Date(a.created_at).getTime();
+        const timeB = new Date(b.created_at).getTime();
+        return timeA - timeB;
+      });
       
       // Calculate social links count
       let socialCount = 0;
@@ -867,129 +823,137 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
       if (tokenInfo?.website) socialCount++;
       if (tokenInfo?.discord) socialCount++;
       if (tokenInfo?.telegram) socialCount++;
-
-      // Row: Token info data
-      const tokenInfoRow = [
+      
+      // Dev buy amounts
+      const devBuyAmountSOL = tokenInfo?.dev_buy_amount && tokenInfo?.dev_buy_amount_decimal !== null
+        ? parseFloat(tokenInfo.dev_buy_amount) / Math.pow(10, tokenInfo.dev_buy_amount_decimal)
+        : null;
+      const devBuyAmountTokens = tokenInfo?.dev_buy_token_amount && tokenInfo?.dev_buy_token_amount_decimal !== null
+        ? parseFloat(tokenInfo.dev_buy_token_amount) / Math.pow(10, tokenInfo.dev_buy_token_amount_decimal)
+        : null;
+      
+      // Get dev buy timestamp and block number
+      const devBuyTimestamp = tokenInfo?.dev_buy_timestamp ? new Date(tokenInfo.dev_buy_timestamp).getTime() : null;
+      const devBuyBlockNumber = tokenInfo?.dev_buy_block_number || null;
+      
+      // Find first buy transaction (after dev buy if dev buy exists)
+      const buys = transactions.filter((tx: any) => tx.type?.toLowerCase() === 'buy' && tx.mint_from === SOL_MINT);
+      let firstBuy = null;
+      if (devBuyTimestamp && devBuyBlockNumber) {
+        // Find first buy after dev buy
+        firstBuy = buys.find((tx: any) => {
+          const txTime = new Date(tx.created_at).getTime();
+          return txTime > devBuyTimestamp;
+        });
+      } else if (buys.length > 0) {
+        // If no dev buy info, use first buy
+        firstBuy = buys[0];
+      }
+      
+      // Get token decimals
+      const tokenDecimals = tokenInfo?.dev_buy_token_amount_decimal !== null && tokenInfo?.dev_buy_token_amount_decimal !== undefined
+        ? tokenInfo.dev_buy_token_amount_decimal
+        : 9;
+      
+      // Build base row data
+      const rowData: any[] = [
         tokenInfo?.token_name || 'Unknown',
         tokenInfo?.symbol || '???',
         token,
         tokenInfo?.creator || '',
-        tokenInfo?.dev_buy_amount && tokenInfo?.dev_buy_amount_decimal !== null
-          ? parseFloat(tokenInfo.dev_buy_amount) / Math.pow(10, tokenInfo.dev_buy_amount_decimal)
-          : '',
-        tokenInfo?.dev_buy_token_amount && tokenInfo?.dev_buy_token_amount_decimal !== null
-          ? parseFloat(tokenInfo.dev_buy_token_amount) / Math.pow(10, tokenInfo.dev_buy_token_amount_decimal)
-          : '',
-        socialCount, // Number of Socials
-        totalSells || 0 // Total Sells
+        socialCount,
+        devBuyAmountSOL !== null ? devBuyAmountSOL : '',
+        devBuyAmountTokens !== null ? devBuyAmountTokens : '',
+        '', // Wallet Gas & Fees Amount (will fill if firstBuy exists)
+        '', // Wallet Buy Position After Dev
+        '', // Wallet Buy Block #
+        '', // Wallet Buy Block # After Dev
+        '', // Wallet Buy Timestamp
+        '', // Transaction Signature
+        '', // Wallet Buy Amount in SOL
+        '', // Wallet Buy Amount in Tokens
+        ''  // Wallet Buy Market Cap
       ];
       
-      const dataRow1 = worksheet.addRow(tokenInfoRow);
-      dataRow1.eachCell((cell) => {
-        cell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: darkGreen
-        };
-        cell.font = {
-          color: white
-        };
-        cell.alignment = {
-          horizontal: 'center',
-          vertical: 'middle'
-        };
-        cell.border = {
-          top: { style: 'thin', color: black },
-          bottom: { style: 'thin', color: black },
-          left: { style: 'thin', color: black },
-          right: { style: 'thin', color: black }
-        };
-      });
-      currentRow++;
-      
-      // Row: Transaction headers
-      const headerRow2 = worksheet.addRow(transactionHeaders);
-      headerRow2.eachCell((cell) => {
-        cell.font = {
-          bold: true
-        };
-        cell.alignment = {
-          horizontal: 'center',
-          vertical: 'middle'
-        };
-      });
-      currentRow++;
-      
-      // Transaction rows
-      transactions.forEach((tx: any, index: number) => {
-        const event = tx.type?.charAt(0).toUpperCase() + tx.type?.slice(1).toLowerCase() || 'Unknown';
-        const marketCap = formatMarketCap(tx.marketCap);
-        const signature = tx.transaction_id || '';
-        const timestamp = formatTimestamp(tx.created_at);
+      // Fill first buy data if exists
+      if (firstBuy) {
+        // Gas & Fees for first buy only
+        const tipAmount = (firstBuy.tipAmount != null ? parseFloat(firstBuy.tipAmount) : 0) || 0;
+        const feeAmount = (firstBuy.feeAmount != null ? parseFloat(firstBuy.feeAmount) : 0) || 0;
+        const totalGasAndTips = feeAmount + tipAmount;
+        rowData[7] = totalGasAndTips; // Wallet Gas & Fees Amount
         
-        // Calculate time from last transaction (within same token, in seconds/milliseconds)
-        // Transactions are sorted DESC (newest first)
-        // For each transaction, calculate the difference to the next (older) transaction
-        // The oldest transaction (last in array) will have nothing filled
-        let timeFromLast = '';
-        if (index < transactions.length - 1) {
-          // Next transaction (index+1 is older when sorted DESC)
-          const nextTx = transactions[index + 1];
-          const currentTime = new Date(tx.created_at); // Current transaction (newer)
-          const nextTime = new Date(nextTx.created_at); // Next transaction (older)
-          // Calculate: time FROM current (newer) TO next (older) = currentTime - nextTime
-          const diffMs = currentTime.getTime() - nextTime.getTime();
-          
-          if (diffMs < 1000) {
-            // Show milliseconds if below 1 second
-            timeFromLast = `${diffMs}ms`;
-          } else {
-            // Show seconds
-            const diffSeconds = (diffMs / 1000).toFixed(3);
-            timeFromLast = `${diffSeconds}s`;
-          }
+        // Calculate position after dev (seconds)
+        if (devBuyTimestamp) {
+          const buyTime = new Date(firstBuy.created_at).getTime();
+          const secondsDiff = Math.floor((buyTime - devBuyTimestamp) / 1000);
+          rowData[8] = secondsDiff; // Wallet Buy Position After Dev
         }
         
-        // Transaction size in SOL
-        const isBuy = tx.mint_from === SOL_MINT;
-        const solAmount = isBuy ? (parseFloat(tx.in_amount) || 0) : (parseFloat(tx.out_amount) || 0);
-        const transactionSizeSOL = `${(solAmount / 1000000000).toFixed(3)} SOL`;
+        // Block number
+        rowData[9] = firstBuy.blockNumber || ''; // Wallet Buy Block #
         
-        // Transaction size in Tokens (consider decimals)
-        const tokenAmountRaw = isBuy ? (parseFloat(tx.out_amount) || 0) : (parseFloat(tx.in_amount) || 0);
-        // Use dev_buy_token_amount_decimal from tokens table for token decimals
-        const tokenDecimals = tokenInfo?.dev_buy_token_amount_decimal !== null && tokenInfo?.dev_buy_token_amount_decimal !== undefined
-          ? tokenInfo.dev_buy_token_amount_decimal
-          : 9; // Default to 9 if not available
-        const tokenAmount = tokenAmountRaw / Math.pow(10, tokenDecimals);
-        const transactionSizeTokens = formatTokenAmount(tokenAmount);
+        // Block number after dev
+        if (devBuyBlockNumber && firstBuy.blockNumber) {
+          rowData[10] = firstBuy.blockNumber - devBuyBlockNumber; // Wallet Buy Block # After Dev
+        }
         
-        // Transaction Gas & Tips
-        const tipAmount = (tx.tipAmount != null ? parseFloat(tx.tipAmount) : 0) || 0;
-        const feeAmount = (tx.feeAmount != null ? parseFloat(tx.feeAmount) : 0) || 0;
-        const totalGasAndTips = feeAmount + tipAmount;
-        const gasAndTips = `${totalGasAndTips.toFixed(9)} SOL`;
+        // Timestamp
+        rowData[11] = formatTimestamp(firstBuy.created_at); // Wallet Buy Timestamp
         
-        const row = worksheet.addRow([
-          '', // Empty column
-          event,
-          marketCap,
-          signature,
-          timestamp,
-          timeFromLast,
-          transactionSizeSOL,
-          transactionSizeTokens,
-          gasAndTips
-        ]);
+        // Transaction signature
+        rowData[12] = firstBuy.transaction_id || ''; // Transaction Signature
         
-        // Center align all cells in transaction rows
-        row.eachCell((cell) => {
-          cell.alignment = {
-            horizontal: 'center',
-            vertical: 'middle'
-          };
+        // Buy amount in SOL
+        const buySolAmount = parseFloat(firstBuy.in_amount) || 0;
+        rowData[13] = buySolAmount / 1000000000; // Wallet Buy Amount in SOL
+        
+        // Buy amount in Tokens
+        const buyTokenAmountRaw = parseFloat(firstBuy.out_amount) || 0;
+        rowData[14] = buyTokenAmountRaw / Math.pow(10, tokenDecimals); // Wallet Buy Amount in Tokens
+        
+        // Market cap
+        rowData[15] = formatMarketCap(firstBuy.marketCap); // Wallet Buy Market Cap
+      }
+      
+      // Get all sells (sorted by timestamp ASC)
+      const sells = transactions
+        .filter((tx: any) => tx.type?.toLowerCase() === 'sell')
+        .sort((a: any, b: any) => {
+          const timeA = new Date(a.created_at).getTime();
+          const timeB = new Date(b.created_at).getTime();
+          return timeA - timeB;
         });
-        currentRow++;
+      
+      // Helper function to format ordinal numbers (1st, 2nd, 3rd, etc.)
+      const formatOrdinal = (n: number): string => {
+        const s = ['th', 'st', 'nd', 'rd'];
+        const v = n % 100;
+        return n + (s[(v - 20) % 10] || s[v] || s[0]);
+      };
+      
+      // Add sell data (repeated columns)
+      for (let i = 0; i < maxSells; i++) {
+        if (i < sells.length) {
+          const sell = sells[i];
+          rowData.push(
+            formatOrdinal(i + 1), // Wallet Sell Number (1st, 2nd, 3rd, etc.)
+            formatTimestamp(sell.created_at), // Wallet Sell Timestamp
+            sell.transaction_id || '', // Transaction Signature
+            (parseFloat(sell.out_amount) || 0) / 1000000000, // Wallet Sell Amount in SOL
+            (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals), // Wallet Sell Amount in Tokens
+            formatMarketCap(sell.marketCap) // Wallet Sell Market Cap
+          );
+        } else {
+          // Empty cells for missing sells
+          rowData.push('', '', '', '', '', '');
+        }
+      }
+      
+      // Add row to worksheet
+      const row = worksheet.addRow(rowData);
+      row.eachCell((cell) => {
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
       });
     }
     
@@ -1246,6 +1210,8 @@ app.post("/api/tokens/fetch-info", requireAuth, async (req, res) => {
             dev_buy_used_token: tokenInfo.devBuyUsedToken,
             dev_buy_token_amount: tokenInfo.devBuyTokenAmount,
             dev_buy_token_amount_decimal: tokenInfo.devBuyTokenAmountDecimal,
+            dev_buy_timestamp: tokenInfo.devBuyTimestamp || null,
+            dev_buy_block_number: tokenInfo.devBuyBlockNumber || null,
           });
           successCount++;
           console.log(`  ✅ Success: ${mint}`);

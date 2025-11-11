@@ -37,12 +37,17 @@ class TransactionTracker {
       throw new Error("Missing GRPC_URL or X_TOKEN environment variables");
     }
 
-    this.client = new Client(process.env.GRPC_URL, process.env.X_TOKEN, {
+    const grpcUrl = process.env.GRPC_URL;
+    const xToken = process.env.X_TOKEN;
+
+    console.log(`🔗 Connecting to gRPC endpoint: ${grpcUrl.replace(/\/\/.*@/, '//***@')}`); // Hide credentials in URL
+    
+    this.client = new Client(grpcUrl, xToken, {
       "grpc.keepalive_permit_without_calls": 1,
       "grpc.keepalive_time_ms": 10000,
       "grpc.keepalive_timeout_ms": 1000,
       "grpc.default_compression_algorithm": 2,
-      "grpc.max_receive_message_length": 1024*1024*1024
+      // "grpc.max_receive_message_length": 1024*1024*1024
     });
 
     // Initialize Solana RPC connection for wallet analysis
@@ -119,6 +124,10 @@ class TransactionTracker {
 
             // Save to database asynchronously (non-blocking)
             if (result) {
+            // Convert slot to number for block_number
+            const blockNumber = currentSlot ? parseInt(currentSlot, 10) : null;
+            const blockNumberValue = (blockNumber !== null && !isNaN(blockNumber)) ? blockNumber : null;
+            
             dbService.saveTransaction(sig, {
               platform: result.platform,
               type: result.type,
@@ -129,6 +138,7 @@ class TransactionTracker {
               feePayer: result.feePayer,
               tipAmount: result.tipAmount,
               feeAmount: result.feeAmount,
+              blockNumber: blockNumberValue,
             });
 
             // Extract token from buy/sell events
@@ -232,7 +242,7 @@ class TransactionTracker {
         if (this.shouldStop) {
           break;
         }
-        
+        console.log(err)
         console.error(
           `Stream error, retrying in ${RETRY_DELAY_MS} second...`,
         );
