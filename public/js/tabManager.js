@@ -166,8 +166,66 @@ export async function refreshAnalysis() {
     await analyzeSelectedWallet();
 }
 
+/**
+ * Remove wallet and all its transactions from database
+ */
+export async function removeWalletFromAnalysis() {
+    const select = document.getElementById('walletSelectTab');
+    const walletAddress = select ? select.value : state.selectedWalletForAnalysis;
+    
+    if (!walletAddress) {
+        // Show notification if no wallet is selected
+        const { showNotification } = await import('./utils.js');
+        showNotification('Please select a wallet first', 'error');
+        return;
+    }
+    
+    // Show confirmation dialog
+    const confirmMessage = `Are you sure you want to remove this wallet and all its transactions from the database?\n\nWallet: ${walletAddress}\n\nThis action cannot be undone.`;
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+    
+    try {
+        const { showNotification } = await import('./utils.js');
+        const result = await api.deleteWalletAndTransactions(walletAddress);
+        
+        if (result.success) {
+            const message = `✅ Wallet removed successfully (${result.transactionsDeleted || 0} transactions, ${result.walletsDeleted || 0} wallet entries deleted)`;
+            showNotification(message, 'success');
+            
+            // Clear selection
+            state.selectedWalletForAnalysis = null;
+            if (select) {
+                select.value = '';
+            }
+            
+            // Clear analysis display
+            document.getElementById('walletInfoContainer').innerHTML = '';
+            
+            // Refresh wallet dropdown (clear cache and refetch)
+            cachedAnalysisWallets = [];
+            analysisWalletsCacheTime = 0;
+            await updateAnalysisWalletSelect();
+            
+            // Refresh transactions tab if it's active
+            if (state.currentTab === 'transactions') {
+                const { fetchTransactions } = await import('./transactionManager.js');
+                await fetchTransactions();
+            }
+        } else {
+            showNotification('❌ ' + (result.error || 'Failed to remove wallet'), 'error');
+        }
+    } catch (error) {
+        console.error('Failed to remove wallet:', error);
+        const { showNotification } = await import('./utils.js');
+        showNotification('❌ Error removing wallet', 'error');
+    }
+}
+
 // Make functions globally available for inline handlers
 window.updateTransactionWalletFilter = updateTransactionWalletFilter;
 window.updateAnalysisWalletFilter = updateAnalysisWalletFilter;
 window.refreshAnalysis = refreshAnalysis;
+window.removeWalletFromAnalysis = removeWalletFromAnalysis;
 

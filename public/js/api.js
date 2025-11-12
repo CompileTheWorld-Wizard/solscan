@@ -195,6 +195,28 @@ export async function removeSkipToken(mintAddress) {
 }
 
 /**
+ * Delete wallet and all its transactions from database
+ */
+export async function deleteWalletAndTransactions(walletAddress) {
+    try {
+        const response = await fetch(`/api/wallets/${encodeURIComponent(walletAddress)}`, {
+            method: 'DELETE',
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        return { 
+            success: data.success, 
+            error: data.error,
+            transactionsDeleted: data.transactionsDeleted,
+            walletsDeleted: data.walletsDeleted
+        };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+}
+
+/**
  * Fetch token data for export
  */
 export async function fetchTokenExportData(walletAddress, tokenAddress) {

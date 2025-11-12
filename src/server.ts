@@ -1309,6 +1309,30 @@ app.delete("/api/skip-tokens/:mintAddress", requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * DELETE /api/wallets/:walletAddress - Remove wallet and all its transactions from database
+ */
+app.delete("/api/wallets/:walletAddress", requireAuth, async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+    
+    if (!walletAddress || walletAddress.trim().length === 0) {
+      return res.status(400).json({ error: "Wallet address is required" });
+    }
+    
+    const result = await dbService.deleteWalletAndTransactions(walletAddress);
+    
+    res.json({ 
+      success: true,
+      message: "Wallet and transactions removed successfully",
+      transactionsDeleted: result.transactionsDeleted,
+      walletsDeleted: result.walletsDeleted
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error("Server error:", err);

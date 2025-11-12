@@ -1442,6 +1442,37 @@ class DatabaseService {
       throw error;
     }
   }
+
+  /**
+   * Delete all transactions and wallet entries for a specific wallet address
+   * This removes the wallet from transactions table and wallets table (not tokens table)
+   */
+  async deleteWalletAndTransactions(walletAddress: string): Promise<{ transactionsDeleted: number; walletsDeleted: number }> {
+    try {
+      // Delete transactions for this wallet
+      const deleteTransactionsQuery = `
+        DELETE FROM transactions
+        WHERE fee_payer = $1
+      `;
+      const transactionsResult = await this.pool.query(deleteTransactionsQuery, [walletAddress]);
+      const transactionsDeleted = transactionsResult.rowCount || 0;
+
+      // Delete wallet entries for this wallet
+      const deleteWalletsQuery = `
+        DELETE FROM wallets
+        WHERE wallet_address = $1
+      `;
+      const walletsResult = await this.pool.query(deleteWalletsQuery, [walletAddress]);
+      const walletsDeleted = walletsResult.rowCount || 0;
+
+      console.log(`🗑️ Deleted wallet ${walletAddress}: ${transactionsDeleted} transactions, ${walletsDeleted} wallet entries`);
+      
+      return { transactionsDeleted, walletsDeleted };
+    } catch (error: any) {
+      console.error(`❌ Failed to delete wallet ${walletAddress}:`, error.message);
+      throw error;
+    }
+  }
 }
 
 // Export a singleton instance

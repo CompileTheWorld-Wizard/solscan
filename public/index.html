@@ -185,6 +185,9 @@
                             <button id="solscanLinkBtn" onclick="window.openSolscanFromSelect()" style="padding: 10px 12px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; display: flex; align-items: center; justify-content: center; height: 42px; width: 42px; box-sizing: border-box; margin-bottom: 0; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);" title="Open in Solscan">
                                 🔗
                             </button>
+                            <button id="removeWalletBtn" onclick="window.removeWalletFromAnalysis()" style="padding: 10px 20px; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; justify-content: center; height: 42px; box-sizing: border-box; margin-bottom: 0; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3); transition: all 0.2s;" title="Remove wallet and all transactions from database" onmouseover="this.style.background='linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)'; this.style.boxShadow='0 6px 20px rgba(239, 68, 68, 0.5)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.background='linear-gradient(135deg, #ef4444 0%, #dc2626 100%)'; this.style.boxShadow='0 4px 15px rgba(239, 68, 68, 0.3)'; this.style.transform='translateY(0)'">
+                                🗑️ Remove
+                            </button>
                         </div>
                         <button id="refreshAnalysisBtn" class="btn-refresh" style="margin-bottom: 0; height: 42px; padding: 10px 20px; display: flex; align-items: center; justify-content: center; box-sizing: border-box;" onclick="window.refreshAnalysis()">
                             <span>🔄</span> Refresh
