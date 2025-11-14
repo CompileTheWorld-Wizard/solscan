@@ -9,15 +9,41 @@ let dashboardData = [];
 let filteredData = [];
 let maxSells = 0;
 
-// Current filter values
-let currentFilters = {
-    devBuySizeMin: 0,
-    devBuySizeMax: 20,
-    buySizeMin: 0,
-    buySizeMax: 20,
-    pnlMin: -100,
-    pnlMax: 100
-};
+// Pagination state
+let currentPage = 1;
+let itemsPerPage = 50;
+
+// Dynamic filters - array of filter objects
+let activeFilters = [];
+
+// Data point definitions with filter types
+const DATA_POINTS = [
+    // SOL Amount filters
+    { key: 'pnlSOL', label: 'PNL per token in SOL', type: 'sol', field: 'pnlSOL' },
+    { key: 'devBuyAmountSOL', label: 'Dev Buy Amount in SOL', type: 'sol', field: 'devBuyAmountSOL' },
+    { key: 'walletBuyAmountSOL', label: 'Wallet Buy Amount in SOL', type: 'sol', field: 'walletBuyAmountSOL' },
+    { key: 'walletGasAndFeesAmount', label: 'Wallet Gas & Fees Amount', type: 'sol', field: 'walletGasAndFeesAmount' },
+    { key: 'walletBuyMarketCap', label: 'Wallet Buy Market Cap', type: 'sol', field: 'walletBuyMarketCap' },
+    
+    // Token Amount filters
+    { key: 'devBuyAmountTokens', label: 'Dev Buy Amount in Tokens', type: 'token', field: 'devBuyAmountTokens' },
+    { key: 'walletBuyAmountTokens', label: 'Wallet Buy Amount in Tokens', type: 'token', field: 'walletBuyAmountTokens' },
+    
+    // Percentage filters
+    { key: 'pnlPercent', label: '% PNL per token', type: 'percent', field: 'pnlPercent' },
+    { key: 'walletBuySOLPercentOfDev', label: 'Wallet buy SOL % of dev', type: 'percent', field: 'walletBuySOLPercentOfDev' },
+    { key: 'walletBuyTokensPercentOfDev', label: 'Wallet buy Tokens % of dev', type: 'percent', field: 'walletBuyTokensPercentOfDev' },
+    { key: 'devBuyTokensPercentOfTotalSupply', label: 'Dev buy Tokens % of total supply', type: 'percent', field: 'devBuyTokensPercentOfTotalSupply' },
+    { key: 'walletBuyPercentOfTotalSupply', label: 'Wallet buy % of total supply', type: 'percent', field: 'walletBuyPercentOfTotalSupply' },
+    { key: 'walletBuyPercentOfRemainingSupply', label: 'Wallet buy % of the remaining supply', type: 'percent', field: 'walletBuyPercentOfRemainingSupply' },
+    
+    // Sell-related filters (these will be handled specially)
+    { key: 'sellAmountSOL', label: 'Wallet Sell Amount in SOL (any sell)', type: 'sol', field: 'sells', isArray: true, arrayField: 'sellAmountSOL' },
+    { key: 'sellAmountTokens', label: 'Wallet Sell Amount in Tokens (any sell)', type: 'token', field: 'sells', isArray: true, arrayField: 'sellAmountTokens' },
+    { key: 'sellMarketCap', label: 'Wallet Sell Market Cap (any sell)', type: 'sol', field: 'sells', isArray: true, arrayField: 'marketCap' },
+    { key: 'sellPercentOfBuy', label: 'Sell % of Buy (any sell)', type: 'percent', field: 'sells', isArray: true, arrayField: 'sellPercentOfBuy' },
+    { key: 'firstSellPNL', label: 'First Sell PNL (any sell)', type: 'percent', field: 'sells', isArray: true, arrayField: 'firstSellPNL' }
+];
 
 /**
  * Initialize dashboard - load wallets into select
@@ -44,25 +70,527 @@ export async function initializeDashboard() {
         // Initialize filter presets
         await loadFilterPresets();
         
-        // Setup filter event listeners
-        setupFilterListeners();
+        // Render existing filters
+        renderFilters();
     } catch (error) {
         console.error('Failed to initialize dashboard:', error);
     }
 }
 
 /**
- * Setup filter event listeners with dual-range sliders
+ * Get filter configuration based on type
  */
-function setupFilterListeners() {
-    // Dev Buy Size filter
-    setupDualRangeSlider('devBuySize', 0, 20, 0, 20);
+function getFilterConfig(type) {
+    switch(type) {
+        case 'sol':
+            return { min: -20, max: 20, defaultMin: -20, defaultMax: 20, step: 0.01, minLabel: '-20', maxLabel: '20+' };
+        case 'token':
+            return { min: 0, max: 1000000000, defaultMin: 0, defaultMax: 1000000000, step: 1, maxLabel: '10^9+' };
+        case 'percent':
+            return { min: -100, max: 100, defaultMin: -100, defaultMax: 100, step: 0.01, minLabel: '-100%', maxLabel: '100%' };
+        default:
+            return { min: 0, max: 100, defaultMin: 0, defaultMax: 100, step: 0.01 };
+    }
+}
+
+/**
+ * Open add filter dialog
+ */
+window.openAddFilterDialog = function() {
+    const modal = document.getElementById('addFilterModal');
+    const list = document.getElementById('dataPointsList');
+    if (!modal || !list) return;
     
-    // Buy Size filter
-    setupDualRangeSlider('buySize', 0, 20, 0, 20);
+    // Clear and populate data points list
+    list.innerHTML = '';
     
-    // PNL filter
-    setupDualRangeSlider('pnl', -100, 100, -100, 100);
+    // Get already active filter keys
+    const activeKeys = activeFilters.map(f => f.key);
+    
+    // Filter out already added data points
+    const availableDataPoints = DATA_POINTS.filter(dp => !activeKeys.includes(dp.key));
+    
+    if (availableDataPoints.length === 0) {
+        list.innerHTML = '<div style="padding: 20px; text-align: center; color: #94a3b8;">All available data points have been added as filters.</div>';
+    } else {
+        availableDataPoints.forEach(dataPoint => {
+            const item = document.createElement('div');
+            item.style.cssText = 'padding: 12px; background: #1a1f2e; border: 1px solid #334155; border-radius: 6px; cursor: pointer; transition: all 0.2s;';
+            item.onmouseover = () => {
+                item.style.background = '#334155';
+                item.style.borderColor = '#3b82f6';
+            };
+            item.onmouseout = () => {
+                item.style.background = '#1a1f2e';
+                item.style.borderColor = '#334155';
+            };
+            item.onclick = () => {
+                addFilter(dataPoint.key);
+                window.closeAddFilterDialog();
+            };
+            
+            const label = document.createElement('div');
+            label.style.cssText = 'color: #e0e7ff; font-weight: 600; margin-bottom: 4px;';
+            label.textContent = dataPoint.label;
+            item.appendChild(label);
+            
+            const type = document.createElement('div');
+            type.style.cssText = 'color: #94a3b8; font-size: 0.85rem;';
+            const typeLabels = { sol: 'SOL Amount', token: 'Token Amount', percent: 'Percentage' };
+            type.textContent = `Type: ${typeLabels[dataPoint.type] || 'Unknown'}`;
+            item.appendChild(type);
+            
+            list.appendChild(item);
+        });
+    }
+    
+    modal.classList.add('active');
+    
+    // Add click-outside-to-close
+    const handleOverlayClick = (e) => {
+        if (e.target === modal) {
+            window.closeAddFilterDialog();
+        }
+    };
+    modal.addEventListener('click', handleOverlayClick);
+    modal._overlayHandler = handleOverlayClick;
+};
+
+/**
+ * Close add filter dialog
+ */
+window.closeAddFilterDialog = function() {
+    const modal = document.getElementById('addFilterModal');
+    if (!modal) return;
+    
+    modal.classList.remove('active');
+    
+    // Clear search
+    const searchInput = document.getElementById('filterSearchInput');
+    if (searchInput) {
+        searchInput.value = '';
+    }
+    
+    // Remove overlay click handler
+    if (modal._overlayHandler) {
+        modal.removeEventListener('click', modal._overlayHandler);
+        delete modal._overlayHandler;
+    }
+};
+
+/**
+ * Filter data point options by search
+ */
+window.filterDataPointOptions = function() {
+    const searchInput = document.getElementById('filterSearchInput');
+    const list = document.getElementById('dataPointsList');
+    if (!searchInput || !list) return;
+    
+    const searchTerm = searchInput.value.toLowerCase();
+    const items = Array.from(list.children);
+    
+    items.forEach(item => {
+        if (item.tagName === 'DIV') {
+            const label = item.querySelector('div:first-child')?.textContent.toLowerCase() || '';
+            if (label.includes(searchTerm)) {
+                item.style.display = '';
+            } else {
+                item.style.display = 'none';
+            }
+        }
+    });
+};
+
+/**
+ * Add a filter
+ */
+function addFilter(dataPointKey) {
+    const dataPoint = DATA_POINTS.find(dp => dp.key === dataPointKey);
+    if (!dataPoint) return;
+    
+    // Check if already added
+    if (activeFilters.find(f => f.key === dataPointKey)) {
+        return;
+    }
+    
+    const config = getFilterConfig(dataPoint.type);
+    
+    // Create filter object
+    const filter = {
+        key: dataPointKey,
+        label: dataPoint.label,
+        type: dataPoint.type,
+        min: config.defaultMin,
+        max: config.defaultMax,
+        minEnabled: true,
+        maxEnabled: true
+    };
+    
+    activeFilters.push(filter);
+    renderFilters();
+    applyFilters();
+}
+
+/**
+ * Remove a filter
+ */
+function removeFilter(dataPointKey) {
+    activeFilters = activeFilters.filter(f => f.key !== dataPointKey);
+    renderFilters();
+    applyFilters();
+}
+
+/**
+ * Render all active filters
+ */
+function renderFilters() {
+    const container = document.getElementById('dynamicFiltersContainer');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    if (activeFilters.length === 0) {
+        const emptyMsg = document.createElement('div');
+        emptyMsg.style.cssText = 'padding: 20px; text-align: center; color: #94a3b8; font-size: 0.9rem;';
+        emptyMsg.textContent = 'No filters added. Click "Add Filter" to add filters.';
+        container.appendChild(emptyMsg);
+        return;
+    }
+    
+    activeFilters.forEach((filter, index) => {
+        const filterDiv = document.createElement('div');
+        filterDiv.style.cssText = 'margin-bottom: 20px; padding: 15px; background: #1a1f2e; border: 1px solid #334155; border-radius: 6px;';
+        filterDiv.id = `filter-${filter.key}`;
+        
+        // Header with label and remove button
+        const header = document.createElement('div');
+        header.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;';
+        
+        const label = document.createElement('label');
+        label.style.cssText = 'font-weight: 600; color: #cbd5e1; font-size: 0.9rem;';
+        label.textContent = filter.label;
+        header.appendChild(label);
+        
+        const removeBtn = document.createElement('button');
+        removeBtn.style.cssText = 'padding: 4px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; transition: all 0.2s;';
+        removeBtn.textContent = 'Remove';
+        removeBtn.onclick = () => removeFilter(filter.key);
+        removeBtn.onmouseover = () => { removeBtn.style.background = '#dc2626'; };
+        removeBtn.onmouseout = () => { removeBtn.style.background = '#ef4444'; };
+        header.appendChild(removeBtn);
+        
+        filterDiv.appendChild(header);
+        
+        // Filter controls
+        const config = getFilterConfig(filter.type);
+        const controlsDiv = document.createElement('div');
+        controlsDiv.style.cssText = 'display: flex; gap: 15px; align-items: center; flex-wrap: wrap;';
+        
+        // Inputs
+        const inputsDiv = document.createElement('div');
+        inputsDiv.style.cssText = 'flex: 1; min-width: 150px;';
+        
+        const inputsInner = document.createElement('div');
+        inputsInner.style.cssText = 'display: flex; gap: 10px; align-items: center;';
+        
+        // Min input
+        const minInput = document.createElement('input');
+        minInput.type = 'number';
+        minInput.id = `filter-${filter.key}-min`;
+        minInput.min = (filter.type === 'percent' || filter.type === 'sol') ? undefined : config.min; // Percent and SOL can be unset
+        minInput.step = config.step;
+        minInput.value = filter.min;
+        minInput.placeholder = (filter.type === 'percent' || filter.type === 'sol') ? 'Min' : config.min.toString();
+        minInput.style.cssText = 'width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;';
+        inputsInner.appendChild(minInput);
+        
+        const toSpan = document.createElement('span');
+        toSpan.style.cssText = 'color: #94a3b8;';
+        toSpan.textContent = 'to';
+        inputsInner.appendChild(toSpan);
+        
+        // Max input
+        const maxInput = document.createElement('input');
+        maxInput.type = 'number';
+        maxInput.id = `filter-${filter.key}-max`;
+        maxInput.min = filter.type === 'sol' || filter.type === 'token' ? config.min : undefined; // SOL/Token min is 0, percent can be unset
+        maxInput.step = config.step;
+        maxInput.value = filter.max;
+        maxInput.placeholder = 'Max';
+        maxInput.style.cssText = 'width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;';
+        inputsInner.appendChild(maxInput);
+        
+        inputsDiv.appendChild(inputsInner);
+        controlsDiv.appendChild(inputsDiv);
+        
+        // Slider
+        const sliderDiv = document.createElement('div');
+        sliderDiv.style.cssText = 'flex: 4; min-width: 300px; position: relative; display: flex; justify-content: space-between; gap: 5px; align-items: center;';
+        
+        // Min label
+        const minLabel = document.createElement('span');
+        minLabel.id = `filter-${filter.key}-min-label`;
+        minLabel.style.cssText = 'color: #94a3b8; font-size: 0.85rem; text-align: right; min-width: 50px; flex-shrink: 0;';
+        if (filter.type === 'percent') {
+            minLabel.textContent = config.minLabel;
+        } else if (filter.type === 'sol') {
+            minLabel.textContent = config.minLabel || config.min;
+        } else {
+            minLabel.textContent = config.min;
+        }
+        sliderDiv.appendChild(minLabel);
+        
+        // Slider container
+        const sliderContainer = document.createElement('div');
+        sliderContainer.className = 'dual-range-container';
+        sliderContainer.style.cssText = 'position: relative; height: 40px; padding: 15px 0; width: 100%;';
+        
+        const track = document.createElement('div');
+        track.className = 'dual-range-track';
+        track.style.cssText = 'position: absolute; width: 100%; height: 6px; background: #334155; border-radius: 3px; top: 15px; z-index: 1;';
+        sliderContainer.appendChild(track);
+        
+        const progress = document.createElement('div');
+        progress.className = 'dual-range-progress';
+        progress.id = `filter-${filter.key}-progress`;
+        progress.style.cssText = 'position: absolute; height: 6px; background: #3b82f6; border-radius: 3px; top: 15px; z-index: 1; left: 0%; width: 100%;';
+        sliderContainer.appendChild(progress);
+        
+        const minSlider = document.createElement('input');
+        minSlider.type = 'range';
+        minSlider.id = `filter-${filter.key}-slider-min`;
+        minSlider.className = 'dual-range-input';
+        minSlider.min = config.min;
+        minSlider.max = config.max;
+        minSlider.step = config.step;
+        minSlider.value = filter.min;
+        minSlider.style.cssText = 'position: absolute; width: 100%; top: 10px; z-index: 2;';
+        sliderContainer.appendChild(minSlider);
+        
+        const maxSlider = document.createElement('input');
+        maxSlider.type = 'range';
+        maxSlider.id = `filter-${filter.key}-slider-max`;
+        maxSlider.className = 'dual-range-input';
+        maxSlider.min = config.min;
+        maxSlider.max = config.max;
+        maxSlider.step = config.step;
+        maxSlider.value = filter.max;
+        maxSlider.style.cssText = 'position: absolute; width: 100%; top: 10px; z-index: 3;';
+        sliderContainer.appendChild(maxSlider);
+        
+        sliderDiv.appendChild(sliderContainer);
+        
+        // Max label
+        const maxLabel = document.createElement('span');
+        maxLabel.id = `filter-${filter.key}-max-label`;
+        maxLabel.style.cssText = 'color: #94a3b8; font-size: 0.85rem; text-align: left; min-width: 50px; flex-shrink: 0;';
+        maxLabel.textContent = filter.type === 'percent' ? config.maxLabel : config.max;
+        sliderDiv.appendChild(maxLabel);
+        
+        controlsDiv.appendChild(sliderDiv);
+        filterDiv.appendChild(controlsDiv);
+        container.appendChild(filterDiv);
+        
+        // Setup slider
+        setupDynamicDualRangeSlider(filter.key, config);
+    });
+}
+
+/**
+ * Setup dual-range slider for dynamic filter
+ */
+function setupDynamicDualRangeSlider(filterKey, config) {
+    const minInput = document.getElementById(`filter-${filterKey}-min`);
+    const maxInput = document.getElementById(`filter-${filterKey}-max`);
+    const minSlider = document.getElementById(`filter-${filterKey}-slider-min`);
+    const maxSlider = document.getElementById(`filter-${filterKey}-slider-max`);
+    const progress = document.getElementById(`filter-${filterKey}-progress`);
+    const minLabel = document.getElementById(`filter-${filterKey}-min-label`);
+    const maxLabel = document.getElementById(`filter-${filterKey}-max-label`);
+    
+    if (!minInput || !maxInput || !minSlider || !maxSlider || !progress) return;
+    
+    const filter = activeFilters.find(f => f.key === filterKey);
+    if (!filter) return;
+    
+    // Update progress bar and labels
+    function updateProgress() {
+        // Get actual filter values (may be beyond slider range)
+        const actualMin = filter.min !== null && filter.min !== undefined ? filter.min : (filter.type === 'percent' ? config.min : config.min);
+        const actualMax = filter.max !== null && filter.max !== undefined ? filter.max : (filter.type === 'percent' ? config.max : config.max);
+        
+        // For progress bar, use slider values (clamped to range)
+        const minVal = parseFloat(minSlider.value);
+        const maxVal = parseFloat(maxSlider.value);
+        const minPercent = ((minVal - config.min) / (config.max - config.min)) * 100;
+        const maxPercent = ((maxVal - config.min) / (config.max - config.min)) * 100;
+        
+        progress.style.left = `${minPercent}%`;
+        progress.style.width = `${maxPercent - minPercent}%`;
+        
+        // Update labels with proper formatting
+        if (filter.type === 'sol') {
+            if (actualMin === null || actualMin === undefined) {
+                minLabel.textContent = '-20';
+            } else if (actualMin < -20) {
+                minLabel.textContent = '-20<';
+            } else {
+                minLabel.textContent = actualMin.toFixed(2);
+            }
+            if (actualMax > 20) {
+                maxLabel.textContent = '20+';
+            } else if (actualMax === null || actualMax === undefined) {
+                maxLabel.textContent = '20+';
+            } else {
+                maxLabel.textContent = actualMax.toFixed(2);
+            }
+        } else if (filter.type === 'token') {
+            minLabel.textContent = actualMin >= 0 ? actualMin.toLocaleString() : '0';
+            if (actualMax > 1000000000) {
+                maxLabel.textContent = '10^9+';
+            } else if (actualMax === null || actualMax === undefined) {
+                maxLabel.textContent = '10^9+';
+            } else {
+                maxLabel.textContent = actualMax.toLocaleString();
+            }
+        } else if (filter.type === 'percent') {
+            if (actualMin === null || actualMin === undefined) {
+                minLabel.textContent = '-100%';
+            } else if (actualMin < -100) {
+                minLabel.textContent = `-(${Math.abs(actualMin).toFixed(0)}+)%`;
+            } else {
+                minLabel.textContent = `${actualMin.toFixed(2)}%`;
+            }
+            if (actualMax === null || actualMax === undefined) {
+                maxLabel.textContent = '100%';
+            } else if (actualMax > 100) {
+                maxLabel.textContent = `+(100+)%`;
+            } else {
+                maxLabel.textContent = `${actualMax.toFixed(2)}%`;
+            }
+        }
+    }
+    
+    // Sync slider with input
+    function syncSliderToInput(slider, input, isMin) {
+        let val = parseFloat(input.value);
+        if (isNaN(val) || input.value === '') {
+            // Allow empty input for "not set" case (for percent and SOL filters)
+            if (isMin && (filter.type === 'percent' || filter.type === 'sol')) {
+                filter.min = null;
+            } else if (!isMin) {
+                filter.max = null;
+            }
+            updateProgress();
+            applyFilters();
+            return;
+        }
+        
+        // For Token, min must be >= 0 (SOL can be negative)
+        if (isMin && filter.type === 'token') {
+            val = Math.max(0, val);
+        }
+        
+        // Clamp slider value to its range, but allow input to go beyond
+        const sliderVal = isMin 
+            ? Math.max(config.min, Math.min(config.max, val))
+            : Math.max(config.min, Math.min(config.max, val));
+        slider.value = sliderVal;
+        
+        // But keep the actual value in the filter (can be beyond max)
+        if (isMin) {
+            filter.min = val;
+            if (val > parseFloat(maxInput.value || maxSlider.value)) {
+                const maxVal = val;
+                maxSlider.value = Math.min(config.max, maxVal);
+                maxInput.value = maxVal;
+                filter.max = maxVal;
+            }
+        } else {
+            filter.max = val;
+            if (val < parseFloat(minInput.value || minSlider.value)) {
+                const minVal = val;
+                minSlider.value = Math.max(config.min, minVal);
+                minInput.value = minVal;
+                filter.min = minVal;
+            }
+        }
+        
+        updateProgress();
+        applyFilters();
+    }
+    
+    // Sync input with slider
+    function syncInputToSlider(input, slider, isMin) {
+        let val = parseFloat(slider.value);
+        
+        // For max, allow values beyond the slider max
+        if (!isMin) {
+            // If slider is at max, allow input to go beyond
+            if (val >= config.max) {
+                // Keep the current filter max if it's already beyond, otherwise use slider value
+                val = filter.max !== null && filter.max > config.max ? filter.max : val;
+            }
+        }
+        
+        input.value = val;
+        
+        if (isMin) {
+            filter.min = val;
+            if (val > parseFloat(maxInput.value || maxSlider.value)) {
+                const maxVal = val;
+                maxSlider.value = Math.min(config.max, maxVal);
+                maxInput.value = maxVal;
+                filter.max = maxVal;
+            }
+        } else {
+            filter.max = val;
+            if (val < parseFloat(minInput.value || minSlider.value)) {
+                const minVal = val;
+                minSlider.value = Math.max(config.min, minVal);
+                minInput.value = minVal;
+                filter.min = minVal;
+            }
+        }
+        
+        updateProgress();
+        applyFilters();
+    }
+    
+    // Make sliders interactive
+    let activeSlider = null;
+    
+    minSlider.addEventListener('mousedown', () => {
+        minSlider.style.zIndex = '4';
+        maxSlider.style.zIndex = '3';
+        activeSlider = 'min';
+    });
+    
+    maxSlider.addEventListener('mousedown', () => {
+        maxSlider.style.zIndex = '4';
+        minSlider.style.zIndex = '2';
+        activeSlider = 'max';
+    });
+    
+    document.addEventListener('mouseup', () => {
+        if (activeSlider === 'min') {
+            minSlider.style.zIndex = '3';
+            maxSlider.style.zIndex = '3';
+        } else if (activeSlider === 'max') {
+            minSlider.style.zIndex = '2';
+            maxSlider.style.zIndex = '3';
+        }
+        activeSlider = null;
+    });
+    
+    // Event listeners
+    minInput.addEventListener('input', () => syncSliderToInput(minSlider, minInput, true));
+    maxInput.addEventListener('input', () => syncSliderToInput(maxSlider, maxInput, false));
+    minSlider.addEventListener('input', () => syncInputToSlider(minInput, minSlider, true));
+    maxSlider.addEventListener('input', () => syncInputToSlider(maxInput, maxSlider, false));
+    
+    // Initialize
+    updateProgress();
 }
 
 /**
@@ -185,32 +713,51 @@ function setupDualRangeSlider(prefix, min, max, defaultMin, defaultMax) {
  */
 function applyFilters() {
     filteredData = dashboardData.filter(token => {
-        // Dev Buy Size filter
-        const devBuySize = token.devBuyAmountSOL;
-        if (devBuySize !== null && devBuySize !== undefined) {
-            if (devBuySize < currentFilters.devBuySizeMin || devBuySize > currentFilters.devBuySizeMax) {
-                return false;
+        // Check each active filter
+        for (const filter of activeFilters) {
+            const dataPoint = DATA_POINTS.find(dp => dp.key === filter.key);
+            if (!dataPoint) continue;
+            
+            let value = null;
+            
+            // Handle array fields (sells)
+            if (dataPoint.isArray && dataPoint.field === 'sells') {
+                const sells = token[dataPoint.field] || [];
+                if (sells.length === 0) {
+                    // If no sells, check if we should filter this out
+                    // For now, we'll skip filtering if there are no sells
+                    continue;
+                }
+                // Get the value from the first sell or check all sells
+                const firstSell = sells[0];
+                value = firstSell ? firstSell[dataPoint.arrayField] : null;
+            } else {
+                value = token[dataPoint.field];
             }
-        }
-        
-        // Buy Size filter
-        const buySize = token.walletBuyAmountSOL;
-        if (buySize !== null && buySize !== undefined) {
-            if (buySize < currentFilters.buySizeMin || buySize > currentFilters.buySizeMax) {
-                return false;
+            
+            // Skip if value is null/undefined
+            if (value === null || value === undefined) {
+                continue;
             }
-        }
-        
-        // PNL filter
-        const pnl = token.pnlPercent;
-        if (pnl !== null && pnl !== undefined) {
-            if (pnl < currentFilters.pnlMin || pnl > currentFilters.pnlMax) {
-                return false;
+            
+            // Apply min/max filters (null/undefined means "not set")
+            if (filter.min !== null && filter.min !== undefined) {
+                if (value < filter.min) {
+                    return false;
+                }
+            }
+            if (filter.max !== null && filter.max !== undefined) {
+                if (value > filter.max) {
+                    return false;
+                }
             }
         }
         
         return true;
     });
+    
+    // Reset to first page when filters change
+    currentPage = 1;
     
     // Re-render table with filtered data
     renderDashboardTable();
@@ -244,6 +791,9 @@ export async function loadDashboardData() {
             
             // Calculate max sells across all tokens
             maxSells = Math.max(...dashboardData.map(token => (token.sells || []).length), 0);
+            
+            // Reset to first page when loading new data
+            currentPage = 1;
             
             // Apply current filters
             applyFilters();
@@ -498,8 +1048,22 @@ function renderDashboardTable() {
     
     if (!thead || !tbody) return;
     
-    // Use filtered data instead of dashboardData
-    const dataToRender = filteredData;
+    // Calculate pagination
+    const totalItems = filteredData.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
+    
+    // Ensure currentPage is valid
+    if (currentPage > totalPages) {
+        currentPage = totalPages;
+    }
+    if (currentPage < 1) {
+        currentPage = 1;
+    }
+    
+    // Get data for current page
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    const dataToRender = filteredData.slice(startIndex, endIndex);
     
     // Build header row
     const baseHeaders = [
@@ -642,6 +1206,176 @@ function renderDashboardTable() {
         
         tbody.appendChild(row);
     });
+    
+    // Render pagination controls
+    renderPagination(totalPages, totalItems, startIndex, endIndex);
+}
+
+/**
+ * Render pagination controls
+ */
+function renderPagination(totalPages, totalItems, startIndex, endIndex) {
+    const container = document.getElementById('dashboardPaginationContainer');
+    if (!container) return;
+    
+    if (totalItems === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    
+    container.innerHTML = '';
+    
+    // Pagination info
+    const info = document.createElement('div');
+    info.style.cssText = 'display: flex; align-items: center; gap: 15px; flex-wrap: wrap; justify-content: space-between; padding: 15px; background: #1a1f2e; border-radius: 6px 0px; border: 1px solid #334155; border-bottom: 0px';
+    
+    // Left side - info
+    const infoLeft = document.createElement('div');
+    infoLeft.style.cssText = 'color: #94a3b8; font-size: 0.9rem;';
+    infoLeft.textContent = `Showing ${startIndex + 1} to ${Math.min(endIndex, totalItems)} of ${totalItems} entries`;
+    info.appendChild(infoLeft);
+    
+    // Right side - controls
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display: flex; align-items: center; gap: 10px;';
+    
+    // Items per page selector
+    const itemsPerPageLabel = document.createElement('label');
+    itemsPerPageLabel.style.cssText = 'color: #cbd5e1; font-size: 0.85rem;';
+    itemsPerPageLabel.textContent = 'Items per page:';
+    controls.appendChild(itemsPerPageLabel);
+    
+    const itemsPerPageSelect = document.createElement('select');
+    itemsPerPageSelect.style.cssText = 'padding: 6px 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 4px; font-size: 0.85rem; cursor: pointer;';
+    itemsPerPageSelect.value = itemsPerPage;
+    [10, 25, 50, 100].forEach(val => {
+        const option = document.createElement('option');
+        option.value = val;
+        option.textContent = val;
+        itemsPerPageSelect.appendChild(option);
+    });
+    itemsPerPageSelect.addEventListener('change', (e) => {
+        itemsPerPage = parseInt(e.target.value);
+        currentPage = 1;
+        renderDashboardTable();
+    });
+    controls.appendChild(itemsPerPageSelect);
+    
+    // Page navigation
+    const nav = document.createElement('div');
+    nav.style.cssText = 'display: flex; align-items: center; gap: 5px;';
+    
+    // First button
+    const firstBtn = createPaginationButton('«', currentPage === 1, () => {
+        currentPage = 1;
+        renderDashboardTable();
+    });
+    nav.appendChild(firstBtn);
+    
+    // Previous button
+    const prevBtn = createPaginationButton('‹', currentPage === 1, () => {
+        if (currentPage > 1) {
+            currentPage--;
+            renderDashboardTable();
+        }
+    });
+    nav.appendChild(prevBtn);
+    
+    // Page numbers
+    const maxVisiblePages = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+    
+    if (endPage - startPage < maxVisiblePages - 1) {
+        startPage = Math.max(1, endPage - maxVisiblePages + 1);
+    }
+    
+    if (startPage > 1) {
+        const firstPageBtn = createPaginationButton('1', false, () => {
+            currentPage = 1;
+            renderDashboardTable();
+        });
+        nav.appendChild(firstPageBtn);
+        
+        if (startPage > 2) {
+            const ellipsis = document.createElement('span');
+            ellipsis.textContent = '...';
+            ellipsis.style.cssText = 'color: #94a3b8; padding: 0 5px;';
+            nav.appendChild(ellipsis);
+        }
+    }
+    
+    for (let i = startPage; i <= endPage; i++) {
+        const pageBtn = createPaginationButton(i.toString(), i === currentPage, () => {
+            currentPage = i;
+            renderDashboardTable();
+        });
+        if (i === currentPage) {
+            pageBtn.style.background = 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)';
+            pageBtn.style.color = 'white';
+        }
+        nav.appendChild(pageBtn);
+    }
+    
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            const ellipsis = document.createElement('span');
+            ellipsis.textContent = '...';
+            ellipsis.style.cssText = 'color: #94a3b8; padding: 0 5px;';
+            nav.appendChild(ellipsis);
+        }
+        
+        const lastPageBtn = createPaginationButton(totalPages.toString(), false, () => {
+            currentPage = totalPages;
+            renderDashboardTable();
+        });
+        nav.appendChild(lastPageBtn);
+    }
+    
+    // Next button
+    const nextBtn = createPaginationButton('›', currentPage === totalPages, () => {
+        if (currentPage < totalPages) {
+            currentPage++;
+            renderDashboardTable();
+        }
+    });
+    nav.appendChild(nextBtn);
+    
+    // Last button
+    const lastBtn = createPaginationButton('»', currentPage === totalPages, () => {
+        currentPage = totalPages;
+        renderDashboardTable();
+    });
+    nav.appendChild(lastBtn);
+    
+    controls.appendChild(nav);
+    info.appendChild(controls);
+    container.appendChild(info);
+}
+
+/**
+ * Create a pagination button
+ */
+function createPaginationButton(text, disabled, onClick) {
+    const btn = document.createElement('button');
+    btn.textContent = text;
+    btn.style.cssText = 'padding: 6px 12px; border: 1px solid #334155; background: #1a1f2e; color: #e0e7ff; border-radius: 4px; cursor: pointer; font-size: 0.85rem; min-width: 36px; transition: all 0.2s;';
+    
+    if (disabled) {
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+    } else {
+        btn.addEventListener('mouseenter', () => {
+            btn.style.background = '#334155';
+        });
+        btn.addEventListener('mouseleave', () => {
+            btn.style.background = '#1a1f2e';
+        });
+        btn.addEventListener('click', onClick);
+    }
+    
+    return btn;
 }
 
 /**
@@ -709,34 +1443,62 @@ window.loadFilterPreset = async function() {
         if (result.success && result.preset) {
             const preset = result.preset;
             
-            // Update filter inputs
-            if (preset.devBuySizeMin !== null && preset.devBuySizeMin !== undefined) {
-                document.getElementById('devBuySizeMin').value = preset.devBuySizeMin;
-                currentFilters.devBuySizeMin = parseFloat(preset.devBuySizeMin);
+            // Clear existing filters
+            activeFilters = [];
+            
+            // Load filters from preset
+            // Support both old format (for backward compatibility) and new format
+            if (preset.filters && Array.isArray(preset.filters)) {
+                // New format: array of filter objects
+                activeFilters = preset.filters.map(filter => ({
+                    key: filter.key,
+                    label: filter.label || DATA_POINTS.find(dp => dp.key === filter.key)?.label || filter.key,
+                    type: filter.type || DATA_POINTS.find(dp => dp.key === filter.key)?.type || 'sol',
+                    min: filter.min !== null && filter.min !== undefined ? parseFloat(filter.min) : null,
+                    max: filter.max !== null && filter.max !== undefined ? parseFloat(filter.max) : null,
+                    minEnabled: filter.minEnabled !== false,
+                    maxEnabled: filter.maxEnabled !== false
+                }));
+            } else {
+                // Old format: individual filter properties (backward compatibility)
+                // Convert old format to new format
+                if (preset.devBuySizeMin !== null && preset.devBuySizeMin !== undefined) {
+                    activeFilters.push({
+                        key: 'devBuyAmountSOL',
+                        label: 'Dev Buy Amount in SOL',
+                        type: 'sol',
+                        min: parseFloat(preset.devBuySizeMin),
+                        max: parseFloat(preset.devBuySizeMax || 20),
+                        minEnabled: true,
+                        maxEnabled: true
+                    });
+                }
+                if (preset.buySizeMin !== null && preset.buySizeMin !== undefined) {
+                    activeFilters.push({
+                        key: 'walletBuyAmountSOL',
+                        label: 'Wallet Buy Amount in SOL',
+                        type: 'sol',
+                        min: parseFloat(preset.buySizeMin),
+                        max: parseFloat(preset.buySizeMax || 20),
+                        minEnabled: true,
+                        maxEnabled: true
+                    });
+                }
+                if (preset.pnlMin !== null && preset.pnlMin !== undefined) {
+                    activeFilters.push({
+                        key: 'pnlPercent',
+                        label: '% PNL per token',
+                        type: 'percent',
+                        min: parseFloat(preset.pnlMin),
+                        max: parseFloat(preset.pnlMax || 100),
+                        minEnabled: true,
+                        maxEnabled: true
+                    });
+                }
             }
-            if (preset.devBuySizeMax !== null && preset.devBuySizeMax !== undefined) {
-                document.getElementById('devBuySizeMax').value = preset.devBuySizeMax;
-                document.getElementById('devBuySizeSlider').value = preset.devBuySizeMax;
-                currentFilters.devBuySizeMax = parseFloat(preset.devBuySizeMax);
-            }
-            if (preset.buySizeMin !== null && preset.buySizeMin !== undefined) {
-                document.getElementById('buySizeMin').value = preset.buySizeMin;
-                currentFilters.buySizeMin = parseFloat(preset.buySizeMin);
-            }
-            if (preset.buySizeMax !== null && preset.buySizeMax !== undefined) {
-                document.getElementById('buySizeMax').value = preset.buySizeMax;
-                document.getElementById('buySizeSlider').value = preset.buySizeMax;
-                currentFilters.buySizeMax = parseFloat(preset.buySizeMax);
-            }
-            if (preset.pnlMin !== null && preset.pnlMin !== undefined) {
-                document.getElementById('pnlMin').value = preset.pnlMin;
-                currentFilters.pnlMin = parseFloat(preset.pnlMin);
-            }
-            if (preset.pnlMax !== null && preset.pnlMax !== undefined) {
-                document.getElementById('pnlMax').value = preset.pnlMax;
-                document.getElementById('pnlSlider').value = preset.pnlMax;
-                currentFilters.pnlMax = parseFloat(preset.pnlMax);
-            }
+            
+            // Render filters
+            renderFilters();
             
             // Apply filters
             applyFilters();
@@ -842,17 +1604,39 @@ window.saveFilterPreset = async function() {
         return;
     }
     
+    // Save filters in new format (array of filter objects)
     const filters = {
-        devBuySizeMin: currentFilters.devBuySizeMin,
-        devBuySizeMax: currentFilters.devBuySizeMax,
-        buySizeMin: currentFilters.buySizeMin,
-        buySizeMax: currentFilters.buySizeMax,
-        pnlMin: currentFilters.pnlMin,
-        pnlMax: currentFilters.pnlMax
+        filters: activeFilters.map(filter => ({
+            key: filter.key,
+            label: filter.label,
+            type: filter.type,
+            min: filter.min,
+            max: filter.max,
+            minEnabled: filter.minEnabled,
+            maxEnabled: filter.maxEnabled
+        }))
     };
     
+    // Also include old format for backward compatibility
+    const oldFormatFilters = {};
+    activeFilters.forEach(filter => {
+        if (filter.key === 'devBuyAmountSOL') {
+            oldFormatFilters.devBuySizeMin = filter.min;
+            oldFormatFilters.devBuySizeMax = filter.max;
+        } else if (filter.key === 'walletBuyAmountSOL') {
+            oldFormatFilters.buySizeMin = filter.min;
+            oldFormatFilters.buySizeMax = filter.max;
+        } else if (filter.key === 'pnlPercent') {
+            oldFormatFilters.pnlMin = filter.min;
+            oldFormatFilters.pnlMax = filter.max;
+        }
+    });
+    
+    // Merge both formats
+    const filtersToSave = { ...filters, ...oldFormatFilters };
+    
     try {
-        const result = await api.saveDashboardFilterPreset(nameInput.value.trim(), filters);
+        const result = await api.saveDashboardFilterPreset(nameInput.value.trim(), filtersToSave);
         if (result.success) {
             // Reload presets dropdown
             await loadFilterPresets();
