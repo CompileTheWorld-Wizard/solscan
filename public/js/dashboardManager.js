@@ -413,9 +413,9 @@ function updateSellStatistics() {
             if (token.sells && token.sells.length >= sellPosition) {
                 const sell = token.sells[sellPosition - 1]; // 0-indexed
                 
-                // Collect profit at this sell
-                if (sell.profitAtSell !== null && sell.profitAtSell !== undefined) {
-                    profitsAtSell.push(sell.profitAtSell);
+                // Collect nth Sell PNL (Wallet Buy Market Cap / nth Sell Market Cap)
+                if (sell.firstSellPNL !== null && sell.firstSellPNL !== undefined) {
+                    profitsAtSell.push(sell.firstSellPNL);
                 }
                 
                 // Collect holding time
@@ -426,6 +426,7 @@ function updateSellStatistics() {
         });
         
         // Calculate averages
+        // Average profit of nth sell = Average of nth sell PNL
         const avgProfit = profitsAtSell.length > 0
             ? profitsAtSell.reduce((sum, p) => sum + p, 0) / profitsAtSell.length
             : null;
@@ -454,10 +455,9 @@ function updateSellStatistics() {
         const profitValue = document.createElement('div');
         profitValue.style.cssText = 'font-size: 1.1rem; font-weight: 600; margin-bottom: 12px;';
         if (avgProfit !== null) {
-            profitValue.textContent = avgProfit >= 0 
-                ? `+${avgProfit.toFixed(2)}%` 
-                : `${avgProfit.toFixed(2)}%`;
-            profitValue.style.color = avgProfit >= 0 ? '#10b981' : '#ef4444';
+            // Display as ratio (Wallet Buy Market Cap / nth Sell Market Cap)
+            profitValue.textContent = avgProfit.toFixed(4);
+            profitValue.style.color = '#e0e7ff';
         } else {
             profitValue.textContent = '-';
             profitValue.style.color = '#94a3b8';

@@ -1536,9 +1536,9 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         const sellAmountSOL = (parseFloat(sell.out_amount) || 0) / Math.pow(10, SOL_DECIMALS);
         const sellAmountTokens = (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals);
         const sellMarketCap = sell.marketCap ? parseFloat(sell.marketCap) : null;
-        // First Sell PNL = Wallet Sell Market Cap / Wallet Buy Market Cap
-        const firstSellPNL = firstBuyMarketCap && sellMarketCap && firstBuyMarketCap > 0
-          ? (sellMarketCap / firstBuyMarketCap)
+        // nth Sell PNL = Wallet Buy Market Cap / nth Sell Market Cap
+        const firstSellPNL = firstBuyMarketCap && sellMarketCap && sellMarketCap > 0
+          ? (firstBuyMarketCap / sellMarketCap)
           : null;
         const sellPercentOfBuy = walletBuyAmountSOL > 0
           ? (sellAmountSOL / walletBuyAmountSOL) * 100

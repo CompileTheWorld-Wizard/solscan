@@ -110,9 +110,14 @@
                 <div id="dashboardTab" class="tab-content active">
                     <div style="margin-bottom: 20px;">
                         <label for="dashboardWalletSelect" style="display: block; margin-bottom: 8px; font-weight: 600; color: #cbd5e1; font-size: 0.9rem;">Select Wallet</label>
-                        <select id="dashboardWalletSelect" onchange="window.loadDashboardData()" style="width: 100%; max-width: 500px; padding: 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem; height: 42px; box-sizing: border-box;">
-                            <option value="">-- Select a wallet --</option>
-                        </select>
+                        <div style="display: flex; gap: 10px; align-items: center; width: 100%;">
+                            <select id="dashboardWalletSelect" onchange="window.loadDashboardData()" style="flex: 1; padding: 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem; height: 42px; box-sizing: border-box;">
+                                <option value="">-- Select a wallet --</option>
+                            </select>
+                            <button onclick="window.loadDashboardData()" style="padding: 10px 20px; background: #334155; color: #e0e7ff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; height: 42px; box-sizing: border-box; white-space: nowrap; display: flex; align-items: center; gap: 6px; transition: all 0.2s;" onmouseover="this.style.background='#475569'" onmouseout="this.style.background='#334155'" title="Refresh Dashboard Data">
+                                <span>🔄</span> Refresh
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Wallet Statistics Section -->
