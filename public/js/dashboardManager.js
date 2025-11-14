@@ -328,11 +328,13 @@ function updateAverageDataPoints() {
         walletAvgBuySizeEl.style.color = '#e0e7ff';
     }
     
-    // 6. Dev Average Buy Size in SOL - Sum of Dev Buy Amount in SOL (despite name, it's a sum)
-    const devAvgBuySize = filteredData.reduce((sum, token) => {
-        const devBuySize = token.devBuyAmountSOL;
-        return sum + (devBuySize && devBuySize > 0 ? devBuySize : 0);
-    }, 0);
+    // 6. Dev Average Buy Size in SOL - Average of Dev Buy Amount in SOL
+    const devBuySizes = filteredData
+        .map(token => token.devBuyAmountSOL)
+        .filter(size => size !== null && size !== undefined && size > 0);
+    const devAvgBuySize = devBuySizes.length > 0 
+        ? devBuySizes.reduce((sum, size) => sum + size, 0) / devBuySizes.length 
+        : 0;
     const devAvgBuySizeEl = document.getElementById('devAvgBuySize');
     if (devAvgBuySizeEl) {
         devAvgBuySizeEl.textContent = devAvgBuySize > 0 
@@ -903,6 +905,143 @@ window.deleteFilterPreset = async function() {
         const { showNotification } = await import('./utils.js');
         showNotification('Error deleting filter preset: ' + error.message, 'error');
     }
+};
+
+/**
+ * Export dashboard table data to Excel
+ */
+window.exportDashboardToExcel = async function() {
+    if (!filteredData || filteredData.length === 0) {
+        const { showNotification } = await import('./utils.js');
+        showNotification('No data to export', 'error');
+        return;
+    }
+    
+    // Get wallet address for filename
+    const select = document.getElementById('dashboardWalletSelect');
+    const walletAddress = select ? select.value : 'dashboard';
+    
+    // Build header row (same as table)
+    const baseHeaders = [
+        'PNL per token in SOL',
+        '% PNL per token',
+        'Token Name',
+        'Token Symbol',
+        'Token Address',
+        'Creator Address',
+        'Number of Socials',
+        'Dev Buy Amount in SOL',
+        'Wallet Buy Amount in SOL',
+        'Wallet buy SOL % of dev',
+        'Dev Buy Amount in Tokens',
+        'Wallet Buy Amount in Tokens',
+        'Wallet buy Tokens % of dev',
+        'Dev buy Tokens % of total supply',
+        'Wallet buy % of total supply',
+        'Wallet buy % of the remaining supply',
+        'Token Peak Price Before 1st Sell',
+        'Token Peak Price 10s After 1st Sell',
+        'Wallet Buy Position After Dev',
+        'Wallet Buy Block #',
+        'Wallet Buy Block # After Dev',
+        'Wallet Buy Timestamp',
+        'Wallet Buy Market Cap',
+        'Wallet Gas & Fees Amount',
+        'Transaction Signature'
+    ];
+    
+    // Add sell columns for each sell (up to maxSells)
+    const sellHeaders = [];
+    for (let i = 1; i <= maxSells; i++) {
+        sellHeaders.push(
+            `Wallet Sell Number ${i}`,
+            `Wallet Sell Market Cap ${i}`,
+            `${i === 1 ? 'First' : i === 2 ? '2nd' : i === 3 ? '3rd' : `${i}th`} Sell PNL`,
+            `Sell % of Buy ${i}`,
+            `Wallet Sell Amount in SOL ${i}`,
+            `Wallet Sell Amount in Tokens ${i}`,
+            `Transaction Signature ${i}`,
+            `Wallet Sell Timestamp ${i}`
+        );
+    }
+    
+    const headers = [...baseHeaders, ...sellHeaders];
+    
+    // Build data rows
+    const rows = filteredData.map(token => {
+        const row = [];
+        
+        // Base columns
+        row.push(
+            token.pnlSOL !== null && token.pnlSOL !== undefined ? token.pnlSOL : '',
+            token.pnlPercent !== null && token.pnlPercent !== undefined ? token.pnlPercent : '',
+            token.tokenName || '',
+            token.tokenSymbol || '',
+            token.tokenAddress || '',
+            token.creatorAddress || '',
+            token.numberOfSocials || 0,
+            token.devBuyAmountSOL !== null && token.devBuyAmountSOL !== undefined ? token.devBuyAmountSOL : '',
+            token.walletBuyAmountSOL !== null && token.walletBuyAmountSOL !== undefined ? token.walletBuyAmountSOL : '',
+            token.walletBuySOLPercentOfDev !== null && token.walletBuySOLPercentOfDev !== undefined ? token.walletBuySOLPercentOfDev : '',
+            token.devBuyAmountTokens !== null && token.devBuyAmountTokens !== undefined ? token.devBuyAmountTokens : '',
+            token.walletBuyAmountTokens !== null && token.walletBuyAmountTokens !== undefined ? token.walletBuyAmountTokens : '',
+            token.walletBuyTokensPercentOfDev !== null && token.walletBuyTokensPercentOfDev !== undefined ? token.walletBuyTokensPercentOfDev : '',
+            token.devBuyTokensPercentOfTotalSupply !== null && token.devBuyTokensPercentOfTotalSupply !== undefined ? token.devBuyTokensPercentOfTotalSupply : '',
+            token.walletBuyPercentOfTotalSupply !== null && token.walletBuyPercentOfTotalSupply !== undefined ? token.walletBuyPercentOfTotalSupply : '',
+            token.walletBuyPercentOfRemainingSupply !== null && token.walletBuyPercentOfRemainingSupply !== undefined ? token.walletBuyPercentOfRemainingSupply : '',
+            token.tokenPeakPriceBeforeFirstSell !== null && token.tokenPeakPriceBeforeFirstSell !== undefined ? token.tokenPeakPriceBeforeFirstSell : '',
+            token.tokenPeakPrice10sAfterFirstSell !== null && token.tokenPeakPrice10sAfterFirstSell !== undefined ? token.tokenPeakPrice10sAfterFirstSell : '',
+            token.walletBuyPositionAfterDev !== null ? token.walletBuyPositionAfterDev : '',
+            token.walletBuyBlockNumber || '',
+            token.walletBuyBlockNumberAfterDev !== null ? token.walletBuyBlockNumberAfterDev : '',
+            token.walletBuyTimestamp || '',
+            token.walletBuyMarketCap !== null && token.walletBuyMarketCap !== undefined ? token.walletBuyMarketCap : '',
+            token.walletGasAndFeesAmount !== null && token.walletGasAndFeesAmount !== undefined ? token.walletGasAndFeesAmount : '',
+            token.transactionSignature || ''
+        );
+        
+        // Add sell columns
+        for (let i = 0; i < maxSells; i++) {
+            const sell = token.sells && token.sells[i];
+            if (sell) {
+                row.push(
+                    sell.sellNumber || '',
+                    sell.marketCap !== null && sell.marketCap !== undefined ? sell.marketCap : '',
+                    sell.firstSellPNL !== null && sell.firstSellPNL !== undefined ? sell.firstSellPNL : '',
+                    sell.sellPercentOfBuy !== null && sell.sellPercentOfBuy !== undefined ? sell.sellPercentOfBuy : '',
+                    sell.sellAmountSOL !== null && sell.sellAmountSOL !== undefined ? sell.sellAmountSOL : '',
+                    sell.sellAmountTokens !== null && sell.sellAmountTokens !== undefined ? sell.sellAmountTokens : '',
+                    sell.transactionSignature || '',
+                    sell.timestamp || ''
+                );
+            } else {
+                // Empty cells for missing sells
+                for (let j = 0; j < 8; j++) {
+                    row.push('');
+                }
+            }
+        }
+        
+        return row;
+    });
+    
+    // Create workbook
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    
+    // Set column widths
+    const colWidths = headers.map(() => ({ wch: 15 }));
+    ws['!cols'] = colWidths;
+    
+    // Add worksheet to workbook
+    XLSX.utils.book_append_sheet(wb, ws, 'Dashboard Data');
+    
+    // Generate filename
+    const walletPrefix = walletAddress && walletAddress.length > 8 ? walletAddress.substring(0, 8) : 'dashboard';
+    const filename = `Dashboard_${walletPrefix}_${Date.now()}.xlsx`;
+    
+    // Download file
+    XLSX.writeFile(wb, filename);
 };
 
 // Make loadDashboardData available globally

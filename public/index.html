@@ -117,6 +117,9 @@
                             <button onclick="window.loadDashboardData()" style="padding: 10px 20px; background: #334155; color: #e0e7ff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; height: 42px; box-sizing: border-box; white-space: nowrap; display: flex; align-items: center; gap: 6px; transition: all 0.2s;" onmouseover="this.style.background='#475569'" onmouseout="this.style.background='#334155'" title="Refresh Dashboard Data">
                                 <span>🔄</span> Refresh
                             </button>
+                            <button onclick="window.exportDashboardToExcel()" style="padding: 10px 20px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; height: 42px; box-sizing: border-box; white-space: nowrap; display: flex; align-items: center; gap: 6px; transition: all 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'" title="Export Dashboard Data to Excel">
+                                <span>📥</span> Export
+                            </button>
                         </div>
                     </div>
 
@@ -199,7 +202,7 @@
                                         <div class="dual-range-progress" id="devBuySizeProgress" style="position: absolute; height: 6px; background: #3b82f6; border-radius: 3px; top: 15px; z-index: 1; left: 0%; width: 100%;"></div>
                                         <input type="range" id="devBuySizeSliderMin" min="0" max="99" step="0.01" value="0" 
                                             class="dual-range-input" style="position: absolute; width: 100%; top: 10px; z-index: 2;">
-                                        <input type="range" id="devBuySizeSliderMax" min="0" max="99" step="0.01" value="99 " 
+                                        <input type="range" id="devBuySizeSliderMax" min="0" max="99" step="0.01" value="99" 
                                             class="dual-range-input" style="position: absolute; width: 100%; top: 10px; z-index: 3;">
                                     </div>
                                     <span>99</span>
