@@ -109,6 +109,18 @@ CREATE TABLE IF NOT EXISTS credentials (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Create the dashboard_filter_presets table
+CREATE TABLE IF NOT EXISTS dashboard_filter_presets (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) UNIQUE NOT NULL,
+    filters_json JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create index for dashboard_filter_presets
+CREATE INDEX IF NOT EXISTS idx_filter_preset_name ON dashboard_filter_presets(name);
+
 -- Optional: Create a view for transaction statistics
 CREATE OR REPLACE VIEW transaction_stats AS
 SELECT 

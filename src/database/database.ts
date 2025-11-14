@@ -181,17 +181,93 @@ class DatabaseService {
         CREATE TABLE IF NOT EXISTS dashboard_filter_presets (
           id SERIAL PRIMARY KEY,
           name VARCHAR(255) UNIQUE NOT NULL,
-          dev_buy_size_min NUMERIC(20, 2),
-          dev_buy_size_max NUMERIC(20, 2),
-          buy_size_min NUMERIC(20, 2),
-          buy_size_max NUMERIC(20, 2),
-          pnl_min NUMERIC(10, 2),
-          pnl_max NUMERIC(10, 2),
+          filters_json JSONB NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE INDEX IF NOT EXISTS idx_filter_preset_name ON dashboard_filter_presets(name);
+        
+        -- Migration: Convert old format to new format and remove old columns
+        DO $$ 
+        BEGIN
+          -- Add filters_json column if it doesn't exist
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'dashboard_filter_presets' 
+            AND column_name = 'filters_json'
+          ) THEN
+            ALTER TABLE dashboard_filter_presets ADD COLUMN filters_json JSONB;
+            
+            -- Migrate old format data to new format
+            UPDATE dashboard_filter_presets
+            SET filters_json = jsonb_build_array(
+              CASE 
+                WHEN dev_buy_size_min IS NOT NULL OR dev_buy_size_max IS NOT NULL THEN
+                  jsonb_build_object(
+                    'key', 'devBuyAmountSOL',
+                    'label', 'Dev Buy Amount in SOL',
+                    'type', 'sol',
+                    'min', dev_buy_size_min,
+                    'max', dev_buy_size_max,
+                    'minEnabled', true,
+                    'maxEnabled', true
+                  )
+                ELSE NULL
+              END,
+              CASE 
+                WHEN buy_size_min IS NOT NULL OR buy_size_max IS NOT NULL THEN
+                  jsonb_build_object(
+                    'key', 'walletBuyAmountSOL',
+                    'label', 'Wallet Buy Amount in SOL',
+                    'type', 'sol',
+                    'min', buy_size_min,
+                    'max', buy_size_max,
+                    'minEnabled', true,
+                    'maxEnabled', true
+                  )
+                ELSE NULL
+              END,
+              CASE 
+                WHEN pnl_min IS NOT NULL OR pnl_max IS NOT NULL THEN
+                  jsonb_build_object(
+                    'key', 'pnlPercent',
+                    'label', '% PNL per token',
+                    'type', 'percent',
+                    'min', pnl_min,
+                    'max', pnl_max,
+                    'minEnabled', true,
+                    'maxEnabled', true
+                  )
+                ELSE NULL
+              END
+            )
+            WHERE filters_json IS NULL;
+            
+            -- Remove NULL entries from array
+            UPDATE dashboard_filter_presets
+            SET filters_json = (
+              SELECT jsonb_agg(elem)
+              FROM jsonb_array_elements(filters_json) elem
+              WHERE elem IS NOT NULL
+            )
+            WHERE filters_json IS NOT NULL;
+          END IF;
+          
+          -- Remove old columns if they exist (for existing databases)
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'dashboard_filter_presets' 
+            AND column_name = 'dev_buy_size_min'
+          ) THEN
+            ALTER TABLE dashboard_filter_presets DROP COLUMN IF EXISTS dev_buy_size_min;
+            ALTER TABLE dashboard_filter_presets DROP COLUMN IF EXISTS dev_buy_size_max;
+            ALTER TABLE dashboard_filter_presets DROP COLUMN IF EXISTS buy_size_min;
+            ALTER TABLE dashboard_filter_presets DROP COLUMN IF EXISTS buy_size_max;
+            ALTER TABLE dashboard_filter_presets DROP COLUMN IF EXISTS pnl_min;
+            ALTER TABLE dashboard_filter_presets DROP COLUMN IF EXISTS pnl_max;
+          END IF;
+        END $$;
       `;
 
       await this.pool.query(createTableQuery);
@@ -1480,6 +1556,15 @@ class DatabaseService {
   async saveDashboardFilterPreset(
     name: string,
     filters: {
+      filters?: Array<{
+        key: string;
+        label: string;
+        type: string;
+        min: number | null;
+        max: number | null;
+        minEnabled?: boolean;
+        maxEnabled?: boolean;
+      }>;
       devBuySizeMin?: number | null;
       devBuySizeMax?: number | null;
       buySizeMin?: number | null;
@@ -1489,35 +1574,69 @@ class DatabaseService {
     }
   ): Promise<void> {
     try {
+      // Extract new format filters array if present
+      let filtersJson: string;
+      
+      if (filters.filters && Array.isArray(filters.filters)) {
+        // New format: use filters array directly
+        filtersJson = JSON.stringify(filters.filters);
+      } else {
+        // Old format: convert to new format for backward compatibility
+        const convertedFilters: any[] = [];
+        
+        if (filters.devBuySizeMin !== null && filters.devBuySizeMin !== undefined || 
+            filters.devBuySizeMax !== null && filters.devBuySizeMax !== undefined) {
+          convertedFilters.push({
+            key: 'devBuyAmountSOL',
+            label: 'Dev Buy Amount in SOL',
+            type: 'sol',
+            min: filters.devBuySizeMin ?? null,
+            max: filters.devBuySizeMax ?? null,
+            minEnabled: true,
+            maxEnabled: true
+          });
+        }
+        
+        if (filters.buySizeMin !== null && filters.buySizeMin !== undefined || 
+            filters.buySizeMax !== null && filters.buySizeMax !== undefined) {
+          convertedFilters.push({
+            key: 'walletBuyAmountSOL',
+            label: 'Wallet Buy Amount in SOL',
+            type: 'sol',
+            min: filters.buySizeMin ?? null,
+            max: filters.buySizeMax ?? null,
+            minEnabled: true,
+            maxEnabled: true
+          });
+        }
+        
+        if (filters.pnlMin !== null && filters.pnlMin !== undefined || 
+            filters.pnlMax !== null && filters.pnlMax !== undefined) {
+          convertedFilters.push({
+            key: 'pnlPercent',
+            label: '% PNL per token',
+            type: 'percent',
+            min: filters.pnlMin ?? null,
+            max: filters.pnlMax ?? null,
+            minEnabled: true,
+            maxEnabled: true
+          });
+        }
+        
+        filtersJson = JSON.stringify(convertedFilters);
+      }
+      
       const query = `
         INSERT INTO dashboard_filter_presets (
           name,
-          dev_buy_size_min,
-          dev_buy_size_max,
-          buy_size_min,
-          buy_size_max,
-          pnl_min,
-          pnl_max
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+          filters_json
+        ) VALUES ($1, $2)
         ON CONFLICT (name) DO UPDATE SET
-          dev_buy_size_min = EXCLUDED.dev_buy_size_min,
-          dev_buy_size_max = EXCLUDED.dev_buy_size_max,
-          buy_size_min = EXCLUDED.buy_size_min,
-          buy_size_max = EXCLUDED.buy_size_max,
-          pnl_min = EXCLUDED.pnl_min,
-          pnl_max = EXCLUDED.pnl_max,
+          filters_json = EXCLUDED.filters_json,
           updated_at = CURRENT_TIMESTAMP
       `;
       
-      await this.pool.query(query, [
-        name,
-        filters.devBuySizeMin ?? null,
-        filters.devBuySizeMax ?? null,
-        filters.buySizeMin ?? null,
-        filters.buySizeMax ?? null,
-        filters.pnlMin ?? null,
-        filters.pnlMax ?? null
-      ]);
+      await this.pool.query(query, [name, filtersJson]);
       
       console.log(`💾 Dashboard filter preset saved: ${name}`);
     } catch (error: any) {
@@ -1535,12 +1654,7 @@ class DatabaseService {
         SELECT 
           id,
           name,
-          dev_buy_size_min as "devBuySizeMin",
-          dev_buy_size_max as "devBuySizeMax",
-          buy_size_min as "buySizeMin",
-          buy_size_max as "buySizeMax",
-          pnl_min as "pnlMin",
-          pnl_max as "pnlMax",
+          filters_json as "filtersJson",
           created_at,
           updated_at
         FROM dashboard_filter_presets
@@ -1548,7 +1662,22 @@ class DatabaseService {
       `;
       
       const result = await this.pool.query(query);
-      return result.rows;
+      // Parse JSON
+      return result.rows.map(row => {
+        if (row.filtersJson) {
+          try {
+            row.filters = typeof row.filtersJson === 'string' 
+              ? JSON.parse(row.filtersJson) 
+              : row.filtersJson;
+          } catch (e) {
+            console.error('Failed to parse filters_json:', e);
+            row.filters = [];
+          }
+        } else {
+          row.filters = [];
+        }
+        return row;
+      });
     } catch (error) {
       console.error('Failed to fetch filter presets:', error);
       return [];
@@ -1564,12 +1693,7 @@ class DatabaseService {
         SELECT 
           id,
           name,
-          dev_buy_size_min as "devBuySizeMin",
-          dev_buy_size_max as "devBuySizeMax",
-          buy_size_min as "buySizeMin",
-          buy_size_max as "buySizeMax",
-          pnl_min as "pnlMin",
-          pnl_max as "pnlMax",
+          filters_json as "filtersJson",
           created_at,
           updated_at
         FROM dashboard_filter_presets
@@ -1578,7 +1702,26 @@ class DatabaseService {
       `;
       
       const result = await this.pool.query(query, [name]);
-      return result.rows.length > 0 ? result.rows[0] : null;
+      if (result.rows.length === 0) {
+        return null;
+      }
+      
+      const row = result.rows[0];
+      // Parse JSON
+      if (row.filtersJson) {
+        try {
+          row.filters = typeof row.filtersJson === 'string' 
+            ? JSON.parse(row.filtersJson) 
+            : row.filtersJson;
+        } catch (e) {
+          console.error('Failed to parse filters_json:', e);
+          row.filters = [];
+        }
+      } else {
+        row.filters = [];
+      }
+      
+      return row;
     } catch (error) {
       console.error('Failed to fetch filter preset:', error);
       return null;
