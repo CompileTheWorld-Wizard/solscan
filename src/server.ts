@@ -1527,7 +1527,11 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         }
       }
       
+      // Get buy timestamp for holding time calculation
+      const buyTimestamp = firstBuy ? (firstBuy.blockTimestamp || firstBuy.created_at) : null;
+      
       // Format sell transactions
+      let cumulativeSellAmountSOL = 0;
       const formattedSells = sells.map((sell: any, index: number) => {
         const sellAmountSOL = (parseFloat(sell.out_amount) || 0) / Math.pow(10, SOL_DECIMALS);
         const sellAmountTokens = (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals);
@@ -1540,6 +1544,24 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
           ? (sellAmountSOL / walletBuyAmountSOL) * 100
           : null;
         
+        // Calculate cumulative profit at this sell point
+        cumulativeSellAmountSOL += sellAmountSOL;
+        const profitAtSell = walletBuyAmountSOL > 0
+          ? ((cumulativeSellAmountSOL - walletBuyAmountSOL) / walletBuyAmountSOL) * 100
+          : null;
+        
+        // Calculate holding time (time from buy to this sell)
+        let holdingTimeSeconds = null;
+        if (buyTimestamp) {
+          const sellTimestamp = sell.blockTimestamp || sell.created_at;
+          if (sellTimestamp) {
+            const buyTime = new Date(buyTimestamp).getTime();
+            const sellTime = new Date(sellTimestamp).getTime();
+            holdingTimeSeconds = Math.floor((sellTime - buyTime) / 1000);
+            if (holdingTimeSeconds < 0) holdingTimeSeconds = null;
+          }
+        }
+        
         return {
           sellNumber: index + 1,
           marketCap: sellMarketCap,
@@ -1548,7 +1570,9 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
           sellAmountSOL: sellAmountSOL,
           sellAmountTokens: sellAmountTokens,
           transactionSignature: sell.transaction_id,
-          timestamp: formatTimestamp(sell.blockTimestamp || sell.created_at)
+          timestamp: formatTimestamp(sell.blockTimestamp || sell.created_at),
+          profitAtSell: profitAtSell,
+          holdingTimeSeconds: holdingTimeSeconds
         };
       });
       

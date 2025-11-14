@@ -12,9 +12,9 @@ let maxSells = 0;
 // Current filter values
 let currentFilters = {
     devBuySizeMin: 0,
-    devBuySizeMax: 999,
+    devBuySizeMax: 99,
     buySizeMin: 0,
-    buySizeMax: 999,
+    buySizeMax: 99,
     pnlMin: -100,
     pnlMax: 100
 };
@@ -56,10 +56,10 @@ export async function initializeDashboard() {
  */
 function setupFilterListeners() {
     // Dev Buy Size filter
-    setupDualRangeSlider('devBuySize', 0, 999, 0, 999);
+    setupDualRangeSlider('devBuySize', 0, 99, 0, 99);
     
     // Buy Size filter
-    setupDualRangeSlider('buySize', 0, 999, 0, 999);
+    setupDualRangeSlider('buySize', 0, 99, 0, 99);
     
     // PNL filter
     setupDualRangeSlider('pnl', -100, 100, -100, 100);
@@ -352,6 +352,138 @@ function updateAverageDataPoints() {
             ? `+${avgPNLPerToken.toFixed(2)}%` 
             : `${avgPNLPerToken.toFixed(2)}%`;
         avgPNLPerTokenEl.style.color = avgPNLPerToken >= 0 ? '#10b981' : '#ef4444';
+    }
+    
+    // 8. Calculate average profit and holding time per sell position
+    updateSellStatistics();
+}
+
+/**
+ * Format duration in seconds to human-readable format
+ */
+function formatDuration(seconds) {
+    if (!seconds || seconds < 0) return '-';
+    
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    
+    if (days > 0) {
+        return `${days}d ${hours}h ${minutes}m`;
+    } else if (hours > 0) {
+        return `${hours}h ${minutes}m ${secs}s`;
+    } else if (minutes > 0) {
+        return `${minutes}m ${secs}s`;
+    } else {
+        return `${secs}s`;
+    }
+}
+
+/**
+ * Update sell statistics (average profit and holding time per sell position)
+ */
+function updateSellStatistics() {
+    const container = document.getElementById('sellStatisticsContainer');
+    if (!container) return;
+    
+    if (!filteredData || filteredData.length === 0) {
+        container.innerHTML = '<div style="color: #94a3b8; text-align: center; padding: 20px;">No data available</div>';
+        return;
+    }
+    
+    // Find maximum number of sells across all tokens
+    const maxSells = Math.max(...filteredData.map(token => (token.sells || []).length), 0);
+    
+    if (maxSells === 0) {
+        container.innerHTML = '<div style="color: #94a3b8; text-align: center; padding: 20px;">No sells found</div>';
+        return;
+    }
+    
+    // Clear container
+    container.innerHTML = '';
+    
+    // Calculate averages for each sell position
+    for (let sellPosition = 1; sellPosition <= maxSells; sellPosition++) {
+        const profitsAtSell = [];
+        const holdingTimes = [];
+        
+        // Collect data for this sell position across all tokens
+        filteredData.forEach(token => {
+            if (token.sells && token.sells.length >= sellPosition) {
+                const sell = token.sells[sellPosition - 1]; // 0-indexed
+                
+                // Collect profit at this sell
+                if (sell.profitAtSell !== null && sell.profitAtSell !== undefined) {
+                    profitsAtSell.push(sell.profitAtSell);
+                }
+                
+                // Collect holding time
+                if (sell.holdingTimeSeconds !== null && sell.holdingTimeSeconds !== undefined) {
+                    holdingTimes.push(sell.holdingTimeSeconds);
+                }
+            }
+        });
+        
+        // Calculate averages
+        const avgProfit = profitsAtSell.length > 0
+            ? profitsAtSell.reduce((sum, p) => sum + p, 0) / profitsAtSell.length
+            : null;
+        
+        const avgHoldingTime = holdingTimes.length > 0
+            ? Math.floor(holdingTimes.reduce((sum, t) => sum + t, 0) / holdingTimes.length)
+            : null;
+        
+        // Create card for this sell position
+        const sellNumber = sellPosition === 1 ? '1st' : sellPosition === 2 ? '2nd' : sellPosition === 3 ? '3rd' : `${sellPosition}th`;
+        
+        const card = document.createElement('div');
+        card.style.cssText = 'padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;';
+        
+        const title = document.createElement('div');
+        title.style.cssText = 'font-size: 0.9rem; font-weight: 600; color: #cbd5e1; margin-bottom: 12px; text-align: center;';
+        title.textContent = `${sellNumber} Sell`;
+        card.appendChild(title);
+        
+        // Average Profit
+        const profitLabel = document.createElement('div');
+        profitLabel.style.cssText = 'font-size: 0.75rem; color: #94a3b8; margin-bottom: 5px;';
+        profitLabel.textContent = 'Average Profit';
+        card.appendChild(profitLabel);
+        
+        const profitValue = document.createElement('div');
+        profitValue.style.cssText = 'font-size: 1.1rem; font-weight: 600; margin-bottom: 12px;';
+        if (avgProfit !== null) {
+            profitValue.textContent = avgProfit >= 0 
+                ? `+${avgProfit.toFixed(2)}%` 
+                : `${avgProfit.toFixed(2)}%`;
+            profitValue.style.color = avgProfit >= 0 ? '#10b981' : '#ef4444';
+        } else {
+            profitValue.textContent = '-';
+            profitValue.style.color = '#94a3b8';
+        }
+        card.appendChild(profitValue);
+        
+        // Average Holding Time (in seconds)
+        // Average of holding time on nth sell in seconds for all tokens (except tokens without nth sell)
+        const timeLabel = document.createElement('div');
+        timeLabel.style.cssText = 'font-size: 0.75rem; color: #94a3b8; margin-bottom: 5px;';
+        timeLabel.textContent = 'Average Holding Time';
+        card.appendChild(timeLabel);
+        
+        const timeValue = document.createElement('div');
+        timeValue.style.cssText = 'font-size: 1.1rem; font-weight: 600;';
+        if (avgHoldingTime !== null) {
+            // Display in seconds with formatted version in parentheses
+            timeValue.textContent = `${avgHoldingTime.toLocaleString()}s (${formatDuration(avgHoldingTime)})`;
+            timeValue.style.color = '#e0e7ff';
+        } else {
+            timeValue.textContent = '-';
+            timeValue.style.color = '#94a3b8';
+        }
+        card.appendChild(timeValue);
+        
+        container.appendChild(card);
     }
 }
 

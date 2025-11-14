@@ -150,36 +150,54 @@
                         </div>
                     </div>
 
+                    <!-- Average Profit and Holding Time per Sell Section -->
+                    <div class="card" style="margin-bottom: 20px; padding: 20px;">
+                        <div class="section-title" style="margin-bottom: 15px;">📈 Average Profit & Holding Time per Sell</div>
+                        <div id="sellStatisticsContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                            <!-- Dynamic content will be inserted here -->
+                        </div>
+                    </div>
+
                     <!-- Filters Section -->
                     <div class="card" style="margin-bottom: 20px; padding: 20px;">
                         <div class="section-title" style="margin-bottom: 15px;">🔍 Filters</div>
-                        
+
+                        <!-- Filter Presets -->
+                        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #334155;">
+                            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 15px;">
+                                <span style="color: #cbd5e1; font-size: 0.9rem; font-weight: 600;">Presets:</span>
+                                <select id="filterPresetSelect" style="flex: 1; min-width: 200px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
+                                    <option value="">-- Select a preset --</option>
+                                </select>
+                                <button onclick="window.loadFilterPreset()" style="padding: 8px 16px; background: #334155; color: #e0e7ff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">Load</button>
+                                <button onclick="window.openSavePresetModal()" style="padding: 8px 16px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">Save</button>
+                                <button onclick="window.deleteFilterPreset()" style="padding: 8px 16px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">Delete</button>
+                            </div>
+                        </div>
                         <!-- Dev Buy Size Filter -->
                         <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #cbd5e1; font-size: 0.9rem;">Dev Buy Size (SOL)</label>
                             <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
                                 <div style="flex: 1; min-width: 200px;">
                                     <div style="display: flex; gap: 10px; align-items: center;">
-                                        <input type="number" id="devBuySizeMin" min="0" max="999" step="0.01" value="0" 
+                                        <input type="number" id="devBuySizeMin" min="0" max="99" step="0.01" value="0" 
                                             style="width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
                                         <span style="color: #94a3b8;">to</span>
-                                        <input type="number" id="devBuySizeMax" min="0" max="999" step="0.01" value="999" 
+                                        <input type="number" id="devBuySizeMax" min="0" max="99" step="0.01" value="99" 
                                             style="width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
                                     </div>
                                 </div>
-                                <div style="flex: 2; min-width: 300px; position: relative;">
-                                    <div class="dual-range-container" style="position: relative; height: 40px; padding: 15px 0;">
+                                <div style="flex: 2; min-width: 300px; position: relative; display: flex; justify-content: space-between; gap:5px; align-items: center;">
+                                    <span>0</span>
+                                    <div class="dual-range-container" style="position: relative; height: 40px; padding: 15px 0; width: 100%;">
                                         <div class="dual-range-track" style="position: absolute; width: 100%; height: 6px; background: #334155; border-radius: 3px; top: 15px; z-index: 1;"></div>
                                         <div class="dual-range-progress" id="devBuySizeProgress" style="position: absolute; height: 6px; background: #3b82f6; border-radius: 3px; top: 15px; z-index: 1; left: 0%; width: 100%;"></div>
-                                        <input type="range" id="devBuySizeSliderMin" min="0" max="999" step="0.01" value="0" 
-                                            class="dual-range-input" style="position: absolute; width: 100%; top: 15px; z-index: 2;">
-                                        <input type="range" id="devBuySizeSliderMax" min="0" max="999" step="0.01" value="999" 
-                                            class="dual-range-input" style="position: absolute; width: 100%; top: 15px; z-index: 3;">
+                                        <input type="range" id="devBuySizeSliderMin" min="0" max="99" step="0.01" value="0" 
+                                            class="dual-range-input" style="position: absolute; width: 100%; top: 10px; z-index: 2;">
+                                        <input type="range" id="devBuySizeSliderMax" min="0" max="99" step="0.01" value="99 " 
+                                            class="dual-range-input" style="position: absolute; width: 100%; top: 10px; z-index: 3;">
                                     </div>
-                                    <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 0.75rem; color: #94a3b8;">
-                                        <span>0</span>
-                                        <span>999</span>
-                                    </div>
+                                    <span>99</span>
                                 </div>
                             </div>
                         </div>
@@ -190,26 +208,24 @@
                             <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
                                 <div style="flex: 1; min-width: 200px;">
                                     <div style="display: flex; gap: 10px; align-items: center;">
-                                        <input type="number" id="buySizeMin" min="0" max="999" step="0.01" value="0" 
+                                        <input type="number" id="buySizeMin" min="0" max="99" step="0.01" value="0" 
                                             style="width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
                                         <span style="color: #94a3b8;">to</span>
-                                        <input type="number" id="buySizeMax" min="0" max="999" step="0.01" value="999" 
+                                        <input type="number" id="buySizeMax" min="0" max="99" step="0.01" value="99" 
                                             style="width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
                                     </div>
                                 </div>
-                                <div style="flex: 2; min-width: 300px; position: relative;">
-                                    <div class="dual-range-container" style="position: relative; height: 40px; padding: 15px 0;">
+                                <div style="flex: 2; min-width: 300px; position: relative;  display: flex; justify-content: space-between; gap:5px; align-items: center;">
+                                    <span>0</span>
+                                    <div class="dual-range-container" style="position: relative; height: 40px; padding: 15px 0; width: 100%;">
                                         <div class="dual-range-track" style="position: absolute; width: 100%; height: 6px; background: #334155; border-radius: 3px; top: 15px; z-index: 1;"></div>
                                         <div class="dual-range-progress" id="buySizeProgress" style="position: absolute; height: 6px; background: #3b82f6; border-radius: 3px; top: 15px; z-index: 1; left: 0%; width: 100%;"></div>
-                                        <input type="range" id="buySizeSliderMin" min="0" max="999" step="0.01" value="0" 
-                                            class="dual-range-input" style="position: absolute; width: 100%; top: 15px; z-index: 2;">
-                                        <input type="range" id="buySizeSliderMax" min="0" max="999" step="0.01" value="999" 
-                                            class="dual-range-input" style="position: absolute; width: 100%; top: 15px; z-index: 3;">
+                                        <input type="range" id="buySizeSliderMin" min="0" max="99" step="0.01" value="0" 
+                                            class="dual-range-input" style="position: absolute; width: 100%; top: 10px; z-index: 2;">
+                                        <input type="range" id="buySizeSliderMax" min="0" max="99" step="0.01" value="99" 
+                                            class="dual-range-input" style="position: absolute; width: 100%; top: 10px; z-index: 3;">
                                     </div>
-                                    <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 0.75rem; color: #94a3b8;">
-                                        <span>0</span>
-                                        <span>999</span>
-                                    </div>
+                                    <span>99</span>
                                 </div>
                             </div>
                         </div>
@@ -227,33 +243,18 @@
                                             style="width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
                                     </div>
                                 </div>
-                                <div style="flex: 2; min-width: 300px; position: relative;">
-                                    <div class="dual-range-container" style="position: relative; height: 40px; padding: 15px 0;">
+                                <div style="flex: 2; min-width: 300px; position: relative; display: flex; justify-content: space-between; gap:5px; align-items: center;">
+                                    <span>-100%</span>
+                                    <div class="dual-range-container" style="position: relative; height: 40px; padding: 15px 0; width: 100%;">
                                         <div class="dual-range-track" style="position: absolute; width: 100%; height: 6px; background: #334155; border-radius: 3px; top: 15px; z-index: 1;"></div>
                                         <div class="dual-range-progress" id="pnlProgress" style="position: absolute; height: 6px; background: #3b82f6; border-radius: 3px; top: 15px; z-index: 1; left: 0%; width: 100%;"></div>
                                         <input type="range" id="pnlSliderMin" min="-100" max="100" step="0.01" value="-100" 
-                                            class="dual-range-input" style="position: absolute; width: 100%; top: 15px; z-index: 2;">
+                                            class="dual-range-input" style="position: absolute; width: 100%; top: 10px; z-index: 2;">
                                         <input type="range" id="pnlSliderMax" min="-100" max="100" step="0.01" value="100" 
-                                            class="dual-range-input" style="position: absolute; width: 100%; top: 15px; z-index: 3;">
+                                            class="dual-range-input" style="position: absolute; width: 100%; top: 10px; z-index: 3;">
                                     </div>
-                                    <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 0.75rem; color: #94a3b8;">
-                                        <span>-100%</span>
-                                        <span>100%</span>
-                                    </div>
+                                    <span>100%</span>
                                 </div>
-                            </div>
-                        </div>
-
-                        <!-- Filter Presets -->
-                        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #334155;">
-                            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 15px;">
-                                <span style="color: #cbd5e1; font-size: 0.9rem; font-weight: 600;">Presets:</span>
-                                <select id="filterPresetSelect" style="flex: 1; min-width: 200px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
-                                    <option value="">-- Select a preset --</option>
-                                </select>
-                                <button onclick="window.loadFilterPreset()" style="padding: 8px 16px; background: #334155; color: #e0e7ff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">Load</button>
-                                <button onclick="window.openSavePresetModal()" style="padding: 8px 16px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">Save</button>
-                                <button onclick="window.deleteFilterPreset()" style="padding: 8px 16px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">Delete</button>
                             </div>
                         </div>
                     </div>
