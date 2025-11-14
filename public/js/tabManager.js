@@ -175,7 +175,10 @@ export async function refreshAnalysis() {
  * Remove wallet and all its transactions from database
  */
 export async function removeWalletFromAnalysis() {
-    const select = document.getElementById('walletSelectTab');
+    // Try dashboard wallet select first, then fall back to analysis select for backward compatibility
+    const dashboardSelect = document.getElementById('dashboardWalletSelect');
+    const analysisSelect = document.getElementById('walletSelectTab');
+    const select = dashboardSelect || analysisSelect;
     const walletAddress = select ? select.value : state.selectedWalletForAnalysis;
     
     if (!walletAddress) {
@@ -201,17 +204,31 @@ export async function removeWalletFromAnalysis() {
             
             // Clear selection
             state.selectedWalletForAnalysis = null;
-            if (select) {
-                select.value = '';
+            if (dashboardSelect) {
+                dashboardSelect.value = '';
+            }
+            if (analysisSelect) {
+                analysisSelect.value = '';
             }
             
-            // Clear analysis display
-            document.getElementById('walletInfoContainer').innerHTML = '';
+            // Clear analysis display if it exists
+            const walletInfoContainer = document.getElementById('walletInfoContainer');
+            if (walletInfoContainer) {
+                walletInfoContainer.innerHTML = '';
+            }
             
-            // Refresh wallet dropdown (clear cache and refetch)
+            // Refresh wallet dropdowns (clear cache and refetch)
             cachedAnalysisWallets = [];
             analysisWalletsCacheTime = 0;
-            await updateAnalysisWalletSelect();
+            if (analysisSelect) {
+                await updateAnalysisWalletSelect();
+            }
+            
+            // Refresh dashboard wallet select
+            if (dashboardSelect) {
+                const { initializeDashboard } = await import('./dashboardManager.js');
+                await initializeDashboard();
+            }
             
             // Refresh transactions tab if it's active
             if (state.currentTab === 'transactions') {
