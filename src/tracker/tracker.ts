@@ -172,7 +172,8 @@ class TransactionTracker {
                   
                   if (marketCapResult.success && typeof marketCapResult.marketCap === 'number') {
                     console.log(`🧮 MarketCap for ${sig}: $${marketCapResult.marketCap}`);
-                    dbService.updateTransactionMarketCap(sig, marketCapResult.marketCap).catch((e) => {
+                    const totalSupply = marketCapResult.tokenSupply ? marketCapResult.tokenSupply : undefined;
+                    dbService.updateTransactionMarketCap(sig, marketCapResult.marketCap, totalSupply).catch((e) => {
                       console.error(`Failed to persist market cap for ${sig}:`, e?.message || e);
                     });
                   } else {

@@ -41,6 +41,11 @@ export async function switchTab(tabName) {
         // Re-render wallet list to update selection state
         const { getAddresses, renderWalletAddressesList } = await import('./walletManager.js');
         renderWalletAddressesList(getAddresses());
+    } else if (tabName === 'dashboard') {
+        document.getElementById('dashboardTab').classList.add('active');
+        // Initialize dashboard wallets if not already done
+        const { initializeDashboard } = await import('./dashboardManager.js');
+        await initializeDashboard();
     }
 }
 

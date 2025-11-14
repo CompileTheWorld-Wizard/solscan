@@ -316,3 +316,120 @@ export async function downloadAllTokensExcel(walletAddress) {
     }
 }
 
+/**
+ * Fetch dashboard data for a wallet
+ */
+export async function fetchDashboardData(walletAddress) {
+    try {
+        const response = await fetch(`/api/dashboard-data/${encodeURIComponent(walletAddress)}`, {
+            method: 'GET',
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch dashboard data');
+        }
+
+        const data = await response.json();
+        return { success: true, data: data.data || [] };
+    } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Fetch all dashboard filter presets
+ */
+export async function fetchDashboardFilterPresets() {
+    try {
+        const response = await fetch('/api/dashboard-filter-presets', {
+            method: 'GET',
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch filter presets');
+        }
+
+        const data = await response.json();
+        return { success: true, presets: data.presets || [] };
+    } catch (error) {
+        console.error('Error fetching filter presets:', error);
+        return { success: false, error: error.message, presets: [] };
+    }
+}
+
+/**
+ * Fetch dashboard filter preset by name
+ */
+export async function fetchDashboardFilterPreset(name) {
+    try {
+        const response = await fetch(`/api/dashboard-filter-presets/${encodeURIComponent(name)}`, {
+            method: 'GET',
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch filter preset');
+        }
+
+        const data = await response.json();
+        return { success: true, preset: data.preset };
+    } catch (error) {
+        console.error('Error fetching filter preset:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Save dashboard filter preset
+ */
+export async function saveDashboardFilterPreset(name, filters) {
+    try {
+        const response = await fetch('/api/dashboard-filter-presets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ name, filters })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to save filter preset');
+        }
+
+        const data = await response.json();
+        return { success: true, message: data.message };
+    } catch (error) {
+        console.error('Error saving filter preset:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Delete dashboard filter preset
+ */
+export async function deleteDashboardFilterPreset(name) {
+    try {
+        const response = await fetch(`/api/dashboard-filter-presets/${encodeURIComponent(name)}`, {
+            method: 'DELETE',
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to delete filter preset');
+        }
+
+        const data = await response.json();
+        return { success: true, message: data.message };
+    } catch (error) {
+        console.error('Error deleting filter preset:', error);
+        return { success: false, error: error.message };
+    }
+}
+

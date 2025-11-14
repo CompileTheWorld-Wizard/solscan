@@ -17,6 +17,7 @@ import { analyzeSelectedWallet, analysisPreviousPage, analysisNextPage } from '.
 import { addSkipToken } from './skipTokens.js';
 import './walletFilter.js'; // Initialize wallet filter
 import './headerStats.js'; // Initialize header stats
+import { initializeDashboard } from './dashboardManager.js';
 
 /**
  * Initialize the application
@@ -47,6 +48,9 @@ export function init() {
     if (window.updateHeaderStats) {
         window.updateHeaderStats();
     }
+    
+    // Initialize dashboard
+    initializeDashboard();
     
     // Check status periodically (only update if something actually changed)
     // Increased interval to 10 seconds to reduce unnecessary checks

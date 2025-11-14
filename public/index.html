@@ -95,7 +95,10 @@
         <div class="card">
             <div class="tabs-container">
                 <div class="tabs-header">
-                    <button class="tab-btn active" data-tab="transactions" onclick="switchTab('transactions')">
+                    <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">
+                        📊 Dashboard
+                    </button>
+                    <button class="tab-btn" data-tab="transactions" onclick="switchTab('transactions')">
                         📊 Recent Transactions
                     </button>
                     <button class="tab-btn" data-tab="analysis" onclick="switchTab('analysis')">
@@ -103,8 +106,172 @@
                     </button>
                 </div>
 
+                <!-- Dashboard Tab -->
+                <div id="dashboardTab" class="tab-content active">
+                    <div style="margin-bottom: 20px;">
+                        <label for="dashboardWalletSelect" style="display: block; margin-bottom: 8px; font-weight: 600; color: #cbd5e1; font-size: 0.9rem;">Select Wallet</label>
+                        <select id="dashboardWalletSelect" onchange="window.loadDashboardData()" style="width: 100%; max-width: 500px; padding: 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem; height: 42px; box-sizing: border-box;">
+                            <option value="">-- Select a wallet --</option>
+                        </select>
+                    </div>
+
+                    <!-- Wallet Statistics Section -->
+                    <div class="card" style="margin-bottom: 20px; padding: 20px;">
+                        <div class="section-title" style="margin-bottom: 15px;">📊 Wallet Statistics</div>
+                        <div id="averageDataPointsContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px;">
+                            <div style="padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;">
+                                <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 5px;">Total Wallet PNL SOL</div>
+                                <div id="totalWalletPNL" style="font-size: 1.2rem; font-weight: 600; color: #e0e7ff;">-</div>
+                            </div>
+                            <div style="padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;">
+                                <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 5px;">Cumulative PNL %</div>
+                                <div id="cumulativePNL" style="font-size: 1.2rem; font-weight: 600; color: #e0e7ff;">-</div>
+                            </div>
+                            <div style="padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;">
+                                <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 5px;">Risk/Reward Profit %</div>
+                                <div id="riskRewardProfit" style="font-size: 1.2rem; font-weight: 600; color: #e0e7ff;">-</div>
+                            </div>
+                            <div style="padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;">
+                                <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 5px;">Net Invested</div>
+                                <div id="netInvested" style="font-size: 1.2rem; font-weight: 600; color: #e0e7ff;">-</div>
+                            </div>
+                            <div style="padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;">
+                                <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 5px;">Wallet Average Buy Size in SOL</div>
+                                <div id="walletAvgBuySize" style="font-size: 1.2rem; font-weight: 600; color: #e0e7ff;">-</div>
+                            </div>
+                            <div style="padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;">
+                                <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 5px;">Dev Average Buy Size in SOL</div>
+                                <div id="devAvgBuySize" style="font-size: 1.2rem; font-weight: 600; color: #e0e7ff;">-</div>
+                            </div>
+                            <div style="padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;">
+                                <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 5px;">Average PNL per Token</div>
+                                <div id="avgPNLPerToken" style="font-size: 1.2rem; font-weight: 600; color: #e0e7ff;">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Filters Section -->
+                    <div class="card" style="margin-bottom: 20px; padding: 20px;">
+                        <div class="section-title" style="margin-bottom: 15px;">🔍 Filters</div>
+                        
+                        <!-- Dev Buy Size Filter -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #cbd5e1; font-size: 0.9rem;">Dev Buy Size (SOL)</label>
+                            <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                                <div style="flex: 1; min-width: 200px;">
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        <input type="number" id="devBuySizeMin" min="0" max="999" step="0.01" value="0" 
+                                            style="width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
+                                        <span style="color: #94a3b8;">to</span>
+                                        <input type="number" id="devBuySizeMax" min="0" max="999" step="0.01" value="999" 
+                                            style="width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
+                                    </div>
+                                </div>
+                                <div style="flex: 2; min-width: 300px; position: relative;">
+                                    <div class="dual-range-container" style="position: relative; height: 40px; padding: 15px 0;">
+                                        <div class="dual-range-track" style="position: absolute; width: 100%; height: 6px; background: #334155; border-radius: 3px; top: 15px; z-index: 1;"></div>
+                                        <div class="dual-range-progress" id="devBuySizeProgress" style="position: absolute; height: 6px; background: #3b82f6; border-radius: 3px; top: 15px; z-index: 1; left: 0%; width: 100%;"></div>
+                                        <input type="range" id="devBuySizeSliderMin" min="0" max="999" step="0.01" value="0" 
+                                            class="dual-range-input" style="position: absolute; width: 100%; top: 15px; z-index: 2;">
+                                        <input type="range" id="devBuySizeSliderMax" min="0" max="999" step="0.01" value="999" 
+                                            class="dual-range-input" style="position: absolute; width: 100%; top: 15px; z-index: 3;">
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 0.75rem; color: #94a3b8;">
+                                        <span>0</span>
+                                        <span>999</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Buy Size Filter -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #cbd5e1; font-size: 0.9rem;">Buy Size (SOL)</label>
+                            <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                                <div style="flex: 1; min-width: 200px;">
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        <input type="number" id="buySizeMin" min="0" max="999" step="0.01" value="0" 
+                                            style="width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
+                                        <span style="color: #94a3b8;">to</span>
+                                        <input type="number" id="buySizeMax" min="0" max="999" step="0.01" value="999" 
+                                            style="width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
+                                    </div>
+                                </div>
+                                <div style="flex: 2; min-width: 300px; position: relative;">
+                                    <div class="dual-range-container" style="position: relative; height: 40px; padding: 15px 0;">
+                                        <div class="dual-range-track" style="position: absolute; width: 100%; height: 6px; background: #334155; border-radius: 3px; top: 15px; z-index: 1;"></div>
+                                        <div class="dual-range-progress" id="buySizeProgress" style="position: absolute; height: 6px; background: #3b82f6; border-radius: 3px; top: 15px; z-index: 1; left: 0%; width: 100%;"></div>
+                                        <input type="range" id="buySizeSliderMin" min="0" max="999" step="0.01" value="0" 
+                                            class="dual-range-input" style="position: absolute; width: 100%; top: 15px; z-index: 2;">
+                                        <input type="range" id="buySizeSliderMax" min="0" max="999" step="0.01" value="999" 
+                                            class="dual-range-input" style="position: absolute; width: 100%; top: 15px; z-index: 3;">
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 0.75rem; color: #94a3b8;">
+                                        <span>0</span>
+                                        <span>999</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- PNL Filter -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #cbd5e1; font-size: 0.9rem;">PNL (%)</label>
+                            <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                                <div style="flex: 1; min-width: 200px;">
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        <input type="number" id="pnlMin" min="-100" max="100" step="0.01" value="-100" 
+                                            style="width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
+                                        <span style="color: #94a3b8;">to</span>
+                                        <input type="number" id="pnlMax" min="-100" max="100" step="0.01" value="100" 
+                                            style="width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
+                                    </div>
+                                </div>
+                                <div style="flex: 2; min-width: 300px; position: relative;">
+                                    <div class="dual-range-container" style="position: relative; height: 40px; padding: 15px 0;">
+                                        <div class="dual-range-track" style="position: absolute; width: 100%; height: 6px; background: #334155; border-radius: 3px; top: 15px; z-index: 1;"></div>
+                                        <div class="dual-range-progress" id="pnlProgress" style="position: absolute; height: 6px; background: #3b82f6; border-radius: 3px; top: 15px; z-index: 1; left: 0%; width: 100%;"></div>
+                                        <input type="range" id="pnlSliderMin" min="-100" max="100" step="0.01" value="-100" 
+                                            class="dual-range-input" style="position: absolute; width: 100%; top: 15px; z-index: 2;">
+                                        <input type="range" id="pnlSliderMax" min="-100" max="100" step="0.01" value="100" 
+                                            class="dual-range-input" style="position: absolute; width: 100%; top: 15px; z-index: 3;">
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 0.75rem; color: #94a3b8;">
+                                        <span>-100%</span>
+                                        <span>100%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Filter Presets -->
+                        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #334155;">
+                            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 15px;">
+                                <span style="color: #cbd5e1; font-size: 0.9rem; font-weight: 600;">Presets:</span>
+                                <select id="filterPresetSelect" style="flex: 1; min-width: 200px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;">
+                                    <option value="">-- Select a preset --</option>
+                                </select>
+                                <button onclick="window.loadFilterPreset()" style="padding: 8px 16px; background: #334155; color: #e0e7ff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">Load</button>
+                                <button onclick="window.openSavePresetModal()" style="padding: 8px 16px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">Save</button>
+                                <button onclick="window.deleteFilterPreset()" style="padding: 8px 16px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">Delete</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dashboard Table -->
+                    <div id="dashboardTableContainer" style="overflow-x: auto;">
+                        <div id="dashboardTableLoading" style="text-align: center; padding: 40px; color: #94a3b8;">
+                            Select a wallet to load dashboard data
+                        </div>
+                        <table id="dashboardTable" style="display: none; width: 100%; border-collapse: collapse; background: #0f1419;">
+                            <thead id="dashboardTableHead"></thead>
+                            <tbody id="dashboardTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <!-- Transactions Tab -->
-                <div id="transactionsTab" class="tab-content active">
+                <div id="transactionsTab" class="tab-content ">
                     <div style="display: flex; gap: 10px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap;">
                         <div style="flex: 1; min-width: 250px;">
                             <label for="walletFilterSelect" style="display: block; margin-bottom: 8px; font-weight: 600; color: #cbd5e1; font-size: 0.9rem;">Filter by Wallet</label>
@@ -198,6 +365,7 @@
                     </div>
                     <div id="walletInfoContainer"></div>
                 </div>
+
             </div>
         </div>
     </div>
@@ -280,9 +448,40 @@
         </div>
     </div>
 
+    <!-- Save Preset Modal -->
+    <div id="savePresetModal" class="modal-overlay">
+        <div class="modal" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>💾 Save Filter Preset</h2>
+                <button class="modal-close" onclick="window.closeSavePresetModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="savePresetNameInput">Preset Name</label>
+                    <input 
+                        type="text" 
+                        id="savePresetNameInput" 
+                        placeholder="Enter preset name..."
+                        autocomplete="off"
+                        style="width: 100%; padding: 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.9rem;"
+                    >
+                </div>
+                <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                    <button type="button" onclick="window.closeSavePresetModal()" style="padding: 10px 20px; background: #334155; color: #e0e7ff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                        Cancel
+                    </button>
+                    <button type="button" onclick="window.confirmSavePreset()" style="padding: 10px 20px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: all 0.2s;">
+                        Confirm
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     <script type="module" src="/js/app.js"></script>
     <script type="module" src="/js/passwordManager.js"></script>
+    <script type="module" src="/js/dashboardManager.js"></script>
 </body>
 </html>
 

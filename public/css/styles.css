@@ -28,6 +28,61 @@ a:visited {
     color: #818cf8;
 }
 
+/* Dual Range Slider Styles */
+.dual-range-input {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    background: transparent;
+    outline: none;
+    pointer-events: auto;
+}
+
+.dual-range-input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: #3b82f6;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid #1a1f2e;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s;
+}
+
+.dual-range-input::-webkit-slider-thumb:hover {
+    background: #2563eb;
+    transform: scale(1.1);
+}
+
+.dual-range-input::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: #3b82f6;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid #1a1f2e;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s;
+}
+
+.dual-range-input::-moz-range-thumb:hover {
+    background: #2563eb;
+    transform: scale(1.1);
+}
+
+.dual-range-input::-webkit-slider-runnable-track {
+    height: 6px;
+    background: transparent;
+}
+
+.dual-range-input::-moz-range-track {
+    height: 6px;
+    background: transparent;
+}
+
 /* Login Page Styles */
 #loginContainer {
     display: flex;

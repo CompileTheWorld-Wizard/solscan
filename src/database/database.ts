@@ -94,6 +94,7 @@ class DatabaseService {
           tip_amount NUMERIC(20, 9),
           fee_amount NUMERIC(20, 9),
           market_cap NUMERIC(20, 2),
+          total_supply NUMERIC(40, 0),
           block_number BIGINT,
           block_timestamp TIMESTAMP,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -176,9 +177,38 @@ class DatabaseService {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS dashboard_filter_presets (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(255) UNIQUE NOT NULL,
+          dev_buy_size_min NUMERIC(20, 2),
+          dev_buy_size_max NUMERIC(20, 2),
+          buy_size_min NUMERIC(20, 2),
+          buy_size_max NUMERIC(20, 2),
+          pnl_min NUMERIC(10, 2),
+          pnl_max NUMERIC(10, 2),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_filter_preset_name ON dashboard_filter_presets(name);
       `;
 
       await this.pool.query(createTableQuery);
+
+      // Migration: Add total_supply column if it doesn't exist (for existing databases)
+      try {
+        const hasTotalSupply = await this.columnExists('transactions', 'total_supply');
+        if (!hasTotalSupply) {
+          await this.pool.query(`
+            ALTER TABLE transactions 
+            ADD COLUMN total_supply NUMERIC(40, 0)
+          `);
+          console.log('✅ Added total_supply column to transactions table');
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to add total_supply column (may already exist):', error);
+      }
 
       this.isInitialized = true;
       console.log('✅ Database initialized successfully');
@@ -249,17 +279,17 @@ class DatabaseService {
   }
 
   /**
-   * Update market_cap for a transaction by signature
+   * Update market_cap and total_supply for a transaction by signature
    */
-  async updateTransactionMarketCap(transactionId: string, marketCap: number): Promise<void> {
+  async updateTransactionMarketCap(transactionId: string, marketCap: number, totalSupply?: number): Promise<void> {
     try {
       const query = `
         UPDATE transactions
-        SET market_cap = $2
+        SET market_cap = $2, total_supply = $3
         WHERE transaction_id = $1
       `;
-      await this.pool.query(query, [transactionId, marketCap]);
-      console.log(`💾 Market cap updated for tx: ${transactionId}`);
+      await this.pool.query(query, [transactionId, marketCap, totalSupply ?? null]);
+      console.log(`💾 Market cap and total supply updated for tx: ${transactionId}`);
     } catch (error: any) {
       console.error(`❌ Failed to update market cap for ${transactionId}:`, error.message);
     }
@@ -485,6 +515,7 @@ class DatabaseService {
           t.tip_amount as "tipAmount",
           t.fee_amount as "feeAmount",
           t.market_cap as "marketCap",
+          t.total_supply as "totalSupply",
           t.block_number as "blockNumber",
           t.block_timestamp as "blockTimestamp",
           t.created_at
@@ -1439,6 +1470,131 @@ class DatabaseService {
       }
     } catch (error) {
       console.error('Failed to update password hash:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Save dashboard filter preset
+   */
+  async saveDashboardFilterPreset(
+    name: string,
+    filters: {
+      devBuySizeMin?: number | null;
+      devBuySizeMax?: number | null;
+      buySizeMin?: number | null;
+      buySizeMax?: number | null;
+      pnlMin?: number | null;
+      pnlMax?: number | null;
+    }
+  ): Promise<void> {
+    try {
+      const query = `
+        INSERT INTO dashboard_filter_presets (
+          name,
+          dev_buy_size_min,
+          dev_buy_size_max,
+          buy_size_min,
+          buy_size_max,
+          pnl_min,
+          pnl_max
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (name) DO UPDATE SET
+          dev_buy_size_min = EXCLUDED.dev_buy_size_min,
+          dev_buy_size_max = EXCLUDED.dev_buy_size_max,
+          buy_size_min = EXCLUDED.buy_size_min,
+          buy_size_max = EXCLUDED.buy_size_max,
+          pnl_min = EXCLUDED.pnl_min,
+          pnl_max = EXCLUDED.pnl_max,
+          updated_at = CURRENT_TIMESTAMP
+      `;
+      
+      await this.pool.query(query, [
+        name,
+        filters.devBuySizeMin ?? null,
+        filters.devBuySizeMax ?? null,
+        filters.buySizeMin ?? null,
+        filters.buySizeMax ?? null,
+        filters.pnlMin ?? null,
+        filters.pnlMax ?? null
+      ]);
+      
+      console.log(`💾 Dashboard filter preset saved: ${name}`);
+    } catch (error: any) {
+      console.error(`❌ Failed to save filter preset:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all dashboard filter presets
+   */
+  async getDashboardFilterPresets(): Promise<any[]> {
+    try {
+      const query = `
+        SELECT 
+          id,
+          name,
+          dev_buy_size_min as "devBuySizeMin",
+          dev_buy_size_max as "devBuySizeMax",
+          buy_size_min as "buySizeMin",
+          buy_size_max as "buySizeMax",
+          pnl_min as "pnlMin",
+          pnl_max as "pnlMax",
+          created_at,
+          updated_at
+        FROM dashboard_filter_presets
+        ORDER BY updated_at DESC
+      `;
+      
+      const result = await this.pool.query(query);
+      return result.rows;
+    } catch (error) {
+      console.error('Failed to fetch filter presets:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get dashboard filter preset by name
+   */
+  async getDashboardFilterPreset(name: string): Promise<any | null> {
+    try {
+      const query = `
+        SELECT 
+          id,
+          name,
+          dev_buy_size_min as "devBuySizeMin",
+          dev_buy_size_max as "devBuySizeMax",
+          buy_size_min as "buySizeMin",
+          buy_size_max as "buySizeMax",
+          pnl_min as "pnlMin",
+          pnl_max as "pnlMax",
+          created_at,
+          updated_at
+        FROM dashboard_filter_presets
+        WHERE name = $1
+        LIMIT 1
+      `;
+      
+      const result = await this.pool.query(query, [name]);
+      return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error) {
+      console.error('Failed to fetch filter preset:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Delete dashboard filter preset
+   */
+  async deleteDashboardFilterPreset(name: string): Promise<void> {
+    try {
+      const query = `DELETE FROM dashboard_filter_presets WHERE name = $1`;
+      await this.pool.query(query, [name]);
+      console.log(`🗑️ Filter preset deleted: ${name}`);
+    } catch (error: any) {
+      console.error(`❌ Failed to delete filter preset:`, error.message);
       throw error;
     }
   }

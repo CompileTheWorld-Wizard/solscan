@@ -1333,6 +1333,340 @@ app.delete("/api/wallets/:walletAddress", requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * GET /api/dashboard-data/:wallet - Get dashboard data for a wallet
+ * Returns comprehensive token data with all calculated metrics
+ */
+app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
+  try {
+    const { wallet } = req.params;
+    const SOL_MINT = 'So11111111111111111111111111111111111111112';
+    const SOL_DECIMALS = 9;
+    
+    // Get all wallet trades
+    const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
+    const walletTrades = walletTradesResult.data;
+    
+    if (!walletTrades || walletTrades.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+    
+    // Get all token mints
+    const tokenMints = walletTrades.map((trade: any) => trade.token_address);
+    
+    // Get token information for all tokens
+    const tokens = await dbService.getTokensByMints(tokenMints);
+    const tokenInfoMap = new Map();
+    tokens.forEach((token: any) => {
+      tokenInfoMap.set(token.mint_address, token);
+    });
+    
+    // Helper function to format timestamp
+    const formatTimestamp = (dateString: string | null | undefined): string => {
+      if (!dateString) return '';
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return dateString;
+      
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+      
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    };
+    
+    // Process each token
+    const dashboardData = await Promise.all(walletTrades.map(async (trade: any) => {
+      const token = trade.token_address;
+      const tokenInfo = tokenInfoMap.get(token) || null;
+      
+      // Get all transactions for this wallet+token pair
+      const transactions = await dbService.getTransactionsByWalletToken(wallet, token);
+      
+      // Sort transactions by block timestamp ASC
+      transactions.sort((a: any, b: any) => {
+        const timeA = a.blockTimestamp ? new Date(a.blockTimestamp).getTime() : new Date(a.created_at).getTime();
+        const timeB = b.blockTimestamp ? new Date(b.blockTimestamp).getTime() : new Date(b.created_at).getTime();
+        return timeA - timeB;
+      });
+      
+      // Calculate social links count
+      let socialCount = 0;
+      if (tokenInfo?.twitter) socialCount++;
+      if (tokenInfo?.website) socialCount++;
+      if (tokenInfo?.discord) socialCount++;
+      if (tokenInfo?.telegram) socialCount++;
+      
+      // Dev buy amounts
+      const devBuyAmountSOL = tokenInfo?.dev_buy_amount && tokenInfo?.dev_buy_amount_decimal !== null
+        ? parseFloat(tokenInfo.dev_buy_amount) / Math.pow(10, tokenInfo.dev_buy_amount_decimal)
+        : null;
+      const devBuyAmountTokens = tokenInfo?.dev_buy_token_amount && tokenInfo?.dev_buy_token_amount_decimal !== null
+        ? parseFloat(tokenInfo.dev_buy_token_amount) / Math.pow(10, tokenInfo.dev_buy_token_amount_decimal)
+        : null;
+      
+      // Get dev buy timestamp and block number
+      const devBuyTimestamp = tokenInfo?.dev_buy_timestamp ? new Date(tokenInfo.dev_buy_timestamp).getTime() : null;
+      const devBuyBlockNumber = tokenInfo?.dev_buy_block_number || null;
+      
+      // Find first buy transaction
+      const buys = transactions.filter((tx: any) => tx.type?.toLowerCase() === 'buy' && tx.mint_from === SOL_MINT);
+      const firstBuy = buys.length > 0 ? buys[0] : null;
+      
+      // Get token decimals
+      const tokenDecimals = tokenInfo?.dev_buy_token_amount_decimal !== null && tokenInfo?.dev_buy_token_amount_decimal !== undefined
+        ? tokenInfo.dev_buy_token_amount_decimal
+        : 9;
+      
+      // Calculate wallet buy amounts (from first buy transaction)
+      const walletBuyAmountSOL = firstBuy ? (parseFloat(firstBuy.in_amount) || 0) / Math.pow(10, SOL_DECIMALS) : 0;
+      const walletBuyAmountTokens = firstBuy ? (parseFloat(firstBuy.out_amount) || 0) / Math.pow(10, tokenDecimals) : 0;
+      
+      // Get total gas and fees for all transactions
+      let totalGasAndFees = 0;
+      transactions.forEach((tx: any) => {
+        const tipAmount = (tx.tipAmount != null ? parseFloat(tx.tipAmount) : 0) || 0;
+        const feeAmount = (tx.feeAmount != null ? parseFloat(tx.feeAmount) : 0) || 0;
+        totalGasAndFees += (tipAmount + feeAmount);
+      });
+      
+      // Get all sells (sorted by timestamp ASC)
+      const sells = transactions
+        .filter((tx: any) => tx.type?.toLowerCase() === 'sell')
+        .sort((a: any, b: any) => {
+          const timeA = a.blockTimestamp ? new Date(a.blockTimestamp).getTime() : new Date(a.created_at).getTime();
+          const timeB = b.blockTimestamp ? new Date(b.blockTimestamp).getTime() : new Date(b.created_at).getTime();
+          return timeA - timeB;
+        });
+      
+      // Calculate total sell amount in SOL
+      const totalSellAmountSOL = sells.reduce((sum: number, sell: any) => {
+        return sum + ((parseFloat(sell.out_amount) || 0) / Math.pow(10, SOL_DECIMALS));
+      }, 0);
+      
+      // Calculate PNL
+      const pnlSOL = totalSellAmountSOL - (walletBuyAmountSOL + totalGasAndFees);
+      const pnlPercent = walletBuyAmountSOL > 0 ? (pnlSOL / walletBuyAmountSOL) * 100 : 0;
+      
+      // Get first buy market cap and total supply
+      const firstBuyMarketCap = firstBuy?.marketCap || null;
+      const firstBuyTotalSupply = firstBuy?.totalSupply ? parseFloat(firstBuy.totalSupply) : null;
+      
+      // Calculate percentages
+      const walletBuySOLPercentOfDev = devBuyAmountSOL && devBuyAmountSOL > 0 
+        ? (walletBuyAmountSOL / devBuyAmountSOL) * 100 
+        : null;
+      const walletBuyTokensPercentOfDev = devBuyAmountTokens && devBuyAmountTokens > 0
+        ? (walletBuyAmountTokens / devBuyAmountTokens) * 100
+        : null;
+      const devBuyTokensPercentOfTotalSupply = firstBuyTotalSupply && firstBuyTotalSupply > 0 && devBuyAmountTokens
+        ? (devBuyAmountTokens / firstBuyTotalSupply) * 100
+        : null;
+      const walletBuyPercentOfTotalSupply = firstBuyTotalSupply && firstBuyTotalSupply > 0
+        ? (walletBuyAmountTokens / firstBuyTotalSupply) * 100
+        : null;
+      const walletBuyPercentOfRemainingSupply = firstBuyTotalSupply && devBuyAmountTokens && (firstBuyTotalSupply - devBuyAmountTokens) > 0
+        ? (walletBuyAmountTokens / (firstBuyTotalSupply - devBuyAmountTokens)) * 100
+        : null;
+      
+      // Calculate position after dev (seconds)
+      let walletBuyPositionAfterDev = null;
+      if (devBuyTimestamp && firstBuy) {
+        const buyTimestamp = firstBuy.blockTimestamp || firstBuy.created_at;
+        if (buyTimestamp) {
+          const buyTime = new Date(buyTimestamp).getTime();
+          const secondsDiff = Math.floor((buyTime - devBuyTimestamp) / 1000);
+          walletBuyPositionAfterDev = secondsDiff >= 0 ? secondsDiff : null;
+        }
+      }
+      
+      // Calculate block number after dev
+      const walletBuyBlockNumberAfterDev = devBuyBlockNumber && firstBuy?.blockNumber
+        ? firstBuy.blockNumber - devBuyBlockNumber
+        : null;
+      
+      // Find peak price before first sell (highest market cap before first sell)
+      let tokenPeakPriceBeforeFirstSell = null;
+      if (sells.length > 0 && firstBuy) {
+        const firstSellTime = sells[0].blockTimestamp ? new Date(sells[0].blockTimestamp).getTime() : new Date(sells[0].created_at).getTime();
+        const buyTime = firstBuy.blockTimestamp ? new Date(firstBuy.blockTimestamp).getTime() : new Date(firstBuy.created_at).getTime();
+        
+        // Find transactions between buy and first sell
+        const transactionsBeforeFirstSell = transactions.filter((tx: any) => {
+          const txTime = tx.blockTimestamp ? new Date(tx.blockTimestamp).getTime() : new Date(tx.created_at).getTime();
+          return txTime >= buyTime && txTime < firstSellTime && tx.marketCap;
+        });
+        
+        if (transactionsBeforeFirstSell.length > 0) {
+          const peakTx = transactionsBeforeFirstSell.reduce((max: any, tx: any) => {
+            return (!max || (tx.marketCap && parseFloat(tx.marketCap) > parseFloat(max.marketCap || 0))) ? tx : max;
+          }, null);
+          tokenPeakPriceBeforeFirstSell = peakTx?.marketCap ? parseFloat(peakTx.marketCap) : null;
+        }
+      }
+      
+      // Find peak price 10 seconds after first sell
+      let tokenPeakPrice10sAfterFirstSell = null;
+      if (sells.length > 0) {
+        const firstSellTime = sells[0].blockTimestamp ? new Date(sells[0].blockTimestamp).getTime() : new Date(sells[0].created_at).getTime();
+        const tenSecondsAfter = firstSellTime + (10 * 1000);
+        
+        // Find transactions within 10 seconds after first sell
+        const transactionsAfterFirstSell = transactions.filter((tx: any) => {
+          const txTime = tx.blockTimestamp ? new Date(tx.blockTimestamp).getTime() : new Date(tx.created_at).getTime();
+          return txTime >= firstSellTime && txTime <= tenSecondsAfter && tx.marketCap;
+        });
+        
+        if (transactionsAfterFirstSell.length > 0) {
+          const peakTx = transactionsAfterFirstSell.reduce((max: any, tx: any) => {
+            return (!max || (tx.marketCap && parseFloat(tx.marketCap) > parseFloat(max.marketCap || 0))) ? tx : max;
+          }, null);
+          tokenPeakPrice10sAfterFirstSell = peakTx?.marketCap ? parseFloat(peakTx.marketCap) : null;
+        }
+      }
+      
+      // Format sell transactions
+      const formattedSells = sells.map((sell: any, index: number) => {
+        const sellAmountSOL = (parseFloat(sell.out_amount) || 0) / Math.pow(10, SOL_DECIMALS);
+        const sellAmountTokens = (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals);
+        const sellMarketCap = sell.marketCap ? parseFloat(sell.marketCap) : null;
+        // First Sell PNL = Wallet Sell Market Cap / Wallet Buy Market Cap
+        const firstSellPNL = firstBuyMarketCap && sellMarketCap && firstBuyMarketCap > 0
+          ? (sellMarketCap / firstBuyMarketCap)
+          : null;
+        const sellPercentOfBuy = walletBuyAmountSOL > 0
+          ? (sellAmountSOL / walletBuyAmountSOL) * 100
+          : null;
+        
+        return {
+          sellNumber: index + 1,
+          marketCap: sellMarketCap,
+          firstSellPNL: firstSellPNL,
+          sellPercentOfBuy: sellPercentOfBuy,
+          sellAmountSOL: sellAmountSOL,
+          sellAmountTokens: sellAmountTokens,
+          transactionSignature: sell.transaction_id,
+          timestamp: formatTimestamp(sell.blockTimestamp || sell.created_at)
+        };
+      });
+      
+      return {
+        // Basic token info
+        tokenName: tokenInfo?.token_name || 'Unknown',
+        tokenSymbol: tokenInfo?.symbol || '???',
+        tokenAddress: token,
+        creatorAddress: tokenInfo?.creator || '',
+        numberOfSocials: socialCount,
+        
+        // Dev buy data
+        devBuyAmountSOL: devBuyAmountSOL,
+        devBuyAmountTokens: devBuyAmountTokens,
+        
+        // Wallet buy data
+        walletBuyAmountSOL: walletBuyAmountSOL,
+        walletBuySOLPercentOfDev: walletBuySOLPercentOfDev,
+        walletBuyAmountTokens: walletBuyAmountTokens,
+        walletBuyTokensPercentOfDev: walletBuyTokensPercentOfDev,
+        
+        // Supply percentages
+        devBuyTokensPercentOfTotalSupply: devBuyTokensPercentOfTotalSupply,
+        walletBuyPercentOfTotalSupply: walletBuyPercentOfTotalSupply,
+        walletBuyPercentOfRemainingSupply: walletBuyPercentOfRemainingSupply,
+        
+        // Price data
+        tokenPeakPriceBeforeFirstSell: tokenPeakPriceBeforeFirstSell,
+        tokenPeakPrice10sAfterFirstSell: tokenPeakPrice10sAfterFirstSell,
+        
+        // Position data
+        walletBuyPositionAfterDev: walletBuyPositionAfterDev,
+        walletBuyBlockNumber: firstBuy?.blockNumber || null,
+        walletBuyBlockNumberAfterDev: walletBuyBlockNumberAfterDev,
+        walletBuyTimestamp: formatTimestamp(firstBuy?.blockTimestamp || firstBuy?.created_at),
+        walletBuyMarketCap: firstBuyMarketCap,
+        
+        // Gas & fees
+        walletGasAndFeesAmount: totalGasAndFees,
+        
+        // Transaction signature
+        transactionSignature: firstBuy?.transaction_id || '',
+        
+        // PNL
+        pnlSOL: pnlSOL,
+        pnlPercent: pnlPercent,
+        
+        // Sells
+        sells: formattedSells
+      };
+    }));
+    
+    res.json({ success: true, data: dashboardData });
+  } catch (error: any) {
+    console.error('Dashboard data error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/dashboard-filter-presets - Get all dashboard filter presets
+ */
+app.get("/api/dashboard-filter-presets", requireAuth, async (req, res) => {
+  try {
+    const presets = await dbService.getDashboardFilterPresets();
+    res.json({ success: true, presets });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/dashboard-filter-presets/:name - Get dashboard filter preset by name
+ */
+app.get("/api/dashboard-filter-presets/:name", requireAuth, async (req, res) => {
+  try {
+    const { name } = req.params;
+    const preset = await dbService.getDashboardFilterPreset(name);
+    if (!preset) {
+      return res.status(404).json({ success: false, error: 'Preset not found' });
+    }
+    res.json({ success: true, preset });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/dashboard-filter-presets - Save dashboard filter preset
+ */
+app.post("/api/dashboard-filter-presets", requireAuth, async (req, res) => {
+  try {
+    const { name, filters } = req.body;
+    
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      return res.status(400).json({ success: false, error: 'Preset name is required' });
+    }
+    
+    await dbService.saveDashboardFilterPreset(name.trim(), filters || {});
+    res.json({ success: true, message: 'Filter preset saved successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/dashboard-filter-presets/:name - Delete dashboard filter preset
+ */
+app.delete("/api/dashboard-filter-presets/:name", requireAuth, async (req, res) => {
+  try {
+    const { name } = req.params;
+    await dbService.deleteDashboardFilterPreset(name);
+    res.json({ success: true, message: 'Filter preset deleted successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error("Server error:", err);
