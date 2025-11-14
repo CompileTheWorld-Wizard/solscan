@@ -12,9 +12,9 @@ let maxSells = 0;
 // Current filter values
 let currentFilters = {
     devBuySizeMin: 0,
-    devBuySizeMax: 99,
+    devBuySizeMax: 20,
     buySizeMin: 0,
-    buySizeMax: 99,
+    buySizeMax: 20,
     pnlMin: -100,
     pnlMax: 100
 };
@@ -56,10 +56,10 @@ export async function initializeDashboard() {
  */
 function setupFilterListeners() {
     // Dev Buy Size filter
-    setupDualRangeSlider('devBuySize', 0, 99, 0, 99);
+    setupDualRangeSlider('devBuySize', 0, 20, 0, 20);
     
     // Buy Size filter
-    setupDualRangeSlider('buySize', 0, 99, 0, 99);
+    setupDualRangeSlider('buySize', 0, 20, 0, 20);
     
     // PNL filter
     setupDualRangeSlider('pnl', -100, 100, -100, 100);
