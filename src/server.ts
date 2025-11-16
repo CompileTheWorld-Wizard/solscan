@@ -1540,8 +1540,8 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         const firstSellPNL = firstBuyMarketCap && sellMarketCap && sellMarketCap > 0
           ? (firstBuyMarketCap / sellMarketCap)
           : null;
-        const sellPercentOfBuy = walletBuyAmountSOL > 0
-          ? (sellAmountSOL / walletBuyAmountSOL) * 100
+        const sellPercentOfBuy = walletBuyAmountTokens > 0
+          ? (sellAmountTokens / walletBuyAmountTokens) * 100
           : null;
         
         // Calculate cumulative profit at this sell point
