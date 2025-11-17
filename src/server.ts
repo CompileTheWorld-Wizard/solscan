@@ -1361,9 +1361,18 @@ async function getOpenPositionsCount(walletAddress: string): Promise<number> {
     const parsedTokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
       programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
     });
+    const parsed2022TokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
+      programId: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
+    });
     
     // Count only accounts with non-zero balance
     const nonZeroBalanceCount = parsedTokenAccounts.value.filter(account => {
+      const parsedInfo = account.account.data.parsed?.info;
+      if (parsedInfo && parsedInfo.tokenAmount) {
+        return parseFloat(parsedInfo.tokenAmount.uiAmountString || '0') > 0;
+      }
+      return false;
+    }).length + parsed2022TokenAccounts.value.filter(account => {
       const parsedInfo = account.account.data.parsed?.info;
       if (parsedInfo && parsedInfo.tokenAmount) {
         return parseFloat(parsedInfo.tokenAmount.uiAmountString || '0') > 0;
