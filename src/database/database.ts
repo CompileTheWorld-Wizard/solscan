@@ -579,7 +579,7 @@ class DatabaseService {
           break;
         case 'day':
           dateFormat = 'YYYY-MM-DD';
-          groupBy = "DATE(created_at)";
+          groupBy = "TO_CHAR(DATE(created_at), 'YYYY-MM-DD')";
           break;
         case 'week':
           dateFormat = 'YYYY-"W"IW';
@@ -587,7 +587,7 @@ class DatabaseService {
           break;
         case 'month':
           dateFormat = 'YYYY-MM';
-          groupBy = "DATE_TRUNC('month', created_at)";
+          groupBy = "TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM')";
           break;
         default:
           dateFormat = 'YYYY-MM-DD';
@@ -608,12 +608,48 @@ class DatabaseService {
       
       const result = await this.pool.query(query, [walletAddress]);
       
-      return result.rows.map((row: any) => ({
-        period: row.period ? String(row.period) : '',
-        buys: parseInt(row.buys) || 0,
-        sells: parseInt(row.sells) || 0,
-        total: parseInt(row.total) || 0
-      }));
+      return result.rows.map((row: any) => {
+        // Handle period - convert Date objects to string format
+        let periodStr = '';
+        if (row.period) {
+          if (row.period instanceof Date) {
+            // If it's a Date object, format it based on interval
+            const date = row.period;
+            switch (interval) {
+              case 'hour':
+                const hour = String(date.getUTCHours()).padStart(2, '0');
+                const minute = String(date.getUTCMinutes()).padStart(2, '0');
+                const year = date.getUTCFullYear();
+                const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(date.getUTCDate()).padStart(2, '0');
+                periodStr = `${year}-${month}-${day} ${hour}:${minute}`;
+                break;
+              case 'day':
+                const dYear = date.getUTCFullYear();
+                const dMonth = String(date.getUTCMonth() + 1).padStart(2, '0');
+                const dDay = String(date.getUTCDate()).padStart(2, '0');
+                periodStr = `${dYear}-${dMonth}-${dDay}`;
+                break;
+              case 'month':
+                const mYear = date.getUTCFullYear();
+                const mMonth = String(date.getUTCMonth() + 1).padStart(2, '0');
+                periodStr = `${mYear}-${mMonth}`;
+                break;
+              default:
+                periodStr = String(row.period);
+            }
+          } else {
+            periodStr = String(row.period);
+          }
+        }
+        
+        return {
+          period: periodStr,
+          buys: parseInt(row.buys) || 0,
+          sells: parseInt(row.sells) || 0,
+          total: parseInt(row.total) || 0
+        };
+      });
     } catch (error) {
       console.error('Failed to get trading activity for wallet:', error);
       return [];

@@ -100,57 +100,107 @@ export async function updateActivityChart() {
         const formatLabel = (period, interval) => {
             if (!period) return '';
             
-            switch (interval) {
-                case 'hour':
-                    // Format: "2024-01-15 14:00" -> "01/15 14:00" or "14:00"
-                    if (period.includes(' ')) {
-                        const [date, time] = period.split(' ');
-                        const dateParts = date.split('-');
-                        return `${dateParts[1]}/${dateParts[2]} ${time}`;
-                    }
-                    return period;
-                    
-                case 'quarter_day':
-                    // Format: "2024-01-15 Morning" -> "01/15 Morning" or just "Morning"
-                    if (period.includes(' ')) {
-                        const parts = period.split(' ');
-                        if (parts.length >= 2) {
-                            const dateParts = parts[0].split('-');
-                            const timeOfDay = parts.slice(1).join(' ');
-                            return `${dateParts[1]}/${dateParts[2]} ${timeOfDay}`;
+            // Convert period to string and clean it up
+            let periodStr = String(period);
+            
+            // If it's a Date object string, extract the date part
+            if (periodStr.includes('GMT') || periodStr.includes('UTC') || periodStr.includes('T')) {
+                // Try to parse as Date and format
+                try {
+                    const date = new Date(periodStr);
+                    if (!isNaN(date.getTime())) {
+                        switch (interval) {
+                            case 'hour':
+                                const hour = String(date.getUTCHours()).padStart(2, '0');
+                                const minute = String(date.getUTCMinutes()).padStart(2, '0');
+                                const year = date.getUTCFullYear();
+                                const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+                                const day = String(date.getUTCDate()).padStart(2, '0');
+                                periodStr = `${year}-${month}-${day} ${hour}:${minute}`;
+                                break;
+                            case 'day':
+                                const dYear = date.getUTCFullYear();
+                                const dMonth = String(date.getUTCMonth() + 1).padStart(2, '0');
+                                const dDay = String(date.getUTCDate()).padStart(2, '0');
+                                periodStr = `${dYear}-${dMonth}-${dDay}`;
+                                break;
+                            case 'month':
+                                const mYear = date.getUTCFullYear();
+                                const mMonth = String(date.getUTCMonth() + 1).padStart(2, '0');
+                                periodStr = `${mYear}-${mMonth}`;
+                                break;
                         }
                     }
-                    return period;
+                } catch (e) {
+                    // If parsing fails, use the string as is
+                }
+            }
+            
+            switch (interval) {
+                case 'hour':
+                    // Format: "2024-01-15 14:00" -> "01/15 14:00"
+                    if (periodStr.includes(' ')) {
+                        const [date, time] = periodStr.split(' ');
+                        const dateParts = date.split('-');
+                        if (dateParts.length >= 3) {
+                            return `${dateParts[1]}/${dateParts[2]} ${time}`;
+                        }
+                    }
+                    return periodStr;
+                    
+                case 'quarter_day':
+                    // Format: "2024-01-15 Morning" -> "01/15 Morning"
+                    if (periodStr.includes(' ')) {
+                        const parts = periodStr.split(' ');
+                        if (parts.length >= 2) {
+                            const dateParts = parts[0].split('-');
+                            if (dateParts.length >= 3) {
+                                const timeOfDay = parts.slice(1).join(' ');
+                                return `${dateParts[1]}/${dateParts[2]} ${timeOfDay}`;
+                            }
+                        }
+                    }
+                    return periodStr;
                     
                 case 'day':
                     // Format: "2024-01-15" -> "01/15"
-                    if (period.includes('-')) {
-                        const dateParts = period.split('-');
-                        return `${dateParts[1]}/${dateParts[2]}`;
+                    if (periodStr.includes('-')) {
+                        const dateParts = periodStr.split('-');
+                        if (dateParts.length >= 3 && dateParts[0] && dateParts[1] && dateParts[2]) {
+                            return `${dateParts[1]}/${dateParts[2]}`;
+                        }
                     }
-                    return period;
+                    return periodStr;
                     
                 case 'week':
-                    // Format: "2024-W01" -> "W01 2024" or "Week 1"
-                    if (period.includes('-W')) {
-                        const [year, week] = period.split('-W');
-                        return `W${week} ${year}`;
+                    // Format: "2024-W01" -> "W01 2024"
+                    if (periodStr.includes('-W')) {
+                        const [year, week] = periodStr.split('-W');
+                        if (year && week) {
+                            return `W${week} ${year}`;
+                        }
                     }
-                    return period;
+                    return periodStr;
                     
                 case 'month':
-                    // Format: "2024-01" -> "Jan 2024" or "01/2024"
-                    if (period.includes('-')) {
-                        const [year, month] = period.split('-');
-                        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
-                                          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                        const monthIndex = parseInt(month) - 1;
-                        return `${monthNames[monthIndex]} ${year}`;
+                    // Format: "2024-01" -> "Jan 2024"
+                    if (periodStr.includes('-')) {
+                        const parts = periodStr.split('-');
+                        if (parts.length >= 2 && parts[0] && parts[1]) {
+                            const year = parts[0];
+                            const month = parts[1];
+                            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                                              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                            const monthIndex = parseInt(month) - 1;
+                            if (monthIndex >= 0 && monthIndex < 12) {
+                                return `${monthNames[monthIndex]} ${year}`;
+                            }
+                        }
                     }
-                    return period;
+                    return periodStr;
                     
                 default:
-                    return period;
+                    return periodStr;
             }
         };
         
