@@ -6,6 +6,7 @@ import path from "path";
 import session from "express-session";
 import ExcelJS from "exceljs";
 import crypto from "crypto";
+import { Connection, PublicKey } from "@solana/web3.js";
 import { setupFileLogging } from "./utils/logger";
 import { dbService } from "./database";
 import { tracker } from "./tracker";
@@ -1334,6 +1335,64 @@ app.delete("/api/wallets/:walletAddress", requireAuth, async (req, res) => {
 });
 
 /**
+ * Get token account count for a wallet using getTokenAccountsByOwner
+ * @param walletAddress - The wallet address to check
+ * @returns The count of token accounts (open positions)
+ */
+async function getOpenPositionsCount(walletAddress: string): Promise<number> {
+  try {
+    // Initialize Shyft RPC connection
+    const shyftApiKey = process.env.SHYFT_API_KEY;
+    let connection: Connection;
+    
+    if (shyftApiKey) {
+      // Shyft RPC endpoint format: https://rpc.shyft.to?api_key=YOUR_API_KEY
+      const shyftRpcUrl = `https://rpc.shyft.to?api_key=${shyftApiKey}`;
+      connection = new Connection(shyftRpcUrl, 'confirmed');
+    } else {
+      // Fallback to default Solana RPC or SOLANA_RPC_URL if available
+      const fallbackRpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+      connection = new Connection(fallbackRpcUrl, 'confirmed');
+    }
+    
+    const publicKey = new PublicKey(walletAddress);
+    
+    // Use getParsedTokenAccountsByOwner for better balance checking
+    const parsedTokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
+      programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+    });
+    
+    // Count only accounts with non-zero balance
+    const nonZeroBalanceCount = parsedTokenAccounts.value.filter(account => {
+      const parsedInfo = account.account.data.parsed?.info;
+      if (parsedInfo && parsedInfo.tokenAmount) {
+        return parseFloat(parsedInfo.tokenAmount.uiAmountString || '0') > 0;
+      }
+      return false;
+    }).length;
+    
+    return nonZeroBalanceCount;
+  } catch (error: any) {
+    console.error(`Error getting open positions count for ${walletAddress}:`, error);
+    return 0; // Return 0 on error
+  }
+}
+
+/**
+ * Get total buy and sell transaction counts for a wallet
+ * @param walletAddress - The wallet address to check
+ * @returns Object with totalBuys and totalSells counts
+ */
+async function getWalletBuySellCounts(walletAddress: string): Promise<{ totalBuys: number; totalSells: number }> {
+  try {
+    return await dbService.getWalletBuySellCounts(walletAddress);
+  } catch (error: any) {
+    console.error(`Error getting buy/sell counts for ${walletAddress}:`, error);
+    return { totalBuys: 0, totalSells: 0 };
+  }
+}
+
+/**
  * GET /api/dashboard-data/:wallet - Get dashboard data for a wallet
  * Returns comprehensive token data with all calculated metrics
  */
@@ -1343,12 +1402,18 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
     const SOL_MINT = 'So11111111111111111111111111111111111111112';
     const SOL_DECIMALS = 9;
     
+    // Get open positions count
+    const openPositions = await getOpenPositionsCount(wallet);
+    
+    // Get total buy/sell counts
+    const { totalBuys, totalSells } = await getWalletBuySellCounts(wallet);
+    
     // Get all wallet trades
     const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
     const walletTrades = walletTradesResult.data;
     
     if (!walletTrades || walletTrades.length === 0) {
-      return res.json({ success: true, data: [] });
+      return res.json({ success: true, data: [], openPositions, totalBuys, totalSells });
     }
     
     // Get all token mints
@@ -1625,9 +1690,39 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
       };
     }));
     
-    res.json({ success: true, data: dashboardData });
+    res.json({ success: true, data: dashboardData, openPositions, totalBuys, totalSells });
   } catch (error: any) {
     console.error('Dashboard data error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/wallet-activity/:wallet - Get trading activity aggregated by time interval
+ * Query params: interval (hour, quarter_day, day, week, month)
+ */
+app.get("/api/wallet-activity/:wallet", requireAuth, async (req, res) => {
+  try {
+    const { wallet } = req.params;
+    const interval = (req.query.interval as string) || 'day';
+    
+    // Validate interval
+    const validIntervals = ['hour', 'quarter_day', 'day', 'week', 'month'];
+    if (!validIntervals.includes(interval)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: `Invalid interval. Must be one of: ${validIntervals.join(', ')}` 
+      });
+    }
+    
+    const activity = await dbService.getWalletTradingActivity(
+      wallet, 
+      interval as 'hour' | 'quarter_day' | 'day' | 'week' | 'month'
+    );
+    
+    res.json({ success: true, data: activity, interval });
+  } catch (error: any) {
+    console.error('Wallet activity error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

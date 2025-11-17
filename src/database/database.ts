@@ -549,6 +549,112 @@ class DatabaseService {
   }
 
   /**
+   * Get trading activity aggregated by time interval for a wallet
+   * @param walletAddress - The wallet address
+   * @param interval - Time interval: 'hour', 'quarter_day', 'day', 'week', 'month'
+   * @returns Array of aggregated data points
+   */
+  async getWalletTradingActivity(
+    walletAddress: string, 
+    interval: 'hour' | 'quarter_day' | 'day' | 'week' | 'month'
+  ): Promise<Array<{ period: string; buys: number; sells: number; total: number }>> {
+    try {
+      let dateFormat: string;
+      let groupBy: string;
+      
+      switch (interval) {
+        case 'hour':
+          dateFormat = 'YYYY-MM-DD HH24:00';
+          groupBy = "DATE_TRUNC('hour', created_at)";
+          break;
+        case 'quarter_day':
+          // Morning (06-12), Afternoon (12-18), Evening (18-24), Night (00-06)
+          dateFormat = 'YYYY-MM-DD';
+          groupBy = `DATE(created_at) || ' ' || CASE 
+            WHEN EXTRACT(HOUR FROM created_at) >= 6 AND EXTRACT(HOUR FROM created_at) < 12 THEN 'Morning'
+            WHEN EXTRACT(HOUR FROM created_at) >= 12 AND EXTRACT(HOUR FROM created_at) < 18 THEN 'Afternoon'
+            WHEN EXTRACT(HOUR FROM created_at) >= 18 AND EXTRACT(HOUR FROM created_at) < 24 THEN 'Evening'
+            ELSE 'Night'
+          END`;
+          break;
+        case 'day':
+          dateFormat = 'YYYY-MM-DD';
+          groupBy = "DATE(created_at)";
+          break;
+        case 'week':
+          dateFormat = 'YYYY-"W"WW';
+          groupBy = "DATE_TRUNC('week', created_at)";
+          break;
+        case 'month':
+          dateFormat = 'YYYY-MM';
+          groupBy = "DATE_TRUNC('month', created_at)";
+          break;
+        default:
+          dateFormat = 'YYYY-MM-DD';
+          groupBy = "DATE(created_at)";
+      }
+      
+      const query = `
+        SELECT 
+          ${groupBy} as period,
+          COUNT(*) FILTER (WHERE LOWER(type) = 'buy') as buys,
+          COUNT(*) FILTER (WHERE LOWER(type) = 'sell') as sells,
+          COUNT(*) as total
+        FROM transactions
+        WHERE fee_payer = $1
+        GROUP BY ${groupBy}
+        ORDER BY period ASC
+      `;
+      
+      const result = await this.pool.query(query, [walletAddress]);
+      
+      return result.rows.map((row: any) => ({
+        period: row.period ? String(row.period) : '',
+        buys: parseInt(row.buys) || 0,
+        sells: parseInt(row.sells) || 0,
+        total: parseInt(row.total) || 0
+      }));
+    } catch (error) {
+      console.error('Failed to get trading activity for wallet:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get buy and sell transaction counts for a wallet
+   */
+  async getWalletBuySellCounts(walletAddress: string): Promise<{ totalBuys: number; totalSells: number }> {
+    try {
+      const query = `
+        SELECT 
+          type,
+          COUNT(*) as count
+        FROM transactions
+        WHERE fee_payer = $1 AND (LOWER(type) = 'buy' OR LOWER(type) = 'sell')
+        GROUP BY type
+      `;
+
+      const result = await this.pool.query(query, [walletAddress]);
+      
+      let totalBuys = 0;
+      let totalSells = 0;
+      
+      result.rows.forEach((row: any) => {
+        if (row.type?.toLowerCase() === 'buy') {
+          totalBuys = parseInt(row.count);
+        } else if (row.type?.toLowerCase() === 'sell') {
+          totalSells = parseInt(row.count);
+        }
+      });
+      
+      return { totalBuys, totalSells };
+    } catch (error) {
+      console.error('Failed to get buy/sell counts for wallet:', error);
+      return { totalBuys: 0, totalSells: 0 };
+    }
+  }
+
+  /**
    * Get the earliest transaction timestamp for a wallet (used as tracking start time)
    */
   async getEarliestTransactionForWallet(walletAddress: string): Promise<{ created_at: string } | null> {

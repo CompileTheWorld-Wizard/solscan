@@ -8,6 +8,9 @@ import * as api from './api.js';
 let dashboardData = [];
 let filteredData = [];
 let maxSells = 0;
+let openPositions = 0;
+let totalBuys = 0;
+let totalSells = 0;
 
 // Pagination state
 let currentPage = 1;
@@ -775,6 +778,19 @@ export async function loadDashboardData() {
     if (!walletAddress) {
         document.getElementById('dashboardTableLoading').textContent = 'Select a wallet to load dashboard data';
         document.getElementById('dashboardTable').style.display = 'none';
+        // Reset open positions and buy/sell counts when no wallet selected
+        const openPositionsEl = document.getElementById('openPositions');
+        if (openPositionsEl) {
+            openPositionsEl.textContent = '-';
+        }
+        const totalBuysEl = document.getElementById('totalBuys');
+        if (totalBuysEl) {
+            totalBuysEl.textContent = '-';
+        }
+        const totalSellsEl = document.getElementById('totalSells');
+        if (totalSellsEl) {
+            totalSellsEl.textContent = '-';
+        }
         return;
     }
     
@@ -789,6 +805,34 @@ export async function loadDashboardData() {
         if (result.success && result.data) {
             dashboardData = result.data;
             
+            // Store open positions count
+            openPositions = result.openPositions || 0;
+            
+            // Store total buys/sells counts
+            totalBuys = result.totalBuys || 0;
+            totalSells = result.totalSells || 0;
+            
+            // Update open positions display
+            const openPositionsEl = document.getElementById('openPositions');
+            if (openPositionsEl) {
+                openPositionsEl.textContent = openPositions.toString();
+                openPositionsEl.style.color = '#e0e7ff';
+            }
+            
+            // Update total buys display
+            const totalBuysEl = document.getElementById('totalBuys');
+            if (totalBuysEl) {
+                totalBuysEl.textContent = totalBuys.toString();
+                totalBuysEl.style.color = '#e0e7ff';
+            }
+            
+            // Update total sells display
+            const totalSellsEl = document.getElementById('totalSells');
+            if (totalSellsEl) {
+                totalSellsEl.textContent = totalSells.toString();
+                totalSellsEl.style.color = '#e0e7ff';
+            }
+            
             // Calculate max sells across all tokens
             maxSells = Math.max(...dashboardData.map(token => (token.sells || []).length), 0);
             
@@ -802,10 +846,36 @@ export async function loadDashboardData() {
             tableEl.style.display = 'table';
         } else {
             loadingEl.textContent = result.error || 'Failed to load dashboard data';
+            // Reset open positions and buy/sell counts on error
+            const openPositionsEl = document.getElementById('openPositions');
+            if (openPositionsEl) {
+                openPositionsEl.textContent = '-';
+            }
+            const totalBuysEl = document.getElementById('totalBuys');
+            if (totalBuysEl) {
+                totalBuysEl.textContent = '-';
+            }
+            const totalSellsEl = document.getElementById('totalSells');
+            if (totalSellsEl) {
+                totalSellsEl.textContent = '-';
+            }
         }
     } catch (error) {
         console.error('Error loading dashboard data:', error);
         loadingEl.textContent = 'Error loading dashboard data: ' + error.message;
+        // Reset open positions and buy/sell counts on error
+        const openPositionsEl = document.getElementById('openPositions');
+        if (openPositionsEl) {
+            openPositionsEl.textContent = '-';
+        }
+        const totalBuysEl = document.getElementById('totalBuys');
+        if (totalBuysEl) {
+            totalBuysEl.textContent = '-';
+        }
+        const totalSellsEl = document.getElementById('totalSells');
+        if (totalSellsEl) {
+            totalSellsEl.textContent = '-';
+        }
     }
 }
 
@@ -814,7 +884,7 @@ export async function loadDashboardData() {
  */
 function updateAverageDataPoints() {
     if (!filteredData || filteredData.length === 0) {
-        // Reset all stats to '-' if no data
+        // Reset all stats to '-' if no data (but keep open positions as it's independent)
         const statIds = ['totalWalletPNL', 'cumulativePNL', 'riskRewardProfit', 'netInvested', 
                         'walletAvgBuySize', 'devAvgBuySize', 'avgPNLPerToken'];
         statIds.forEach(id => {

@@ -332,7 +332,7 @@ export async function fetchDashboardData(walletAddress) {
         }
 
         const data = await response.json();
-        return { success: true, data: data.data || [] };
+        return { success: true, data: data.data || [], openPositions: data.openPositions || 0, totalBuys: data.totalBuys || 0, totalSells: data.totalSells || 0 };
     } catch (error) {
         console.error('Error fetching dashboard data:', error);
         return { success: false, error: error.message };
@@ -359,6 +359,29 @@ export async function fetchDashboardFilterPresets() {
     } catch (error) {
         console.error('Error fetching filter presets:', error);
         return { success: false, error: error.message, presets: [] };
+    }
+}
+
+/**
+ * Fetch wallet trading activity aggregated by time interval
+ */
+export async function fetchWalletActivity(walletAddress, interval = 'day') {
+    try {
+        const response = await fetch(`/api/wallet-activity/${encodeURIComponent(walletAddress)}?interval=${encodeURIComponent(interval)}`, {
+            method: 'GET',
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch wallet activity');
+        }
+
+        const data = await response.json();
+        return { success: true, data: data.data || [], interval: data.interval || interval };
+    } catch (error) {
+        console.error('Error fetching wallet activity:', error);
+        return { success: false, error: error.message, data: [] };
     }
 }
 
