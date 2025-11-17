@@ -96,8 +96,66 @@ export async function updateActivityChart() {
         loadingEl.style.display = 'none';
         canvas.style.display = 'block';
         
-        // Prepare chart data
-        const labels = result.data.map(item => item.period);
+        // Format labels based on interval
+        const formatLabel = (period, interval) => {
+            if (!period) return '';
+            
+            switch (interval) {
+                case 'hour':
+                    // Format: "2024-01-15 14:00" -> "01/15 14:00" or "14:00"
+                    if (period.includes(' ')) {
+                        const [date, time] = period.split(' ');
+                        const dateParts = date.split('-');
+                        return `${dateParts[1]}/${dateParts[2]} ${time}`;
+                    }
+                    return period;
+                    
+                case 'quarter_day':
+                    // Format: "2024-01-15 Morning" -> "01/15 Morning" or just "Morning"
+                    if (period.includes(' ')) {
+                        const parts = period.split(' ');
+                        if (parts.length >= 2) {
+                            const dateParts = parts[0].split('-');
+                            const timeOfDay = parts.slice(1).join(' ');
+                            return `${dateParts[1]}/${dateParts[2]} ${timeOfDay}`;
+                        }
+                    }
+                    return period;
+                    
+                case 'day':
+                    // Format: "2024-01-15" -> "01/15"
+                    if (period.includes('-')) {
+                        const dateParts = period.split('-');
+                        return `${dateParts[1]}/${dateParts[2]}`;
+                    }
+                    return period;
+                    
+                case 'week':
+                    // Format: "2024-W01" -> "W01 2024" or "Week 1"
+                    if (period.includes('-W')) {
+                        const [year, week] = period.split('-W');
+                        return `W${week} ${year}`;
+                    }
+                    return period;
+                    
+                case 'month':
+                    // Format: "2024-01" -> "Jan 2024" or "01/2024"
+                    if (period.includes('-')) {
+                        const [year, month] = period.split('-');
+                        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                                          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                        const monthIndex = parseInt(month) - 1;
+                        return `${monthNames[monthIndex]} ${year}`;
+                    }
+                    return period;
+                    
+                default:
+                    return period;
+            }
+        };
+        
+        // Prepare chart data with formatted labels
+        const labels = result.data.map(item => formatLabel(item.period, interval));
         const buysData = result.data.map(item => item.buys);
         const sellsData = result.data.map(item => item.sells);
         const totalData = result.data.map(item => item.total);
@@ -164,8 +222,9 @@ export async function updateActivityChart() {
                     x: {
                         ticks: {
                             color: '#94a3b8',
-                            maxRotation: 45,
-                            minRotation: 0
+                            maxRotation: interval === 'hour' || interval === 'quarter_day' ? 45 : 0,
+                            minRotation: 0,
+                            maxTicksLimit: interval === 'hour' ? 24 : interval === 'day' ? 14 : interval === 'week' ? 12 : interval === 'month' ? 12 : 20
                         },
                         grid: {
                             color: '#334155'

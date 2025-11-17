@@ -582,8 +582,8 @@ class DatabaseService {
           groupBy = "DATE(created_at)";
           break;
         case 'week':
-          dateFormat = 'YYYY-"W"WW';
-          groupBy = "DATE_TRUNC('week', created_at)";
+          dateFormat = 'YYYY-"W"IW';
+          groupBy = "TO_CHAR(DATE_TRUNC('week', created_at), 'YYYY-\"W\"IW')";
           break;
         case 'month':
           dateFormat = 'YYYY-MM';
