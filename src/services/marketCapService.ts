@@ -85,7 +85,7 @@ export class MarketCapService {
   /**
    * Get transaction details from Solscan API with retry logic
    */
-  private async getTransactionDetail(signature: string, retryCount: number = 0, maxRetries: number = 1): Promise<TransactionDetailResponse> {
+  private async getTransactionDetail(signature: string, retryCount: number = 0, maxRetries: number = 5): Promise<TransactionDetailResponse> {
     if (!this.solscanApiKey) {
       throw new Error("SOLSCAN_API_KEY environment variable is not set. Please check your .env file.");
     }
