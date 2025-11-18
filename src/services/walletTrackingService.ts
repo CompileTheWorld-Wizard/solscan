@@ -8,6 +8,7 @@
  * - First Sell Timestamp & Amount
  */
 
+import { Connection, PublicKey } from '@solana/web3.js';
 import { dbService } from '../database';
 
 interface MarketCapResult {
@@ -140,6 +141,56 @@ export class WalletTrackingService {
 
       // Save wallet-token pair to database (save first even if market data is empty)
       await dbService.saveWalletTokenPair(walletAddress, tokenAddress, txType as 'BUY' | 'SELL', amount, marketData);
+
+      // If this is a BUY event, record the open positions count
+      if (txType === 'BUY') {
+        // Get current open positions count for this wallet
+        try {
+          const shyftApiKey = process.env.SHYFT_API_KEY;
+          let connection: Connection;
+          
+          if (shyftApiKey) {
+            const shyftRpcUrl = `https://rpc.shyft.to?api_key=${shyftApiKey}`;
+            connection = new Connection(shyftRpcUrl, 'confirmed');
+          } else {
+            const fallbackRpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+            connection = new Connection(fallbackRpcUrl, 'confirmed');
+          }
+          
+          const publicKey = new PublicKey(walletAddress);
+          
+          // Get parsed token accounts
+          const parsedTokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
+            programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+          });
+          const parsed2022TokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
+            programId: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
+          });
+          
+          // Count only accounts with non-zero balance
+          const openPositionsCount = parsedTokenAccounts.value.filter(account => {
+            const parsedInfo = account.account.data.parsed?.info;
+            if (parsedInfo && parsedInfo.tokenAmount) {
+              return parseFloat(parsedInfo.tokenAmount.uiAmountString || '0') > 0;
+            }
+            return false;
+          }).length + parsed2022TokenAccounts.value.filter(account => {
+            const parsedInfo = account.account.data.parsed?.info;
+            if (parsedInfo && parsedInfo.tokenAmount) {
+              return parseFloat(parsedInfo.tokenAmount.uiAmountString || '0') > 0;
+            }
+            return false;
+          }).length;
+          
+          // Update wallet stats (non-blocking)
+          dbService.updateWalletStatsOnBuy(walletAddress, openPositionsCount).catch((error) => {
+            console.error(`Failed to update wallet stats on buy:`, error);
+          });
+        } catch (error: any) {
+          console.error(`Failed to get open positions count for wallet stats:`, error.message);
+          // Don't throw - this is non-critical
+        }
+      }
 
       // If data was empty, schedule a retry after 60 seconds (non-blocking)
       if (isEmptyData) {

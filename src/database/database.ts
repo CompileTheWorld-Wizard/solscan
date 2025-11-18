@@ -171,6 +171,16 @@ class DatabaseService {
         CREATE INDEX IF NOT EXISTS idx_wallets_first_buy ON wallets(first_buy_timestamp);
         CREATE INDEX IF NOT EXISTS idx_wallets_first_sell ON wallets(first_sell_timestamp);
 
+        CREATE TABLE IF NOT EXISTS wallet_stats (
+          wallet_address VARCHAR(100) PRIMARY KEY,
+          buy_event_count INTEGER DEFAULT 0,
+          open_position_total INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_wallet_stats_address ON wallet_stats(wallet_address);
+
         CREATE TABLE IF NOT EXISTS credentials (
           id SERIAL PRIMARY KEY,
           password_hash VARCHAR(255) NOT NULL,
@@ -284,6 +294,26 @@ class DatabaseService {
         }
       } catch (error) {
         console.warn('⚠️ Failed to add total_supply column (may already exist):', error);
+      }
+
+      // Migration: Create wallet_stats table if it doesn't exist (for existing databases)
+      try {
+        const hasWalletStats = await this.tableExists('wallet_stats');
+        if (!hasWalletStats) {
+          await this.pool.query(`
+            CREATE TABLE IF NOT EXISTS wallet_stats (
+              wallet_address VARCHAR(100) PRIMARY KEY,
+              buy_event_count INTEGER DEFAULT 0,
+              open_position_total INTEGER DEFAULT 0,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_wallet_stats_address ON wallet_stats(wallet_address);
+          `);
+          console.log('✅ Created wallet_stats table');
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to create wallet_stats table (may already exist):', error);
       }
 
       this.isInitialized = true;
@@ -557,8 +587,10 @@ class DatabaseService {
   async getWalletTradingActivity(
     walletAddress: string, 
     interval: 'hour' | 'quarter_day' | 'day' | 'week' | 'month'
-  ): Promise<Array<{ period: string; buys: number; sells: number; total: number }>> {
+  ): Promise<Array<{ period: string; buys: number; sells: number; total: number; pnlPercent: number }>> {
     try {
+      const SOL_MINT = 'So11111111111111111111111111111111111111112';
+      const SOL_DECIMALS = 9;
       let dateFormat: string;
       let groupBy: string;
       
@@ -599,14 +631,25 @@ class DatabaseService {
           ${groupBy} as period,
           COUNT(*) FILTER (WHERE LOWER(type) = 'buy') as buys,
           COUNT(*) FILTER (WHERE LOWER(type) = 'sell') as sells,
-          COUNT(*) as total
+          COUNT(*) as total,
+          COALESCE(SUM(CASE 
+            WHEN LOWER(type) = 'buy' AND mint_from = $2 
+            THEN in_amount::numeric / POWER(10, $3)
+            ELSE 0 
+          END), 0) as total_buy_amount_sol,
+          COALESCE(SUM(CASE 
+            WHEN LOWER(type) = 'sell' AND mint_to = $2 
+            THEN out_amount::numeric / POWER(10, $3)
+            ELSE 0 
+          END), 0) as total_sell_amount_sol,
+          COALESCE(SUM(COALESCE(tip_amount, 0) + COALESCE(fee_amount, 0)), 0) as total_gas_fees
         FROM transactions
         WHERE fee_payer = $1
         GROUP BY ${groupBy}
         ORDER BY period ASC
       `;
       
-      const result = await this.pool.query(query, [walletAddress]);
+      const result = await this.pool.query(query, [walletAddress, SOL_MINT, SOL_DECIMALS]);
       
       return result.rows.map((row: any) => {
         // Handle period - convert Date objects to string format
@@ -643,11 +686,19 @@ class DatabaseService {
           }
         }
         
+        // Calculate PNL %
+        const totalBuyAmountSOL = parseFloat(row.total_buy_amount_sol) || 0;
+        const totalSellAmountSOL = parseFloat(row.total_sell_amount_sol) || 0;
+        const totalGasFees = parseFloat(row.total_gas_fees) || 0;
+        const pnlSOL = totalSellAmountSOL - (totalBuyAmountSOL + totalGasFees);
+        const pnlPercent = totalBuyAmountSOL > 0 ? (pnlSOL / totalBuyAmountSOL) * 100 : 0;
+        
         return {
           period: periodStr,
           buys: parseInt(row.buys) || 0,
           sells: parseInt(row.sells) || 0,
-          total: parseInt(row.total) || 0
+          total: parseInt(row.total) || 0,
+          pnlPercent: pnlPercent
         };
       });
     } catch (error) {
@@ -687,6 +738,62 @@ class DatabaseService {
     } catch (error) {
       console.error('Failed to get buy/sell counts for wallet:', error);
       return { totalBuys: 0, totalSells: 0 };
+    }
+  }
+
+  /**
+   * Update wallet stats when a buy event occurs
+   * Increments buy_event_count and adds current open positions to open_position_total
+   */
+  async updateWalletStatsOnBuy(walletAddress: string, openPositionsCount: number): Promise<void> {
+    try {
+      const query = `
+        INSERT INTO wallet_stats (wallet_address, buy_event_count, open_position_total, updated_at)
+        VALUES ($1, 1, $2, CURRENT_TIMESTAMP)
+        ON CONFLICT (wallet_address)
+        DO UPDATE SET
+          buy_event_count = wallet_stats.buy_event_count + 1,
+          open_position_total = wallet_stats.open_position_total + $2,
+          updated_at = CURRENT_TIMESTAMP
+      `;
+      await this.pool.query(query, [walletAddress, openPositionsCount]);
+    } catch (error) {
+      console.error('Failed to update wallet stats on buy:', error);
+      // Don't throw - this is non-critical
+    }
+  }
+
+  /**
+   * Get average open position for a wallet
+   * Returns: sum of all open_position_total / sum of all buy_event_count
+   */
+  async getWalletAverageOpenPosition(walletAddress: string): Promise<number> {
+    try {
+      const query = `
+        SELECT 
+          buy_event_count,
+          open_position_total
+        FROM wallet_stats
+        WHERE wallet_address = $1
+      `;
+      const result = await this.pool.query(query, [walletAddress]);
+      
+      if (result.rows.length === 0) {
+        return 0;
+      }
+      
+      const row = result.rows[0];
+      const buyEventCount = parseInt(row.buy_event_count) || 0;
+      const openPositionTotal = parseInt(row.open_position_total) || 0;
+      
+      if (buyEventCount === 0) {
+        return 0;
+      }
+      
+      return openPositionTotal / buyEventCount;
+    } catch (error) {
+      console.error('Failed to get wallet average open position:', error);
+      return 0;
     }
   }
 

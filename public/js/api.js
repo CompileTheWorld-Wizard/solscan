@@ -332,7 +332,7 @@ export async function fetchDashboardData(walletAddress) {
         }
 
         const data = await response.json();
-        return { success: true, data: data.data || [], openPositions: data.openPositions || 0, totalBuys: data.totalBuys || 0, totalSells: data.totalSells || 0 };
+        return { success: true, data: data.data || [], totalBuys: data.totalBuys || 0, totalSells: data.totalSells || 0, averageOpenPosition: data.averageOpenPosition || 0 };
     } catch (error) {
         console.error('Error fetching dashboard data:', error);
         return { success: false, error: error.message };

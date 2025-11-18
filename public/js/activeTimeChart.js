@@ -209,6 +209,7 @@ export async function updateActivityChart() {
         const buysData = result.data.map(item => item.buys);
         const sellsData = result.data.map(item => item.sells);
         const totalData = result.data.map(item => item.total);
+        const pnlPercentData = result.data.map(item => item.pnlPercent || 0);
         
         // Chart.js configuration
         const ctx = canvas.getContext('2d');
@@ -224,7 +225,8 @@ export async function updateActivityChart() {
                         borderColor: 'rgb(34, 197, 94)',
                         backgroundColor: chartType === 'bar' ? 'rgba(34, 197, 94, 0.5)' : 'rgba(34, 197, 94, 0.1)',
                         tension: 0.1,
-                        fill: chartType === 'line'
+                        fill: chartType === 'line',
+                        yAxisID: 'y'
                     },
                     {
                         label: 'Sells',
@@ -232,7 +234,8 @@ export async function updateActivityChart() {
                         borderColor: 'rgb(239, 68, 68)',
                         backgroundColor: chartType === 'bar' ? 'rgba(239, 68, 68, 0.5)' : 'rgba(239, 68, 68, 0.1)',
                         tension: 0.1,
-                        fill: chartType === 'line'
+                        fill: chartType === 'line',
+                        yAxisID: 'y'
                     },
                     {
                         label: 'Total',
@@ -240,7 +243,18 @@ export async function updateActivityChart() {
                         borderColor: 'rgb(59, 130, 246)',
                         backgroundColor: chartType === 'bar' ? 'rgba(59, 130, 246, 0.5)' : 'rgba(59, 130, 246, 0.1)',
                         tension: 0.1,
-                        fill: chartType === 'line'
+                        fill: chartType === 'line',
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'PNL %',
+                        data: pnlPercentData,
+                        borderColor: 'rgb(168, 85, 247)',
+                        backgroundColor: chartType === 'bar' ? 'rgba(168, 85, 247, 0.5)' : 'rgba(168, 85, 247, 0.1)',
+                        tension: 0.1,
+                        fill: chartType === 'line',
+                        yAxisID: 'y1',
+                        borderDash: [5, 5]
                     }
                 ]
             },
@@ -282,12 +296,37 @@ export async function updateActivityChart() {
                     },
                     y: {
                         beginAtZero: true,
+                        position: 'left',
                         ticks: {
                             color: '#94a3b8',
                             stepSize: 1
                         },
                         grid: {
                             color: '#334155'
+                        },
+                        title: {
+                            display: true,
+                            text: 'Transaction Count',
+                            color: '#94a3b8'
+                        }
+                    },
+                    y1: {
+                        beginAtZero: false,
+                        position: 'right',
+                        ticks: {
+                            color: '#a855f7',
+                            callback: function(value) {
+                                return value.toFixed(2) + '%';
+                            }
+                        },
+                        grid: {
+                            drawOnChartArea: false,
+                            color: '#334155'
+                        },
+                        title: {
+                            display: true,
+                            text: 'PNL %',
+                            color: '#a855f7'
                         }
                     }
                 },

@@ -1411,18 +1411,18 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
     const SOL_MINT = 'So11111111111111111111111111111111111111112';
     const SOL_DECIMALS = 9;
     
-    // Get open positions count
-    const openPositions = await getOpenPositionsCount(wallet);
-    
     // Get total buy/sell counts
     const { totalBuys, totalSells } = await getWalletBuySellCounts(wallet);
+    
+    // Get average open position
+    const averageOpenPosition = await dbService.getWalletAverageOpenPosition(wallet);
     
     // Get all wallet trades
     const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
     const walletTrades = walletTradesResult.data;
     
     if (!walletTrades || walletTrades.length === 0) {
-      return res.json({ success: true, data: [], openPositions, totalBuys, totalSells });
+      return res.json({ success: true, data: [], totalBuys, totalSells, averageOpenPosition });
     }
     
     // Get all token mints
@@ -1699,7 +1699,7 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
       };
     }));
     
-    res.json({ success: true, data: dashboardData, openPositions, totalBuys, totalSells });
+    res.json({ success: true, data: dashboardData, totalBuys, totalSells, averageOpenPosition });
   } catch (error: any) {
     console.error('Dashboard data error:', error);
     res.status(500).json({ success: false, error: error.message });

@@ -8,13 +8,17 @@ import * as api from './api.js';
 let dashboardData = [];
 let filteredData = [];
 let maxSells = 0;
-let openPositions = 0;
 let totalBuys = 0;
 let totalSells = 0;
+let averageOpenPosition = 0;
 
 // Pagination state
 let currentPage = 1;
 let itemsPerPage = 50;
+
+// Sorting state
+let sortColumn = null;
+let sortDirection = 'asc'; // 'asc' or 'desc'
 
 // Dynamic filters - array of filter objects
 let activeFilters = [];
@@ -897,9 +901,185 @@ function applyFilters() {
     // Reset to first page when filters change
     currentPage = 1;
     
+    // Sort filtered data
+    sortFilteredData();
+    
     // Re-render table with filtered data
     renderDashboardTable();
     updateAverageDataPoints();
+}
+
+/**
+ * Sort filtered data based on current sort column and direction
+ */
+function sortFilteredData() {
+    if (!sortColumn || !filteredData || filteredData.length === 0) {
+        return;
+    }
+    
+    // Check if it's a base column or sell column
+    const isBaseColumn = COLUMN_DEFINITIONS.some(col => col.key === sortColumn);
+    const isSellColumn = SELL_COLUMN_DEFINITIONS.some(col => col.key === sortColumn);
+    
+    if (!isBaseColumn && !isSellColumn) {
+        return;
+    }
+    
+    filteredData.sort((a, b) => {
+        let aValue, bValue;
+        
+        if (isBaseColumn) {
+            // Get raw value for base column
+            aValue = getRawValue(a, sortColumn);
+            bValue = getRawValue(b, sortColumn);
+        } else {
+            // For sell columns, use first sell's value
+            const aSell = a.sells && a.sells[0];
+            const bSell = b.sells && b.sells[0];
+            aValue = aSell ? getRawSellValue(aSell, sortColumn) : null;
+            bValue = bSell ? getRawSellValue(bSell, sortColumn) : null;
+        }
+        
+        // Handle null/undefined values
+        if (aValue === null || aValue === undefined) {
+            return sortDirection === 'asc' ? 1 : -1;
+        }
+        if (bValue === null || bValue === undefined) {
+            return sortDirection === 'asc' ? -1 : 1;
+        }
+        
+        // Compare values
+        let comparison = 0;
+        if (typeof aValue === 'number' && typeof bValue === 'number') {
+            comparison = aValue - bValue;
+        } else if (typeof aValue === 'string' && typeof bValue === 'string') {
+            comparison = aValue.localeCompare(bValue);
+        } else {
+            // Convert to string for comparison
+            comparison = String(aValue).localeCompare(String(bValue));
+        }
+        
+        return sortDirection === 'asc' ? comparison : -comparison;
+    });
+}
+
+/**
+ * Get raw value for a base column key
+ */
+function getRawValue(token, key) {
+    switch(key) {
+        case 'pnlSOL': return token.pnlSOL;
+        case 'pnlPercent': return token.pnlPercent;
+        case 'tokenName': return token.tokenName || '';
+        case 'tokenSymbol': return token.tokenSymbol || '';
+        case 'tokenAddress': return token.tokenAddress || '';
+        case 'creatorAddress': return token.creatorAddress || '';
+        case 'numberOfSocials': return token.numberOfSocials || 0;
+        case 'devBuyAmountSOL': return token.devBuyAmountSOL;
+        case 'walletBuyAmountSOL': return token.walletBuyAmountSOL;
+        case 'walletBuySOLPercentOfDev': return token.walletBuySOLPercentOfDev;
+        case 'devBuyAmountTokens': return token.devBuyAmountTokens;
+        case 'walletBuyAmountTokens': return token.walletBuyAmountTokens;
+        case 'walletBuyTokensPercentOfDev': return token.walletBuyTokensPercentOfDev;
+        case 'devBuyTokensPercentOfTotalSupply': return token.devBuyTokensPercentOfTotalSupply;
+        case 'walletBuyPercentOfTotalSupply': return token.walletBuyPercentOfTotalSupply;
+        case 'walletBuyPercentOfRemainingSupply': return token.walletBuyPercentOfRemainingSupply;
+        case 'tokenPeakPriceBeforeFirstSell': return token.tokenPeakPriceBeforeFirstSell;
+        case 'tokenPeakPrice10sAfterFirstSell': return token.tokenPeakPrice10sAfterFirstSell;
+        case 'walletBuyPositionAfterDev': return token.walletBuyPositionAfterDev;
+        case 'walletBuyBlockNumber': return token.walletBuyBlockNumber;
+        case 'walletBuyBlockNumberAfterDev': return token.walletBuyBlockNumberAfterDev;
+        case 'walletBuyTimestamp': return token.walletBuyTimestamp || '';
+        case 'walletBuyMarketCap': return token.walletBuyMarketCap;
+        case 'walletGasAndFeesAmount': return token.walletGasAndFeesAmount;
+        case 'transactionSignature': return token.transactionSignature || '';
+        default: return null;
+    }
+}
+
+/**
+ * Get raw value for a sell column key
+ */
+function getRawSellValue(sell, key) {
+    switch(key) {
+        case 'sellNumber': return sell.sellNumber;
+        case 'sellMarketCap': return sell.marketCap;
+        case 'sellPNL': return sell.firstSellPNL;
+        case 'sellPercentOfBuy': return sell.sellPercentOfBuy;
+        case 'sellAmountSOL': return sell.sellAmountSOL;
+        case 'sellAmountTokens': return sell.sellAmountTokens;
+        case 'sellTransactionSignature': return sell.transactionSignature || '';
+        case 'sellTimestamp': return sell.timestamp || '';
+        default: return null;
+    }
+}
+
+/**
+ * Create a sortable table header
+ */
+function createSortableHeader(label, columnKey, isSellColumn, sellIndex = null) {
+    const th = document.createElement('th');
+    th.style.cssText = 'padding: 12px; border: 1px solid #334155; background: #1a1f2e; color: #e0e7ff; font-weight: 600; text-align: center; white-space: nowrap; cursor: pointer; user-select: none; position: relative;';
+    
+    // Create container for label and sort indicator
+    const container = document.createElement('div');
+    container.style.cssText = 'display: flex; align-items: center; justify-content: center; gap: 6px;';
+    
+    // Label
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = label;
+    container.appendChild(labelSpan);
+    
+    // Sort indicator
+    const sortIndicator = document.createElement('span');
+    sortIndicator.style.cssText = 'font-size: 0.75rem; color: #94a3b8;';
+    
+    // Check if this column is currently sorted
+    const isCurrentSort = sortColumn === columnKey;
+    if (isCurrentSort) {
+        sortIndicator.textContent = sortDirection === 'asc' ? '▲' : '▼';
+        sortIndicator.style.color = '#3b82f6';
+    } else {
+        sortIndicator.textContent = '⇅';
+        sortIndicator.style.opacity = '0.3';
+    }
+    
+    container.appendChild(sortIndicator);
+    th.appendChild(container);
+    
+    // Add hover effect
+    th.addEventListener('mouseenter', () => {
+        th.style.background = '#253548';
+        if (!isCurrentSort) {
+            sortIndicator.style.opacity = '0.6';
+        }
+    });
+    
+    th.addEventListener('mouseleave', () => {
+        th.style.background = '#1a1f2e';
+        if (!isCurrentSort) {
+            sortIndicator.style.opacity = '0.3';
+        }
+    });
+    
+    // Add click handler
+    th.addEventListener('click', () => {
+        // Toggle sort direction if clicking the same column, otherwise set to ascending
+        if (sortColumn === columnKey) {
+            sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+            sortColumn = columnKey;
+            sortDirection = 'asc';
+        }
+        
+        // Reset to first page when sorting changes
+        currentPage = 1;
+        
+        // Re-render table
+        renderDashboardTable();
+    });
+    
+    return th;
 }
 
 /**
@@ -926,11 +1106,7 @@ function clearDashboardData() {
         }
     });
     
-    // Clear open positions, total buys, total sells
-    const openPositionsEl = document.getElementById('openPositions');
-    if (openPositionsEl) {
-        openPositionsEl.textContent = '-';
-    }
+    // Clear total buys, total sells
     const totalBuysEl = document.getElementById('totalBuys');
     if (totalBuysEl) {
         totalBuysEl.textContent = '-';
@@ -938,6 +1114,10 @@ function clearDashboardData() {
     const totalSellsEl = document.getElementById('totalSells');
     if (totalSellsEl) {
         totalSellsEl.textContent = '-';
+    }
+    const averageOpenPositionEl = document.getElementById('averageOpenPosition');
+    if (averageOpenPositionEl) {
+        averageOpenPositionEl.textContent = '-';
     }
     
     // Clear sell statistics container
@@ -947,9 +1127,9 @@ function clearDashboardData() {
     }
     
     // Reset variables
-    openPositions = 0;
     totalBuys = 0;
     totalSells = 0;
+    averageOpenPosition = 0;
     maxSells = 0;
     currentPage = 1;
 }
@@ -1001,24 +1181,12 @@ export async function loadDashboardData() {
             // Update data smoothly
             dashboardData = result.data;
             
-            // Store open positions count
-            openPositions = result.openPositions || 0;
-            
             // Store total buys/sells counts
             totalBuys = result.totalBuys || 0;
             totalSells = result.totalSells || 0;
             
-            // Update open positions display smoothly
-            const openPositionsEl = document.getElementById('openPositions');
-            if (openPositionsEl) {
-                openPositionsEl.style.transition = 'opacity 0.3s ease';
-                openPositionsEl.style.opacity = '0.5';
-                setTimeout(() => {
-                    openPositionsEl.textContent = openPositions.toString();
-                    openPositionsEl.style.color = '#e0e7ff';
-                    openPositionsEl.style.opacity = '1';
-                }, 150);
-            }
+            // Store average open position
+            averageOpenPosition = result.averageOpenPosition || 0;
             
             // Update total buys display smoothly
             const totalBuysEl = document.getElementById('totalBuys');
@@ -1041,6 +1209,19 @@ export async function loadDashboardData() {
                     totalSellsEl.textContent = totalSells.toString();
                     totalSellsEl.style.color = '#e0e7ff';
                     totalSellsEl.style.opacity = '1';
+                }, 150);
+            }
+            
+            // Update average open position display smoothly
+            const averageOpenPositionEl = document.getElementById('averageOpenPosition');
+            if (averageOpenPositionEl) {
+                averageOpenPositionEl.style.transition = 'opacity 0.3s ease';
+                averageOpenPositionEl.style.opacity = '0.5';
+                setTimeout(() => {
+                    const formattedValue = averageOpenPosition > 0 ? averageOpenPosition.toFixed(2) : '0';
+                    averageOpenPositionEl.textContent = formattedValue;
+                    averageOpenPositionEl.style.color = '#e0e7ff';
+                    averageOpenPositionEl.style.opacity = '1';
                 }, 150);
             }
             
@@ -1346,6 +1527,9 @@ function renderDashboardTable() {
         currentPage = 1;
     }
     
+    // Sort filtered data before pagination
+    sortFilteredData();
+    
     // Get data for current page
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
@@ -1402,14 +1586,54 @@ function renderDashboardTable() {
     thead.innerHTML = '';
     tbody.innerHTML = '';
     
-    // Create header row
+    // Create header row with sortable headers
     const headerRow = document.createElement('tr');
-    headers.forEach(header => {
-        const th = document.createElement('th');
-        th.textContent = header;
-        th.style.cssText = 'padding: 12px; border: 1px solid #334155; background: #1a1f2e; color: #e0e7ff; font-weight: 600; text-align: center; white-space: nowrap;';
+    
+    // Create base column headers
+    visibleColumns.forEach((col, index) => {
+        const th = createSortableHeader(col.label, col.key, false);
         headerRow.appendChild(th);
     });
+    
+    // Create sell column headers
+    for (let i = 1; i <= maxSells; i++) {
+        visibleSellColumns.forEach(col => {
+            let headerLabel = '';
+            switch(col.key) {
+                case 'sellNumber':
+                    headerLabel = `Wallet Sell Number ${i}`;
+                    break;
+                case 'sellMarketCap':
+                    headerLabel = `Wallet Sell Market Cap ${i}`;
+                    break;
+                case 'sellPNL':
+                    headerLabel = `${i === 1 ? 'First' : i === 2 ? '2nd' : i === 3 ? '3rd' : `${i}th`} Sell PNL`;
+                    break;
+                case 'sellPercentOfBuy':
+                    headerLabel = `Sell % of Buy ${i}`;
+                    break;
+                case 'sellAmountSOL':
+                    headerLabel = `Wallet Sell Amount in SOL ${i}`;
+                    break;
+                case 'sellAmountTokens':
+                    headerLabel = `Wallet Sell Amount in Tokens ${i}`;
+                    break;
+                case 'sellTransactionSignature':
+                    headerLabel = `Transaction Signature ${i}`;
+                    break;
+                case 'sellTimestamp':
+                    headerLabel = `Wallet Sell Timestamp ${i}`;
+                    break;
+            }
+            if (headerLabel) {
+                // For sell columns, we'll sort by the first sell's value
+                // Store sell index and column key in data attributes
+                const th = createSortableHeader(headerLabel, col.key, true, i - 1);
+                headerRow.appendChild(th);
+            }
+        });
+    }
+    
     thead.appendChild(headerRow);
     
     // Helper function to get cell value for a column key
@@ -1548,13 +1772,16 @@ function renderPagination(totalPages, totalItems, startIndex, endIndex) {
     
     // Right side - controls
     const controls = document.createElement('div');
-    controls.style.cssText = 'display: flex; align-items: center; gap: 10px;';
+    controls.style.cssText = 'display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;';
     
-    // Items per page selector
+    // Items per page selector - keep on one line
+    const itemsPerPageContainer = document.createElement('div');
+    itemsPerPageContainer.style.cssText = 'display: flex; align-items: center; gap: 8px; white-space: nowrap;';
+    
     const itemsPerPageLabel = document.createElement('label');
-    itemsPerPageLabel.style.cssText = 'color: #cbd5e1; font-size: 0.85rem;';
+    itemsPerPageLabel.style.cssText = 'color: #cbd5e1; font-size: 0.85rem; white-space: nowrap;';
     itemsPerPageLabel.textContent = 'Items per page:';
-    controls.appendChild(itemsPerPageLabel);
+    itemsPerPageContainer.appendChild(itemsPerPageLabel);
     
     const itemsPerPageSelect = document.createElement('select');
     itemsPerPageSelect.style.cssText = 'padding: 6px 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 4px; font-size: 0.85rem; cursor: pointer;';
@@ -1570,26 +1797,27 @@ function renderPagination(totalPages, totalItems, startIndex, endIndex) {
         currentPage = 1;
         renderDashboardTable();
     });
-    controls.appendChild(itemsPerPageSelect);
+    itemsPerPageContainer.appendChild(itemsPerPageSelect);
+    controls.appendChild(itemsPerPageContainer);
     
     // Page navigation
     const nav = document.createElement('div');
     nav.style.cssText = 'display: flex; align-items: center; gap: 5px;';
     
     // First button
-    const firstBtn = createPaginationButton('«', currentPage === 1, () => {
+    const firstBtn = createPaginationButton('', currentPage === 1, () => {
         currentPage = 1;
         renderDashboardTable();
-    });
+    }, 'first');
     nav.appendChild(firstBtn);
     
     // Previous button
-    const prevBtn = createPaginationButton('‹', currentPage === 1, () => {
+    const prevBtn = createPaginationButton('', currentPage === 1, () => {
         if (currentPage > 1) {
             currentPage--;
             renderDashboardTable();
         }
-    });
+    }, 'prev');
     nav.appendChild(prevBtn);
     
     // Page numbers
@@ -1644,19 +1872,19 @@ function renderPagination(totalPages, totalItems, startIndex, endIndex) {
     }
     
     // Next button
-    const nextBtn = createPaginationButton('›', currentPage === totalPages, () => {
+    const nextBtn = createPaginationButton('', currentPage === totalPages, () => {
         if (currentPage < totalPages) {
             currentPage++;
             renderDashboardTable();
         }
-    });
+    }, 'next');
     nav.appendChild(nextBtn);
     
     // Last button
-    const lastBtn = createPaginationButton('»', currentPage === totalPages, () => {
+    const lastBtn = createPaginationButton('', currentPage === totalPages, () => {
         currentPage = totalPages;
         renderDashboardTable();
-    });
+    }, 'last');
     nav.appendChild(lastBtn);
     
     controls.appendChild(nav);
@@ -1665,12 +1893,71 @@ function renderPagination(totalPages, totalItems, startIndex, endIndex) {
 }
 
 /**
+ * Create SVG icon for pagination
+ */
+function createPaginationIcon(type) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '14');
+    svg.setAttribute('height', '14');
+    svg.setAttribute('viewBox', '0 0 14 14');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.style.cssText = 'display: block;';
+    
+    switch(type) {
+        case 'first':
+            // << (double left chevron)
+            const first1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            first1.setAttribute('d', 'M9 2 L5 7 L9 12');
+            svg.appendChild(first1);
+            const first2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            first2.setAttribute('d', 'M7 2 L3 7 L7 12');
+            svg.appendChild(first2);
+            break;
+        case 'prev':
+            // < (single left chevron)
+            const prev = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            prev.setAttribute('d', 'M9 2 L5 7 L9 12');
+            svg.appendChild(prev);
+            break;
+        case 'next':
+            // > (single right chevron)
+            const next = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            next.setAttribute('d', 'M5 2 L9 7 L5 12');
+            svg.appendChild(next);
+            break;
+        case 'last':
+            // >> (double right chevron)
+            const last1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            last1.setAttribute('d', 'M5 2 L9 7 L5 12');
+            svg.appendChild(last1);
+            const last2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            last2.setAttribute('d', 'M7 2 L11 7 L7 12');
+            svg.appendChild(last2);
+            break;
+    }
+    
+    return svg;
+}
+
+/**
  * Create a pagination button
  */
-function createPaginationButton(text, disabled, onClick) {
+function createPaginationButton(text, disabled, onClick, iconType = null) {
     const btn = document.createElement('button');
-    btn.textContent = text;
-    btn.style.cssText = 'padding: 6px 12px; border: 1px solid #334155; background: #1a1f2e; color: #e0e7ff; border-radius: 4px; cursor: pointer; font-size: 0.85rem; min-width: 36px; transition: all 0.2s;';
+    btn.style.cssText = 'padding: 6px 12px; border: 1px solid #334155; background: #1a1f2e; color: #e0e7ff; border-radius: 4px; cursor: pointer; font-size: 0.85rem; min-width: 36px; transition: all 0.2s; display: flex; align-items: center; justify-content: center;';
+    
+    if (iconType) {
+        // Use SVG icon
+        const icon = createPaginationIcon(iconType);
+        btn.appendChild(icon);
+    } else {
+        // Use text for page numbers
+        btn.textContent = text;
+    }
     
     if (disabled) {
         btn.disabled = true;
