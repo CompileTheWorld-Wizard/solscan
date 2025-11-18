@@ -574,12 +574,12 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
       const totalGasAndTips = feeAmount + tipAmount;
       rowData[7] = totalGasAndTips; // Wallet Gas & Fees Amount
       
-      // Calculate position after dev (seconds) - only if buy happens after dev buy
+      // Calculate position after dev (milliseconds) - only if buy happens after dev buy
       if (devBuyTimestamp) {
         const buyTime = new Date(firstBuy.created_at).getTime();
-        const secondsDiff = Math.floor((buyTime - devBuyTimestamp) / 1000);
+        const millisecondsDiff = buyTime - devBuyTimestamp;
         // Only show if buy happened after dev buy (positive value)
-        rowData[8] = secondsDiff >= 0 ? secondsDiff : ''; // Wallet Buy Position After Dev
+        rowData[8] = millisecondsDiff >= 0 ? millisecondsDiff : ''; // Wallet Buy Position After Dev
       }
       
       // Block number
@@ -868,14 +868,14 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
         const totalGasAndTips = feeAmount + tipAmount;
         rowData[7] = totalGasAndTips; // Wallet Gas & Fees Amount
         
-      // Calculate position after dev (seconds) - only if buy happens after dev buy
+      // Calculate position after dev (milliseconds) - only if buy happens after dev buy
       // Use block_timestamp if available, otherwise fallback to created_at
       const buyTimestamp = firstBuy.blockTimestamp || firstBuy.created_at;
       if (devBuyTimestamp && buyTimestamp) {
         const buyTime = new Date(buyTimestamp).getTime();
-        const secondsDiff = Math.floor((buyTime - devBuyTimestamp) / 1000);
+        const millisecondsDiff = buyTime - devBuyTimestamp;
         // Only show if buy happened after dev buy (positive value)
-        rowData[8] = secondsDiff >= 0 ? secondsDiff : ''; // Wallet Buy Position After Dev
+        rowData[8] = millisecondsDiff >= 0 ? millisecondsDiff : ''; // Wallet Buy Position After Dev
       }
       
       // Block number
@@ -1545,14 +1545,14 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         ? (walletBuyAmountTokens / (firstBuyTotalSupply - devBuyAmountTokens)) * 100
         : null;
       
-      // Calculate position after dev (seconds)
+      // Calculate position after dev (milliseconds)
       let walletBuyPositionAfterDev = null;
       if (devBuyTimestamp && firstBuy) {
         const buyTimestamp = firstBuy.blockTimestamp || firstBuy.created_at;
         if (buyTimestamp) {
           const buyTime = new Date(buyTimestamp).getTime();
-          const secondsDiff = Math.floor((buyTime - devBuyTimestamp) / 1000);
-          walletBuyPositionAfterDev = secondsDiff >= 0 ? secondsDiff : null;
+          const millisecondsDiff = buyTime - devBuyTimestamp;
+          walletBuyPositionAfterDev = millisecondsDiff >= 0 ? millisecondsDiff : null;
         }
       }
       
@@ -1610,9 +1610,9 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         const sellAmountSOL = (parseFloat(sell.out_amount) || 0) / Math.pow(10, SOL_DECIMALS);
         const sellAmountTokens = (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals);
         const sellMarketCap = sell.marketCap ? parseFloat(sell.marketCap) : null;
-        // nth Sell PNL = Wallet Buy Market Cap / nth Sell Market Cap
+        // nth Sell PNL = (Wallet Buy Market Cap / nth Sell Market Cap - 1) * 100 (as percentage)
         const firstSellPNL = firstBuyMarketCap && sellMarketCap && sellMarketCap > 0
-          ? (firstBuyMarketCap / sellMarketCap)
+          ? ((firstBuyMarketCap / sellMarketCap) - 1) * 100
           : null;
         const sellPercentOfBuy = walletBuyAmountTokens > 0
           ? (sellAmountTokens / walletBuyAmountTokens) * 100

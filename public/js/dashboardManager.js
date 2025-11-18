@@ -1126,6 +1126,12 @@ function clearDashboardData() {
         sellStatsContainer.innerHTML = '';
     }
     
+    // Clear pagination container
+    const paginationContainer = document.getElementById('dashboardPaginationContainer');
+    if (paginationContainer) {
+        paginationContainer.innerHTML = '';
+    }
+    
     // Reset variables
     totalBuys = 0;
     totalSells = 0;
@@ -1147,8 +1153,20 @@ export async function loadDashboardData() {
     const walletAddress = select.value;
     if (!walletAddress) {
         clearDashboardData();
-        document.getElementById('dashboardTableLoading').textContent = 'Select a wallet to load dashboard data';
-        document.getElementById('dashboardTable').style.display = 'none';
+        const loadingEl = document.getElementById('dashboardTableLoading');
+        const tableEl = document.getElementById('dashboardTable');
+        if (loadingEl) {
+            loadingEl.textContent = 'Select a wallet to load dashboard data';
+            loadingEl.style.display = 'block';
+        }
+        if (tableEl) {
+            tableEl.style.display = 'none';
+        }
+        // Clear pagination
+        const paginationContainer = document.getElementById('dashboardPaginationContainer');
+        if (paginationContainer) {
+            paginationContainer.innerHTML = '';
+        }
         return;
     }
     
@@ -1445,7 +1463,7 @@ function updateSellStatistics() {
         });
         
         // Calculate averages
-        // Average profit of nth sell = Average of nth sell PNL
+        // Average profit of nth sell = Average of nth sell PNL (already in percentage)
         const avgProfit = profitsAtSell.length > 0
             ? profitsAtSell.reduce((sum, p) => sum + p, 0) / profitsAtSell.length
             : null;
@@ -1474,8 +1492,8 @@ function updateSellStatistics() {
         const profitValue = document.createElement('div');
         profitValue.style.cssText = 'font-size: 1.1rem; font-weight: 600; margin-bottom: 12px;';
         if (avgProfit !== null) {
-            // Display as ratio (Wallet Buy Market Cap / nth Sell Market Cap)
-            profitValue.textContent = avgProfit.toFixed(4);
+            // Display as percentage (already calculated as percentage in server)
+            profitValue.textContent = formatPercent(avgProfit);
             profitValue.style.color = '#e0e7ff';
         } else {
             profitValue.textContent = '-';
@@ -1657,7 +1675,7 @@ function renderDashboardTable() {
             case 'walletBuyPercentOfRemainingSupply': return formatPercent(token.walletBuyPercentOfRemainingSupply);
             case 'tokenPeakPriceBeforeFirstSell': return formatNumber(token.tokenPeakPriceBeforeFirstSell, 2);
             case 'tokenPeakPrice10sAfterFirstSell': return formatNumber(token.tokenPeakPrice10sAfterFirstSell, 2);
-            case 'walletBuyPositionAfterDev': return token.walletBuyPositionAfterDev !== null ? `${token.walletBuyPositionAfterDev}s` : '';
+            case 'walletBuyPositionAfterDev': return token.walletBuyPositionAfterDev !== null ? `${token.walletBuyPositionAfterDev}ms` : '';
             case 'walletBuyBlockNumber': return token.walletBuyBlockNumber || '';
             case 'walletBuyBlockNumberAfterDev': return token.walletBuyBlockNumberAfterDev !== null ? token.walletBuyBlockNumberAfterDev : '';
             case 'walletBuyTimestamp': return token.walletBuyTimestamp || '';
@@ -1701,7 +1719,7 @@ function renderDashboardTable() {
                             cellContent = formatNumber(sell.marketCap, 2);
                             break;
                         case 'sellPNL':
-                            cellContent = formatNumber(sell.firstSellPNL, 4);
+                            cellContent = formatPercent(sell.firstSellPNL);
                             break;
                         case 'sellPercentOfBuy':
                             cellContent = formatPercent(sell.sellPercentOfBuy);
@@ -1785,15 +1803,16 @@ function renderPagination(totalPages, totalItems, startIndex, endIndex) {
     
     const itemsPerPageSelect = document.createElement('select');
     itemsPerPageSelect.style.cssText = 'padding: 6px 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 4px; font-size: 0.85rem; cursor: pointer;';
-    itemsPerPageSelect.value = itemsPerPage;
     [10, 25, 50, 100].forEach(val => {
         const option = document.createElement('option');
-        option.value = val;
-        option.textContent = val;
+        option.value = String(val);
+        option.textContent = String(val);
         itemsPerPageSelect.appendChild(option);
     });
+    // Set the value after options are added, as a string
+    itemsPerPageSelect.value = String(itemsPerPage);
     itemsPerPageSelect.addEventListener('change', (e) => {
-        itemsPerPage = parseInt(e.target.value);
+        itemsPerPage = parseInt(e.target.value, 10);
         currentPage = 1;
         renderDashboardTable();
     });
