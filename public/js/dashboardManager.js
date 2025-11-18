@@ -130,7 +130,9 @@ const DATA_POINTS = [
     { key: 'devBuyAmountSOL', label: 'Dev Buy Amount in SOL', type: 'sol', field: 'devBuyAmountSOL' },
     { key: 'walletBuyAmountSOL', label: 'Wallet Buy Amount in SOL', type: 'sol', field: 'walletBuyAmountSOL' },
     { key: 'walletGasAndFeesAmount', label: 'Wallet Gas & Fees Amount', type: 'sol', field: 'walletGasAndFeesAmount' },
-    { key: 'walletBuyMarketCap', label: 'Wallet Buy Market Cap', type: 'sol', field: 'walletBuyMarketCap' },
+    { key: 'walletBuyMarketCap', label: 'Wallet Buy Market Cap', type: 'marketcap', field: 'walletBuyMarketCap' },
+    { key: 'walletBuyBlockNumberAfterDev', label: 'Wallet Block # after dev', type: 'marketcap', field: 'walletBuyBlockNumberAfterDev' },
+    { key: 'walletBuyPositionAfterDev', label: 'Wallet Position after dev', type: 'marketcap', field: 'walletBuyPositionAfterDev' },
     
     // Token Amount filters
     { key: 'devBuyAmountTokens', label: 'Dev Buy Amount in Tokens', type: 'token', field: 'devBuyAmountTokens' },
@@ -145,11 +147,15 @@ const DATA_POINTS = [
     { key: 'walletBuyPercentOfRemainingSupply', label: 'Wallet buy % of the remaining supply', type: 'percent', field: 'walletBuyPercentOfRemainingSupply' },
     
     // Sell-related filters (these will be handled specially)
-    { key: 'sellAmountSOL', label: 'Wallet Sell Amount in SOL (any sell)', type: 'sol', field: 'sells', isArray: true, arrayField: 'sellAmountSOL' },
-    { key: 'sellAmountTokens', label: 'Wallet Sell Amount in Tokens (any sell)', type: 'token', field: 'sells', isArray: true, arrayField: 'sellAmountTokens' },
-    { key: 'sellMarketCap', label: 'Wallet Sell Market Cap (any sell)', type: 'sol', field: 'sells', isArray: true, arrayField: 'marketCap' },
-    { key: 'sellPercentOfBuy', label: 'Sell % of Buy (any sell)', type: 'percent', field: 'sells', isArray: true, arrayField: 'sellPercentOfBuy' },
-    { key: 'firstSellPNL', label: 'First Sell PNL (any sell)', type: 'percent', field: 'sells', isArray: true, arrayField: 'firstSellPNL' }
+    { key: 'sellAmountSOL', label: 'Wallet Sell Amount in SOL', type: 'sol', field: 'sells', isArray: true, arrayField: 'sellAmountSOL' },
+    { key: 'sellAmountTokens', label: 'Wallet Sell Amount in Tokens', type: 'token', field: 'sells', isArray: true, arrayField: 'sellAmountTokens' },
+    { key: 'sellMarketCap', label: 'Wallet Sell Market Cap', type: 'marketcap', field: 'sells', isArray: true, arrayField: 'marketCap' },
+    { key: 'sellPercentOfBuy', label: 'Sell % of Buy', type: 'percent', field: 'sells', isArray: true, arrayField: 'sellPercentOfBuy' },
+    { key: 'firstSellPNL', label: 'Sell PNL', type: 'percent', field: 'sells', isArray: true, arrayField: 'firstSellPNL' },
+    { key: 'sellTimestamp', label: 'Wallet Sell Timestamp', type: 'timestamp', field: 'sells', isArray: true, arrayField: 'timestamp' },
+    
+    // Timestamp filters
+    { key: 'walletBuyTimestamp', label: 'Wallet Buy Timestamp', type: 'timestamp', field: 'walletBuyTimestamp' }
 ];
 
 /**
@@ -230,6 +236,11 @@ function getFilterConfig(type) {
             return { min: 0, max: 1000000000, defaultMin: 0, defaultMax: 1000000000, step: 1, maxLabel: '10^9+' };
         case 'percent':
             return { min: -100, max: 100, defaultMin: -100, defaultMax: 100, step: 0.01, minLabel: '-100%', maxLabel: '100%' };
+        case 'marketcap':
+            return { min: 0, max: 10000, defaultMin: 0, defaultMax: 10000, step: 0.01, minLabel: '0', maxLabel: '10,000+' };
+        case 'timestamp':
+            // For timestamp, min/max are ISO date strings, defaults are null (no filter)
+            return { min: null, max: null, defaultMin: null, defaultMax: null, step: null, minLabel: 'Start Date/Time', maxLabel: 'End Date/Time' };
         default:
             return { min: 0, max: 100, defaultMin: 0, defaultMax: 100, step: 0.01 };
     }
@@ -249,8 +260,16 @@ window.openAddFilterDialog = function() {
     // Get already active filter keys
     const activeKeys = activeFilters.map(f => f.key);
     
-    // Filter out already added data points
-    const availableDataPoints = DATA_POINTS.filter(dp => !activeKeys.includes(dp.key));
+    // For sell filters, always show them (allow multiple instances with different sell numbers)
+    // For other filters, filter out already added data points
+    const availableDataPoints = DATA_POINTS.filter(dp => {
+        // Always show sell filters (isArray && field === 'sells')
+        if (dp.isArray && dp.field === 'sells') {
+            return true;
+        }
+        // For non-sell filters, only show if not already added
+        return !activeKeys.includes(dp.key);
+    });
     
     if (availableDataPoints.length === 0) {
         list.innerHTML = '<div style="padding: 20px; text-align: center; color: #94a3b8;">All available data points have been added as filters.</div>';
@@ -278,8 +297,25 @@ window.openAddFilterDialog = function() {
             
             const type = document.createElement('div');
             type.style.cssText = 'color: #94a3b8; font-size: 0.85rem;';
-            const typeLabels = { sol: 'SOL Amount', token: 'Token Amount', percent: 'Percentage' };
-            type.textContent = `Type: ${typeLabels[dataPoint.type] || 'Unknown'}`;
+            const typeLabels = { sol: 'SOL Amount', token: 'Token Amount', percent: 'Percentage', marketcap: 'Market Cap', timestamp: 'Date/Time' };
+            let typeText = `Type: ${typeLabels[dataPoint.type] || 'Unknown'}`;
+            
+            // For sell filters, show which sell numbers are already used
+            if (dataPoint.isArray && dataPoint.field === 'sells') {
+                const existingFilters = activeFilters.filter(f => f.key === dataPoint.key);
+                if (existingFilters.length > 0) {
+                    const usedSellNumbers = existingFilters
+                        .map(f => f.sellNumber || 1)
+                        .sort((a, b) => a - b);
+                    const sellNumbersText = usedSellNumbers.map(n => 
+                        n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`
+                    ).join(', ');
+                    typeText += ` (${existingFilters.length} filter${existingFilters.length > 1 ? 's' : ''} added: ${sellNumbersText} sell${usedSellNumbers.length > 1 ? 's' : ''} - can add more with different sell numbers)`;
+                } else {
+                    typeText += ' (can add multiple with different sell numbers)';
+                }
+            }
+            type.textContent = typeText;
             item.appendChild(type);
             
             list.appendChild(item);
@@ -350,15 +386,11 @@ function addFilter(dataPointKey) {
     const dataPoint = DATA_POINTS.find(dp => dp.key === dataPointKey);
     if (!dataPoint) return;
     
-    // Check if already added
-    if (activeFilters.find(f => f.key === dataPointKey)) {
-        return;
-    }
-    
     const config = getFilterConfig(dataPoint.type);
     
     // Create filter object
     const filter = {
+        id: Date.now() + Math.random(), // Unique ID for this filter instance
         key: dataPointKey,
         label: dataPoint.label,
         type: dataPoint.type,
@@ -368,6 +400,47 @@ function addFilter(dataPointKey) {
         maxEnabled: true
     };
     
+    // Add sellNumber for sell filters
+    if (dataPoint.isArray && dataPoint.field === 'sells') {
+        // Get all existing sell numbers for this filter key (explicitly check for sellNumber property)
+        const existingFiltersForThisKey = activeFilters.filter(f => f.key === dataPointKey);
+        const existingSellNumbers = existingFiltersForThisKey
+            .filter(f => f.sellNumber !== null && f.sellNumber !== undefined)
+            .map(f => f.sellNumber)
+            .sort((a, b) => a - b);
+        
+        // Find the first available sell number starting from 1
+        let defaultSellNumber = 1;
+        for (let i = 1; i <= 20; i++) { // Check up to 20th sell
+            if (!existingSellNumbers.includes(i)) {
+                defaultSellNumber = i;
+                break;
+            }
+        }
+        
+        // Check if this exact combination (key + sellNumber) already exists BEFORE assigning
+        // Use strict comparison to ensure we catch all duplicates
+        const duplicateExists = existingFiltersForThisKey.some(f => {
+            // Handle both cases: explicit sellNumber and default to 1
+            const existingSellNum = (f.sellNumber !== null && f.sellNumber !== undefined) ? f.sellNumber : 1;
+            return existingSellNum === defaultSellNumber;
+        });
+        
+        if (duplicateExists) {
+            // This exact filter already exists, don't add it
+            // Could show a notification here if needed
+            console.log(`Filter for ${dataPoint.label} with ${defaultSellNumber === 1 ? '1st' : defaultSellNumber === 2 ? '2nd' : defaultSellNumber === 3 ? '3rd' : `${defaultSellNumber}th`} sell already exists`);
+            return;
+        }
+        
+        filter.sellNumber = defaultSellNumber;
+    } else {
+        // For non-sell filters, prevent duplicates (same key)
+        if (activeFilters.find(f => f.key === dataPointKey)) {
+            return;
+        }
+    }
+    
     activeFilters.push(filter);
     renderFilters();
     applyFilters();
@@ -376,8 +449,8 @@ function addFilter(dataPointKey) {
 /**
  * Remove a filter
  */
-function removeFilter(dataPointKey) {
-    activeFilters = activeFilters.filter(f => f.key !== dataPointKey);
+function removeFilter(filterId) {
+    activeFilters = activeFilters.filter(f => f.id !== filterId);
     renderFilters();
     applyFilters();
 }
@@ -402,139 +475,281 @@ function renderFilters() {
     activeFilters.forEach((filter, index) => {
         const filterDiv = document.createElement('div');
         filterDiv.style.cssText = 'margin-bottom: 20px; padding: 15px; background: #1a1f2e; border: 1px solid #334155; border-radius: 6px;';
-        filterDiv.id = `filter-${filter.key}`;
+        filterDiv.id = `filter-${filter.id}`;
         
         // Header with label and remove button
         const header = document.createElement('div');
         header.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;';
         
+        // Get data point for this filter
+        const dataPoint = DATA_POINTS.find(dp => dp.key === filter.key);
+        
         const label = document.createElement('label');
         label.style.cssText = 'font-weight: 600; color: #cbd5e1; font-size: 0.9rem;';
-        label.textContent = filter.label;
+        // For sell filters, show sell number in label if specified
+        let labelText = filter.label;
+        if (dataPoint && dataPoint.isArray && dataPoint.field === 'sells' && filter.sellNumber) {
+            const sellNumText = filter.sellNumber === 1 ? '1st' : filter.sellNumber === 2 ? '2nd' : filter.sellNumber === 3 ? '3rd' : `${filter.sellNumber}th`;
+            labelText = `${filter.label} (${sellNumText} sell)`;
+        }
+        label.textContent = labelText;
         header.appendChild(label);
         
         const removeBtn = document.createElement('button');
         removeBtn.style.cssText = 'padding: 4px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; transition: all 0.2s;';
         removeBtn.textContent = 'Remove';
-        removeBtn.onclick = () => removeFilter(filter.key);
+        removeBtn.onclick = () => removeFilter(filter.id);
         removeBtn.onmouseover = () => { removeBtn.style.background = '#dc2626'; };
         removeBtn.onmouseout = () => { removeBtn.style.background = '#ef4444'; };
         header.appendChild(removeBtn);
         
         filterDiv.appendChild(header);
         
+        // Sell number selector for sell filters
+        if (dataPoint && dataPoint.isArray && dataPoint.field === 'sells') {
+            const sellNumberDiv = document.createElement('div');
+            sellNumberDiv.style.cssText = 'margin-bottom: 12px; display: flex; align-items: center; gap: 10px;';
+            
+            const sellNumberLabel = document.createElement('label');
+            sellNumberLabel.style.cssText = 'color: #94a3b8; font-size: 0.85rem;';
+            sellNumberLabel.textContent = 'Sell Number:';
+            sellNumberDiv.appendChild(sellNumberLabel);
+            
+            const sellNumberSelect = document.createElement('select');
+            sellNumberSelect.id = `filter-${filter.key}-sellNumber`;
+            sellNumberSelect.style.cssText = 'padding: 6px 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem; cursor: pointer;';
+            
+            // Determine max sell number to show (use maxSells or a reasonable default like 10)
+            const maxSellOptions = Math.max(maxSells || 10, 10);
+            
+            for (let i = 1; i <= maxSellOptions; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.textContent = i === 1 ? '1st sell' : i === 2 ? '2nd sell' : i === 3 ? '3rd sell' : `${i}th sell`;
+                sellNumberSelect.appendChild(option);
+            }
+            
+            // Set current value
+            sellNumberSelect.value = filter.sellNumber || 1;
+            
+            // Update filter when selection changes
+            sellNumberSelect.onchange = async () => {
+                const newSellNumber = parseInt(sellNumberSelect.value);
+                
+                // Check if this sell number is already used by another filter with the same key
+                const duplicateExists = activeFilters.some(f => {
+                    if (f.id === filter.id) return false; // Don't check against itself
+                    if (f.key !== filter.key) return false; // Different datapoint
+                    const existingSellNum = f.sellNumber !== null && f.sellNumber !== undefined ? f.sellNumber : 1;
+                    return existingSellNum === newSellNumber;
+                });
+                
+                if (duplicateExists) {
+                    // Revert to previous value
+                    sellNumberSelect.value = filter.sellNumber || 1;
+                    const { showNotification } = await import('./utils.js');
+                    const sellNumText = newSellNumber === 1 ? '1st' : newSellNumber === 2 ? '2nd' : newSellNumber === 3 ? '3rd' : `${newSellNumber}th`;
+                    showNotification(`Sell number ${sellNumText} is already used for this datapoint`, 'error');
+                    return;
+                }
+                
+                filter.sellNumber = newSellNumber;
+                applyFilters();
+            };
+            
+            sellNumberDiv.appendChild(sellNumberSelect);
+            filterDiv.appendChild(sellNumberDiv);
+        }
+        
         // Filter controls
         const config = getFilterConfig(filter.type);
         const controlsDiv = document.createElement('div');
         controlsDiv.style.cssText = 'display: flex; gap: 15px; align-items: center; flex-wrap: wrap;';
         
-        // Inputs
-        const inputsDiv = document.createElement('div');
-        inputsDiv.style.cssText = 'flex: 1; min-width: 150px;';
-        
-        const inputsInner = document.createElement('div');
-        inputsInner.style.cssText = 'display: flex; gap: 10px; align-items: center;';
-        
-        // Min input
-        const minInput = document.createElement('input');
-        minInput.type = 'number';
-        minInput.id = `filter-${filter.key}-min`;
-        minInput.min = (filter.type === 'percent' || filter.type === 'sol') ? undefined : config.min; // Percent and SOL can be unset
-        minInput.step = config.step;
-        minInput.value = filter.min;
-        minInput.placeholder = (filter.type === 'percent' || filter.type === 'sol') ? 'Min' : config.min.toString();
-        minInput.style.cssText = 'width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;';
-        inputsInner.appendChild(minInput);
-        
-        const toSpan = document.createElement('span');
-        toSpan.style.cssText = 'color: #94a3b8;';
-        toSpan.textContent = 'to';
-        inputsInner.appendChild(toSpan);
-        
-        // Max input
-        const maxInput = document.createElement('input');
-        maxInput.type = 'number';
-        maxInput.id = `filter-${filter.key}-max`;
-        maxInput.min = filter.type === 'sol' || filter.type === 'token' ? config.min : undefined; // SOL/Token min is 0, percent can be unset
-        maxInput.step = config.step;
-        maxInput.value = filter.max;
-        maxInput.placeholder = 'Max';
-        maxInput.style.cssText = 'width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;';
-        inputsInner.appendChild(maxInput);
-        
-        inputsDiv.appendChild(inputsInner);
-        controlsDiv.appendChild(inputsDiv);
-        
-        // Slider
-        const sliderDiv = document.createElement('div');
-        sliderDiv.style.cssText = 'flex: 4; min-width: 300px; position: relative; display: flex; justify-content: space-between; gap: 5px; align-items: center;';
-        
-        // Min label
-        const minLabel = document.createElement('span');
-        minLabel.id = `filter-${filter.key}-min-label`;
-        minLabel.style.cssText = 'color: #94a3b8; font-size: 0.85rem; text-align: right; min-width: 50px; flex-shrink: 0;';
-        if (filter.type === 'percent') {
-            minLabel.textContent = config.minLabel;
-        } else if (filter.type === 'sol') {
-            minLabel.textContent = config.minLabel || config.min;
+        // Handle timestamp filters differently - use datetime-local inputs
+        if (filter.type === 'timestamp') {
+            const timestampDiv = document.createElement('div');
+            timestampDiv.style.cssText = 'display: flex; gap: 10px; align-items: center; flex: 1; flex-wrap: wrap;';
+            
+            // Helper function to convert formatted timestamp to datetime-local format
+            const convertToDatetimeLocal = (timestampStr) => {
+                if (!timestampStr) return '';
+                try {
+                    // Parse the formatted timestamp (e.g., "2024-01-15 14:30:00")
+                    const date = new Date(timestampStr);
+                    if (isNaN(date.getTime())) return '';
+                    // Convert to datetime-local format (YYYY-MM-DDTHH:mm)
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    const hours = String(date.getHours()).padStart(2, '0');
+                    const minutes = String(date.getMinutes()).padStart(2, '0');
+                    return `${year}-${month}-${day}T${hours}:${minutes}`;
+                } catch (e) {
+                    return '';
+                }
+            };
+            
+            // Start datetime input
+            const startLabel = document.createElement('label');
+            startLabel.style.cssText = 'color: #94a3b8; font-size: 0.85rem; white-space: nowrap;';
+            startLabel.textContent = 'From:';
+            timestampDiv.appendChild(startLabel);
+            
+            const startInput = document.createElement('input');
+            startInput.type = 'datetime-local';
+            startInput.id = `filter-${filter.key}-min`;
+            startInput.value = convertToDatetimeLocal(filter.min);
+            startInput.style.cssText = 'padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem; min-width: 180px;';
+            startInput.onchange = () => {
+                if (startInput.value) {
+                    // Convert datetime-local to ISO string for storage
+                    const date = new Date(startInput.value);
+                    filter.min = date.toISOString();
+                } else {
+                    filter.min = null;
+                }
+                applyFilters();
+            };
+            timestampDiv.appendChild(startInput);
+            
+            // End datetime input
+            const endLabel = document.createElement('label');
+            endLabel.style.cssText = 'color: #94a3b8; font-size: 0.85rem; white-space: nowrap; margin-left: 10px;';
+            endLabel.textContent = 'To:';
+            timestampDiv.appendChild(endLabel);
+            
+            const endInput = document.createElement('input');
+            endInput.type = 'datetime-local';
+            endInput.id = `filter-${filter.key}-max`;
+            endInput.value = convertToDatetimeLocal(filter.max);
+            endInput.style.cssText = 'padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem; min-width: 180px;';
+            endInput.onchange = () => {
+                if (endInput.value) {
+                    // Convert datetime-local to ISO string for storage
+                    const date = new Date(endInput.value);
+                    filter.max = date.toISOString();
+                } else {
+                    filter.max = null;
+                }
+                applyFilters();
+            };
+            timestampDiv.appendChild(endInput);
+            
+            controlsDiv.appendChild(timestampDiv);
         } else {
-            minLabel.textContent = config.min;
+            // Regular number inputs and sliders for non-timestamp filters
+            // Inputs
+            const inputsDiv = document.createElement('div');
+            inputsDiv.style.cssText = 'flex: 1; min-width: 150px;';
+            
+            const inputsInner = document.createElement('div');
+            inputsInner.style.cssText = 'display: flex; gap: 10px; align-items: center;';
+            
+            // Min input
+            const minInput = document.createElement('input');
+            minInput.type = 'number';
+            minInput.id = `filter-${filter.key}-min`;
+            minInput.min = (filter.type === 'percent' || filter.type === 'sol') ? undefined : config.min; // Percent and SOL can be unset
+            minInput.step = config.step;
+            minInput.value = filter.min;
+            minInput.placeholder = (filter.type === 'percent' || filter.type === 'sol') ? 'Min' : config.min.toString();
+            minInput.style.cssText = 'width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;';
+            inputsInner.appendChild(minInput);
+            
+            const toSpan = document.createElement('span');
+            toSpan.style.cssText = 'color: #94a3b8;';
+            toSpan.textContent = 'to';
+            inputsInner.appendChild(toSpan);
+            
+            // Max input
+            const maxInput = document.createElement('input');
+            maxInput.type = 'number';
+            maxInput.id = `filter-${filter.key}-max`;
+            maxInput.min = filter.type === 'sol' || filter.type === 'token' || filter.type === 'marketcap' ? config.min : undefined; // SOL/Token/MarketCap min is 0, percent can be unset
+            maxInput.step = config.step;
+            maxInput.value = filter.max;
+            maxInput.placeholder = 'Max';
+            maxInput.style.cssText = 'width: 100px; padding: 8px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem;';
+            inputsInner.appendChild(maxInput);
+            
+            inputsDiv.appendChild(inputsInner);
+            controlsDiv.appendChild(inputsDiv);
+            
+            // Slider
+            const sliderDiv = document.createElement('div');
+            sliderDiv.style.cssText = 'flex: 4; min-width: 300px; position: relative; display: flex; justify-content: space-between; gap: 5px; align-items: center;';
+            
+            // Min label
+            const minLabel = document.createElement('span');
+            minLabel.id = `filter-${filter.key}-min-label`;
+            minLabel.style.cssText = 'color: #94a3b8; font-size: 0.85rem; text-align: right; min-width: 50px; flex-shrink: 0;';
+            if (filter.type === 'percent') {
+                minLabel.textContent = config.minLabel;
+            } else if (filter.type === 'sol') {
+                minLabel.textContent = config.minLabel || config.min;
+            } else {
+                minLabel.textContent = config.min;
+            }
+            sliderDiv.appendChild(minLabel);
+            
+            // Slider container
+            const sliderContainer = document.createElement('div');
+            sliderContainer.className = 'dual-range-container';
+            sliderContainer.style.cssText = 'position: relative; height: 40px; padding: 15px 0; width: 100%;';
+            
+            const track = document.createElement('div');
+            track.className = 'dual-range-track';
+            track.style.cssText = 'position: absolute; width: 100%; height: 6px; background: #334155; border-radius: 3px; top: 15px; z-index: 1;';
+            sliderContainer.appendChild(track);
+            
+            const progress = document.createElement('div');
+            progress.className = 'dual-range-progress';
+            progress.id = `filter-${filter.key}-progress`;
+            progress.style.cssText = 'position: absolute; height: 6px; background: #3b82f6; border-radius: 3px; top: 15px; z-index: 1; left: 0%; width: 100%;';
+            sliderContainer.appendChild(progress);
+            
+            const minSlider = document.createElement('input');
+            minSlider.type = 'range';
+            minSlider.id = `filter-${filter.key}-slider-min`;
+            minSlider.className = 'dual-range-input';
+            minSlider.min = config.min;
+            minSlider.max = config.max;
+            minSlider.step = config.step;
+            minSlider.value = filter.min;
+            minSlider.style.cssText = 'position: absolute; width: 100%; top: 10px; z-index: 2;';
+            sliderContainer.appendChild(minSlider);
+            
+            const maxSlider = document.createElement('input');
+            maxSlider.type = 'range';
+            maxSlider.id = `filter-${filter.key}-slider-max`;
+            maxSlider.className = 'dual-range-input';
+            maxSlider.min = config.min;
+            maxSlider.max = config.max;
+            maxSlider.step = config.step;
+            maxSlider.value = filter.max;
+            maxSlider.style.cssText = 'position: absolute; width: 100%; top: 10px; z-index: 3;';
+            sliderContainer.appendChild(maxSlider);
+            
+            sliderDiv.appendChild(sliderContainer);
+            
+            // Max label
+            const maxLabel = document.createElement('span');
+            maxLabel.id = `filter-${filter.key}-max-label`;
+            maxLabel.style.cssText = 'color: #94a3b8; font-size: 0.85rem; text-align: left; min-width: 50px; flex-shrink: 0;';
+            maxLabel.textContent = (filter.type === 'percent' || filter.type === 'marketcap') ? config.maxLabel : config.max;
+            sliderDiv.appendChild(maxLabel);
+            
+            controlsDiv.appendChild(sliderDiv);
         }
-        sliderDiv.appendChild(minLabel);
         
-        // Slider container
-        const sliderContainer = document.createElement('div');
-        sliderContainer.className = 'dual-range-container';
-        sliderContainer.style.cssText = 'position: relative; height: 40px; padding: 15px 0; width: 100%;';
-        
-        const track = document.createElement('div');
-        track.className = 'dual-range-track';
-        track.style.cssText = 'position: absolute; width: 100%; height: 6px; background: #334155; border-radius: 3px; top: 15px; z-index: 1;';
-        sliderContainer.appendChild(track);
-        
-        const progress = document.createElement('div');
-        progress.className = 'dual-range-progress';
-        progress.id = `filter-${filter.key}-progress`;
-        progress.style.cssText = 'position: absolute; height: 6px; background: #3b82f6; border-radius: 3px; top: 15px; z-index: 1; left: 0%; width: 100%;';
-        sliderContainer.appendChild(progress);
-        
-        const minSlider = document.createElement('input');
-        minSlider.type = 'range';
-        minSlider.id = `filter-${filter.key}-slider-min`;
-        minSlider.className = 'dual-range-input';
-        minSlider.min = config.min;
-        minSlider.max = config.max;
-        minSlider.step = config.step;
-        minSlider.value = filter.min;
-        minSlider.style.cssText = 'position: absolute; width: 100%; top: 10px; z-index: 2;';
-        sliderContainer.appendChild(minSlider);
-        
-        const maxSlider = document.createElement('input');
-        maxSlider.type = 'range';
-        maxSlider.id = `filter-${filter.key}-slider-max`;
-        maxSlider.className = 'dual-range-input';
-        maxSlider.min = config.min;
-        maxSlider.max = config.max;
-        maxSlider.step = config.step;
-        maxSlider.value = filter.max;
-        maxSlider.style.cssText = 'position: absolute; width: 100%; top: 10px; z-index: 3;';
-        sliderContainer.appendChild(maxSlider);
-        
-        sliderDiv.appendChild(sliderContainer);
-        
-        // Max label
-        const maxLabel = document.createElement('span');
-        maxLabel.id = `filter-${filter.key}-max-label`;
-        maxLabel.style.cssText = 'color: #94a3b8; font-size: 0.85rem; text-align: left; min-width: 50px; flex-shrink: 0;';
-        maxLabel.textContent = filter.type === 'percent' ? config.maxLabel : config.max;
-        sliderDiv.appendChild(maxLabel);
-        
-        controlsDiv.appendChild(sliderDiv);
         filterDiv.appendChild(controlsDiv);
         container.appendChild(filterDiv);
         
-        // Setup slider
-        setupDynamicDualRangeSlider(filter.key, config);
+        // Setup slider (only for non-timestamp filters)
+        if (filter.type !== 'timestamp') {
+            setupDynamicDualRangeSlider(filter.key, config);
+        }
     });
 }
 
@@ -592,6 +807,15 @@ function setupDynamicDualRangeSlider(filterKey, config) {
                 maxLabel.textContent = '10^9+';
             } else if (actualMax === null || actualMax === undefined) {
                 maxLabel.textContent = '10^9+';
+            } else {
+                maxLabel.textContent = actualMax.toLocaleString();
+            }
+        } else if (filter.type === 'marketcap') {
+            minLabel.textContent = actualMin >= 0 ? actualMin.toLocaleString() : '0';
+            if (actualMax > 10000) {
+                maxLabel.textContent = '10,000+';
+            } else if (actualMax === null || actualMax === undefined) {
+                maxLabel.textContent = '10,000+';
             } else {
                 maxLabel.textContent = actualMax.toLocaleString();
             }
@@ -870,9 +1094,17 @@ function applyFilters() {
                     // For now, we'll skip filtering if there are no sells
                     continue;
                 }
-                // Get the value from the first sell or check all sells
-                const firstSell = sells[0];
-                value = firstSell ? firstSell[dataPoint.arrayField] : null;
+                // Get the value from the specific sell number (1-indexed)
+                const sellNumber = filter.sellNumber || 1; // Default to 1st sell if not specified
+                const sellIndex = sellNumber - 1; // Convert to 0-indexed
+                
+                if (sellIndex >= 0 && sellIndex < sells.length) {
+                    const targetSell = sells[sellIndex];
+                    value = targetSell ? targetSell[dataPoint.arrayField] : null;
+                } else {
+                    // If the requested sell number doesn't exist, skip this filter
+                    continue;
+                }
             } else {
                 value = token[dataPoint.field];
             }
@@ -882,15 +1114,57 @@ function applyFilters() {
                 continue;
             }
             
-            // Apply min/max filters (null/undefined means "not set")
-            if (filter.min !== null && filter.min !== undefined) {
-                if (value < filter.min) {
-                    return false;
+            // Handle timestamp filters differently
+            if (filter.type === 'timestamp') {
+                // Parse the timestamp value from the data (formatted string like "2024-01-15 14:30:00")
+                let timestampValue = null;
+                try {
+                    if (typeof value === 'string') {
+                        timestampValue = new Date(value).getTime();
+                    } else if (value instanceof Date) {
+                        timestampValue = value.getTime();
+                    }
+                } catch (e) {
+                    // If parsing fails, skip this filter
+                    continue;
                 }
-            }
-            if (filter.max !== null && filter.max !== undefined) {
-                if (value > filter.max) {
-                    return false;
+                
+                if (timestampValue === null || isNaN(timestampValue)) {
+                    continue;
+                }
+                
+                // Apply min/max filters (null/undefined means "not set")
+                if (filter.min !== null && filter.min !== undefined) {
+                    try {
+                        const minDate = new Date(filter.min).getTime();
+                        if (timestampValue < minDate) {
+                            return false;
+                        }
+                    } catch (e) {
+                        // If parsing fails, skip this check
+                    }
+                }
+                if (filter.max !== null && filter.max !== undefined) {
+                    try {
+                        const maxDate = new Date(filter.max).getTime();
+                        if (timestampValue > maxDate) {
+                            return false;
+                        }
+                    } catch (e) {
+                        // If parsing fails, skip this check
+                    }
+                }
+            } else {
+                // Apply min/max filters for numeric values (null/undefined means "not set")
+                if (filter.min !== null && filter.min !== undefined) {
+                    if (value < filter.min) {
+                        return false;
+                    }
+                }
+                if (filter.max !== null && filter.max !== undefined) {
+                    if (value > filter.max) {
+                        return false;
+                    }
                 }
             }
         }
@@ -1444,6 +1718,7 @@ function updateSellStatistics() {
     for (let sellPosition = 1; sellPosition <= maxSells; sellPosition++) {
         const profitsAtSell = [];
         const holdingTimes = [];
+        const sellPercentOfBuyValues = [];
         
         // Collect data for this sell position across all tokens
         filteredData.forEach(token => {
@@ -1453,6 +1728,11 @@ function updateSellStatistics() {
                 // Collect nth Sell PNL (Wallet Buy Market Cap / nth Sell Market Cap)
                 if (sell.firstSellPNL !== null && sell.firstSellPNL !== undefined) {
                     profitsAtSell.push(sell.firstSellPNL);
+                }
+                
+                // Collect Sell % of Buy
+                if (sell.sellPercentOfBuy !== null && sell.sellPercentOfBuy !== undefined) {
+                    sellPercentOfBuyValues.push(sell.sellPercentOfBuy);
                 }
                 
                 // Collect holding time
@@ -1466,6 +1746,11 @@ function updateSellStatistics() {
         // Average profit of nth sell = Average of nth sell PNL (already in percentage)
         const avgProfit = profitsAtSell.length > 0
             ? profitsAtSell.reduce((sum, p) => sum + p, 0) / profitsAtSell.length
+            : null;
+        
+        // Average Sell % of Buy
+        const avgSellPercentOfBuy = sellPercentOfBuyValues.length > 0
+            ? sellPercentOfBuyValues.reduce((sum, p) => sum + p, 0) / sellPercentOfBuyValues.length
             : null;
         
         const avgHoldingTime = holdingTimes.length > 0
@@ -1501,6 +1786,23 @@ function updateSellStatistics() {
         }
         card.appendChild(profitValue);
         
+        // Average Sell % of Buy
+        const sellPercentLabel = document.createElement('div');
+        sellPercentLabel.style.cssText = 'font-size: 0.75rem; color: #94a3b8; margin-bottom: 5px;';
+        sellPercentLabel.textContent = 'Average Sell % of Buy';
+        card.appendChild(sellPercentLabel);
+        
+        const sellPercentValue = document.createElement('div');
+        sellPercentValue.style.cssText = 'font-size: 1.1rem; font-weight: 600; margin-bottom: 12px;';
+        if (avgSellPercentOfBuy !== null) {
+            sellPercentValue.textContent = formatPercent(avgSellPercentOfBuy);
+            sellPercentValue.style.color = '#e0e7ff';
+        } else {
+            sellPercentValue.textContent = '-';
+            sellPercentValue.style.color = '#94a3b8';
+        }
+        card.appendChild(sellPercentValue);
+        
         // Average Holding Time (in seconds)
         // Average of holding time on nth sell in seconds for all tokens (except tokens without nth sell)
         const timeLabel = document.createElement('div');
@@ -1511,8 +1813,8 @@ function updateSellStatistics() {
         const timeValue = document.createElement('div');
         timeValue.style.cssText = 'font-size: 1.1rem; font-weight: 600;';
         if (avgHoldingTime !== null) {
-            // Display in seconds with formatted version in parentheses
-            timeValue.textContent = `${avgHoldingTime.toLocaleString()}s (${formatDuration(avgHoldingTime)})`;
+            // Display formatted duration only (formatDuration already includes appropriate units)
+            timeValue.textContent = formatDuration(avgHoldingTime);
             timeValue.style.color = '#e0e7ff';
         } else {
             timeValue.textContent = '-';
@@ -2067,15 +2369,23 @@ window.loadFilterPreset = async function() {
             // Support both old format (for backward compatibility) and new format
             if (preset.filters && Array.isArray(preset.filters)) {
                 // New format: array of filter objects
-                activeFilters = preset.filters.map(filter => ({
-                    key: filter.key,
-                    label: filter.label || DATA_POINTS.find(dp => dp.key === filter.key)?.label || filter.key,
-                    type: filter.type || DATA_POINTS.find(dp => dp.key === filter.key)?.type || 'sol',
-                    min: filter.min !== null && filter.min !== undefined ? parseFloat(filter.min) : null,
-                    max: filter.max !== null && filter.max !== undefined ? parseFloat(filter.max) : null,
-                    minEnabled: filter.minEnabled !== false,
-                    maxEnabled: filter.maxEnabled !== false
-                }));
+                activeFilters = preset.filters.map(filter => {
+                    const filterObj = {
+                        id: Date.now() + Math.random(), // Generate new unique ID
+                        key: filter.key,
+                        label: filter.label || DATA_POINTS.find(dp => dp.key === filter.key)?.label || filter.key,
+                        type: filter.type || DATA_POINTS.find(dp => dp.key === filter.key)?.type || 'sol',
+                        min: filter.min !== null && filter.min !== undefined ? parseFloat(filter.min) : null,
+                        max: filter.max !== null && filter.max !== undefined ? parseFloat(filter.max) : null,
+                        minEnabled: filter.minEnabled !== false,
+                        maxEnabled: filter.maxEnabled !== false
+                    };
+                    // Include sellNumber if present (for sell filters)
+                    if (filter.sellNumber !== null && filter.sellNumber !== undefined) {
+                        filterObj.sellNumber = parseInt(filter.sellNumber);
+                    }
+                    return filterObj;
+                });
             } else {
                 // Old format: individual filter properties (backward compatibility)
                 // Convert old format to new format
@@ -2223,15 +2533,22 @@ window.saveFilterPreset = async function() {
     
     // Save filters in new format (array of filter objects)
     const filters = {
-        filters: activeFilters.map(filter => ({
-            key: filter.key,
-            label: filter.label,
-            type: filter.type,
-            min: filter.min,
-            max: filter.max,
-            minEnabled: filter.minEnabled,
-            maxEnabled: filter.maxEnabled
-        }))
+        filters: activeFilters.map(filter => {
+            const filterObj = {
+                key: filter.key,
+                label: filter.label,
+                type: filter.type,
+                min: filter.min,
+                max: filter.max,
+                minEnabled: filter.minEnabled,
+                maxEnabled: filter.maxEnabled
+            };
+            // Include sellNumber if present (for sell filters)
+            if (filter.sellNumber !== null && filter.sellNumber !== undefined) {
+                filterObj.sellNumber = filter.sellNumber;
+            }
+            return filterObj;
+        })
     };
     
     // Also include old format for backward compatibility
