@@ -128,12 +128,6 @@
                                 style="flex: 1; padding: 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem; height: 42px; box-sizing: border-box;">
                                 <option value="">-- Select a wallet --</option>
                             </select>
-                            <button onclick="window.loadDashboardData()"
-                                style="padding: 10px 20px; background: #334155; color: #e0e7ff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; height: 42px; box-sizing: border-box; white-space: nowrap; display: flex; align-items: center; gap: 6px; transition: all 0.2s;"
-                                onmouseover="this.style.background='#475569'"
-                                onmouseout="this.style.background='#334155'" title="Refresh Dashboard Data">
-                                <span>🔄</span> Refresh
-                            </button>
                             <button onclick="window.exportDashboardToExcel()"
                                 style="padding: 10px 20px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; height: 42px; box-sizing: border-box; white-space: nowrap; display: flex; align-items: center; gap: 6px; transition: all 0.2s;"
                                 onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'"
@@ -247,9 +241,14 @@
                     <div class="card" style="margin-bottom: 20px; padding: 20px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                             <div class="section-title" style="margin-bottom: 0;">🔍 Filters</div>
-                            <button onclick="window.openAddFilterDialog()" style="padding: 8px 16px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 6px; transition: all 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'" title="Add Filter">
-                                <span>➕</span> Add Filter
-                            </button>
+                            <div style="display: flex; gap: 10px;">
+                                <button onclick="window.openColumnVisibilityDialog()" style="padding: 8px 16px; background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 6px; transition: all 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'" title="Toggle Column Visibility">
+                                    <span>👁️</span> Columns
+                                </button>
+                                <button onclick="window.openAddFilterDialog()" style="padding: 8px 16px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 6px; transition: all 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'" title="Add Filter">
+                                    <span>➕</span> Add Filter
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Dynamic Filters Container -->
@@ -517,6 +516,25 @@
                 </div>
                 <div id="dataPointsList" style="display: flex; flex-direction: column; gap: 8px;">
                     <!-- Data points will be dynamically added here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Column Visibility Dialog -->
+    <div id="columnVisibilityModal" class="modal-overlay" style="display: none; align-items: center; justify-content: center;">
+        <div class="modal" style="max-width: 600px; max-height: 80vh;">
+            <div class="modal-header">
+                <h2>👁️ Column Visibility</h2>
+                <button class="modal-close" onclick="window.closeColumnVisibilityDialog()">×</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto;">
+                <div style="margin-bottom: 15px; display: flex; gap: 10px;">
+                    <button onclick="window.selectAllColumns()" style="padding: 6px 12px; background: #334155; color: #e0e7ff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">Select All</button>
+                    <button onclick="window.deselectAllColumns()" style="padding: 6px 12px; background: #334155; color: #e0e7ff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">Deselect All</button>
+                </div>
+                <div id="columnVisibilityList" style="display: flex; flex-direction: column; gap: 8px;">
+                    <!-- Column checkboxes will be dynamically added here -->
                 </div>
             </div>
         </div>
