@@ -50,8 +50,8 @@ class TransactionTracker {
     });
 
     // Initialize Solana RPC connection for wallet analysis
-    const shyftApiKey = process.env.SHYFT_API_KEY;
-    const rpcUrl = `https://rpc.shyft.to/${shyftApiKey}`;
+    const shyftApiKey = process.env.X_TOKEN;
+    const rpcUrl = `https://dillwifit.shyft.to/${shyftApiKey}`;
     this.solanaConnection = new Connection(rpcUrl, "confirmed");
 
     // Initialize wallet tracking service with Solana connection for pool monitoring
