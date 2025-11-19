@@ -13,6 +13,7 @@ export const state = {
     autoRefreshInterval: null,
     currentTab: 'transactions',
     selectedWalletForTransactions: null, // For transactions tab (single wallet filter)
-    selectedWalletForAnalysis: null // For analysis tab (single)
+    selectedWalletForAnalysis: null, // For analysis tab (single)
+    selectedWalletForDashboard: null // For dashboard tab (single)
 };
 

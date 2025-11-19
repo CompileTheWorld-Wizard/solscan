@@ -165,6 +165,9 @@ const DATA_POINTS = [
  */
 export async function initializeDashboard() {
     try {
+        // Import state to access selectedWalletForDashboard
+        const { state } = await import('./state.js');
+        
         const result = await api.fetchAllWallets();
         if (result.success && result.wallets) {
             const select = document.getElementById('dashboardWalletSelect');
@@ -177,8 +180,19 @@ export async function initializeDashboard() {
                     const option = document.createElement('option');
                     option.value = wallet;
                     option.textContent = wallet;
+                    // Restore previously selected wallet if it exists
+                    if (state.selectedWalletForDashboard === wallet) {
+                        option.selected = true;
+                    }
                     select.appendChild(option);
                 });
+                
+                // Restore selection from state if it exists
+                if (state.selectedWalletForDashboard) {
+                    select.value = state.selectedWalletForDashboard;
+                    // Load dashboard data for the selected wallet
+                    loadDashboardData();
+                }
             }
         }
         
@@ -1429,6 +1443,10 @@ export async function loadDashboardData() {
     if (!select) return;
     
     const walletAddress = select.value;
+    
+    // Save selection to state
+    const { state } = await import('./state.js');
+    state.selectedWalletForDashboard = walletAddress || null;
     if (!walletAddress) {
         clearDashboardData();
         const loadingEl = document.getElementById('dashboardTableLoading');

@@ -46,6 +46,16 @@ export async function switchTab(tabName) {
         // Initialize dashboard wallets if not already done
         const { initializeDashboard } = await import('./dashboardManager.js');
         await initializeDashboard();
+        // Restore wallet selection from state if it exists
+        if (state.selectedWalletForDashboard) {
+            const select = document.getElementById('dashboardWalletSelect');
+            if (select) {
+                select.value = state.selectedWalletForDashboard;
+                // Load dashboard data for the selected wallet
+                const { loadDashboardData } = await import('./dashboardManager.js');
+                loadDashboardData();
+            }
+        }
     }
 }
 
@@ -204,6 +214,7 @@ export async function removeWalletFromAnalysis() {
             
             // Clear selection
             state.selectedWalletForAnalysis = null;
+            state.selectedWalletForDashboard = null;
             if (dashboardSelect) {
                 dashboardSelect.value = '';
             }
@@ -235,11 +246,10 @@ export async function removeWalletFromAnalysis() {
                 }
             }
             
-            // Refresh transactions tab if it's active
-            if (state.currentTab === 'transactions') {
-                const { fetchTransactions } = await import('./transactionManager.js');
-                await fetchTransactions();
-            }
+            // Always refresh transactions list regardless of active tab
+            // This ensures the list is updated when user switches to transactions tab
+            const { fetchTransactions } = await import('./transactionManager.js');
+            await fetchTransactions();
         } else {
             showNotification('❌ ' + (result.error || 'Failed to remove wallet'), 'error');
         }
