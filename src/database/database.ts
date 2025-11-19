@@ -13,6 +13,8 @@ interface TransactionData {
   feeAmount?: number;
   blockNumber?: number | null;
   blockTimestamp?: number | null;
+  token_price_sol?: number | null;
+  token_price_usd?: number | null;
   mint_from_name?: string | null;
   mint_from_image?: string | null;
   mint_from_symbol?: string | null;
@@ -296,6 +298,33 @@ class DatabaseService {
         console.warn('⚠️ Failed to add total_supply column (may already exist):', error);
       }
 
+      // Migration: Add token_price_sol and token_price_usd columns if they don't exist
+      try {
+        const hasTokenPriceSol = await this.columnExists('transactions', 'token_price_sol');
+        if (!hasTokenPriceSol) {
+          await this.pool.query(`
+            ALTER TABLE transactions 
+            ADD COLUMN token_price_sol NUMERIC(20, 9)
+          `);
+          console.log('✅ Added token_price_sol column to transactions table');
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to add token_price_sol column (may already exist):', error);
+      }
+
+      try {
+        const hasTokenPriceUsd = await this.columnExists('transactions', 'token_price_usd');
+        if (!hasTokenPriceUsd) {
+          await this.pool.query(`
+            ALTER TABLE transactions 
+            ADD COLUMN token_price_usd NUMERIC(20, 9)
+          `);
+          console.log('✅ Added token_price_usd column to transactions table');
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to add token_price_usd column (may already exist):', error);
+      }
+
       // Migration: Create wallet_stats table if it doesn't exist (for existing databases)
       try {
         const hasWalletStats = await this.tableExists('wallet_stats');
@@ -353,8 +382,10 @@ class DatabaseService {
             tip_amount,
             fee_amount,
             block_number,
-            block_timestamp
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            block_timestamp,
+            token_price_sol,
+            token_price_usd
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
           ON CONFLICT (transaction_id) DO NOTHING
         `;
 
@@ -371,6 +402,8 @@ class DatabaseService {
           transactionData.feeAmount ?? null,
           transactionData.blockNumber ?? null,
           blockTimestamp,
+          transactionData.token_price_sol ?? null,
+          transactionData.token_price_usd ?? null,
         ];
 
         await this.pool.query(query, values);
@@ -385,17 +418,32 @@ class DatabaseService {
   }
 
   /**
-   * Update market_cap and total_supply for a transaction by signature
+   * Update market_cap, total_supply, token_price_sol, and token_price_usd for a transaction by signature
    */
-  async updateTransactionMarketCap(transactionId: string, marketCap: number, totalSupply?: number): Promise<void> {
+  async updateTransactionMarketCap(
+    transactionId: string, 
+    marketCap: number | null, 
+    totalSupply?: number | null,
+    tokenPriceSol?: number | null,
+    tokenPriceUsd?: number | null
+  ): Promise<void> {
     try {
       const query = `
         UPDATE transactions
-        SET market_cap = $2, total_supply = $3
+        SET market_cap = $2, 
+            total_supply = $3,
+            token_price_sol = $4,
+            token_price_usd = $5
         WHERE transaction_id = $1
       `;
-      await this.pool.query(query, [transactionId, marketCap, totalSupply ?? null]);
-      console.log(`💾 Market cap and total supply updated for tx: ${transactionId}`);
+      await this.pool.query(query, [
+        transactionId, 
+        marketCap, 
+        totalSupply ?? null,
+        tokenPriceSol ?? null,
+        tokenPriceUsd ?? null
+      ]);
+      console.log(`💾 Market cap, total supply, and token prices updated for tx: ${transactionId}`);
     } catch (error: any) {
       console.error(`❌ Failed to update market cap for ${transactionId}:`, error.message);
     }

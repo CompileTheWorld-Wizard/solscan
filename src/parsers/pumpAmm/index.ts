@@ -18,6 +18,7 @@ export function parsePumpAmmTransaction(tx: any) {
 
  const parsedTxn = pumpAmmDecoder.decodePumpAmmTxn(txn);
  const formattedSwapTxn = parseSwapTransactionOutput(parsedTxn,txn);
+ 
   if(!formattedSwapTxn) return;
   // console.log(
   //   new Date(),
@@ -35,6 +36,7 @@ export function parsePumpAmmTransaction(tx: any) {
     mintTo : formattedSwapTxn.type == 'sell' ? SOL_MINT : formattedSwapTxn.mint,
     in_amount : formattedSwapTxn.in_amount,
     out_amount : formattedSwapTxn.out_amount,
+    price : formattedSwapTxn.price
   } ;
   // console.log(result);
   return result ;

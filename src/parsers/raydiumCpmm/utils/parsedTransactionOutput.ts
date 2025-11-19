@@ -1,75 +1,69 @@
-export function parsedTransactionOutput(parsedTxn, txn) {
-  const SOL_MINT = 'So11111111111111111111111111111111111111112';
+export function raydiumCPFormatter(parsedInstruction, txn) {
+  const instructions = parsedInstruction.instructions || parsedInstruction.raydiumCPIxs;
+  const innerInstructions = parsedInstruction.inner_ixs || parsedInstruction.innerIx || parsedInstruction.innerInstructions;
+  const preTB = txn.meta.postTokenBalances[0].owner
+  const ev = parsedInstruction.events;
+  const events =
+    (Array.isArray(ev) ? ev[0]?.data || ev[0] : ev) || {};
+  const SOL_MINT = "So11111111111111111111111111111111111111112"
 
-  const swapInstruction = parsedTxn.innerInstructions?.find(
-    (instr) => instr.name === 'swapBaseInput' || instr.name === 'swapBaseOutput'
-  );
+  const swapInstruction =
+    parsedInstruction.swapInstruction ||
+    instructions?.find(
+      (x) => x.name === "swap_base_input" || x.name === "swap_base_output"
+    ) ||
+    innerInstructions?.find(
+      (x) => x.name === "swap_base_input" || x.name === "swap_base_output"
+    ) ||
+    undefined;
+  const inputAmount = events.inputAmount ?? events.input_amount;
+  const outputAmount = events.outputAmount ?? events.output_amount;
+  const inputToken = events.inputMint ?? events.input_mint;
+  const outputToken = events.outputMint ?? events.output_mint;
+  const inputVault = events.inputVaultBefore ?? events.input_vault_before;
+  const outputVault = events.outputVaultBefore ?? events.output_vault_before;
 
-  if (!swapInstruction) return;
+  if (!inputAmount) return undefined;
 
-  const getAccountPubkey = (name) =>
-    swapInstruction.accounts?.find((acc) => acc.name === name)?.pubkey;
+  const payer =
+    swapInstruction?.accounts?.find((x) => x.name === "payer")?.pubkey ?? preTB;
 
-  const signerPubkey = getAccountPubkey('payer');
-  if (!signerPubkey) {
-    console.error("Payer account not found in swapInstruction accounts");
-    return txn;
-  }
+  const martDeterminer = (mint: string) => mint === SOL_MINT;
+  const type = (e => e ? "Buy" : "Sell")(martDeterminer(inputToken))
 
-  const expectedAmount = swapInstruction.args.amountIn ?? swapInstruction.args.amountOut;
+  // Calculate the price
+  const preTBs = txn.meta?.postTokenBalances;
 
-  const transferInstruction = parsedTxn.innerInstructions.find(
-    (x) => x.name === 'transferChecked' && x.args.amount !== expectedAmount
-  );
+  const inputDecimals = preTBs.find((x) => x.mint === inputToken)?.uiTokenAmount?.decimals;
+  const outputDecimals = preTBs.find((x) => x.mint === outputToken)?.uiTokenAmount?.decimals;
 
-  const amountOut = transferInstruction?.args?.amount ?? 0;
+  const rawPrice =
+    Number(inputVault) > 0
+      ? Number(outputVault) / Number(inputVault)
+      : undefined;
 
-  const isSwapInput = swapInstruction.name === 'swapBaseInput';
+  let adjustedPrice: number | undefined;
 
-  const swapAmount = isSwapInput
-    ? swapInstruction.args?.amountIn
-    : swapInstruction.args?.maxAmountIn;
-
-  const inputMint = getAccountPubkey('inputTokenMint');
-  const outputMint = getAccountPubkey('outputTokenMint');
-
-  let type = 'Unknown';
-  let mint = null;
-
-  if (inputMint && outputMint) {
-    type = inputMint === SOL_MINT ? 'Buy' : 'Sell';
-    mint = inputMint === SOL_MINT ? outputMint : inputMint;
+  if (martDeterminer(inputToken)) {
+    adjustedPrice =
+      Number(outputVault) > 0
+        ? (Number(inputVault) / 10 ** inputDecimals) /
+        (Number(outputVault) / 10 ** outputDecimals)
+        : undefined;
   } else {
-    console.error("Input or output token mint not found.");
+    adjustedPrice =
+      Number(inputVault) > 0
+        ? (Number(outputVault) / 10 ** outputDecimals) /
+        (Number(inputVault) / 10 ** inputDecimals)
+        : undefined;
   }
-  const amount_in = type === 'Buy' ? swapAmount : swapAmount;
-  const amount_out = type === 'Buy' ? amountOut : amountOut;
-
-  const transactionEvent = {
-    name: swapInstruction.name,
-    type,
-    user: signerPubkey,
-    mint,
-    amount: amount_in,
-    amount_out,
+  return {
+    type: type,
+    payer: payer,
+    inputToken: inputToken,
+    outputToken: outputToken,
+    inAmount: inputAmount,
+    outAmount: outputAmount,
+    price: adjustedPrice?.toFixed(17),
   };
-
-  const rpcTxnWithParsed = txn.version === 0
-    ? {
-        ...txn,
-        meta: {
-          ...txn.meta,
-          innerInstructions: parsedTxn.innerInstructions,
-        },
-        transaction: {
-          ...txn.transaction,
-          message: {
-            ...txn.transaction.message,
-            compiledInstructions: parsedTxn.compiledInstructions,
-          },
-        },
-      }
-    : txn;
-
-  return { rpcTxnWithParsed, transactionEvent };
 }

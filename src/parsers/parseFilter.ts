@@ -198,9 +198,7 @@ export function parseTransaction(transactionData: any) {
     }
 
     return result;
-
-
-
+    
   } catch (error) {
     console.error("❌ Error in parseTransaction:", error);
     return null;

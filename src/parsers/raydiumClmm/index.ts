@@ -86,6 +86,7 @@ export function parseRaydiumClmmTransaction(tx: any) {
     if (!parsedTxn) return;
     const raydiumClmmBuySellEvent = parsedTransactionOutput(parsedTxn, txn);
     if (!raydiumClmmBuySellEvent) return;
+    
     // console.log(
     //     new Date(),
     //     ":",
@@ -103,6 +104,7 @@ export function parseRaydiumClmmTransaction(tx: any) {
         mintTo : raydiumClmmBuySellEvent.mint_A,
         in_amount : raydiumClmmBuySellEvent.amount_in,
         out_amount : raydiumClmmBuySellEvent.amount_out,
+        price : raydiumClmmBuySellEvent.price
     }
     // console.log( result ) ;
     return result ;

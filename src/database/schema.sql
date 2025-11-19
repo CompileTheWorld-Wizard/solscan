@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS transactions (
     tip_amount NUMERIC(20, 9),
     fee_amount NUMERIC(20, 9),
     market_cap NUMERIC(20, 2),
+    total_supply NUMERIC(40, 0),
+    token_price_sol NUMERIC(20, 9),
+    token_price_usd NUMERIC(20, 9),
     block_number BIGINT,
     block_timestamp TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

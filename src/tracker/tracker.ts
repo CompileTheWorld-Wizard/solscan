@@ -7,7 +7,6 @@ import { dbService } from "../database";
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { tokenQueueService } from "../services/tokenQueueService";
 import { walletTrackingService } from "../services/walletTrackingService";
-import { marketCapService } from "../services";
 
 const RETRY_DELAY_MS = 1000
 const MAX_RETRY_WITH_LAST_SLOT = 5
@@ -41,7 +40,7 @@ class TransactionTracker {
     const xToken = process.env.X_TOKEN;
 
     console.log(`🔗 Connecting to gRPC endpoint: ${grpcUrl.replace(/\/\/.*@/, '//***@')}`); // Hide credentials in URL
-    
+
     this.client = new Client(grpcUrl, xToken, {
       "grpc.keepalive_permit_without_calls": 1,
       "grpc.keepalive_time_ms": 10000,
@@ -122,15 +121,15 @@ class TransactionTracker {
 
           const result = parseTransaction(data.transaction);
 
-            // Save to database asynchronously (non-blocking)
-            if (result) {
+          // Save to database asynchronously (non-blocking)
+          if (result) {
             // Convert slot to number for block_number
             const blockNumber = currentSlot ? parseInt(currentSlot, 10) : null;
             const blockNumberValue = (blockNumber !== null && !isNaN(blockNumber)) ? blockNumber : null;
-            
+
             // Record current time when transaction is received (Unix epoch in seconds, UTC)
             const blockTimestamp = Math.floor(Date.now() / 1000);
-            
+
             dbService.saveTransaction(sig, {
               platform: result.platform,
               type: result.type,
@@ -148,54 +147,109 @@ class TransactionTracker {
             // Extract token from buy/sell events
             const txType = result.type?.toUpperCase();
             console.log(`📝 Transaction type: ${result.type} (normalized: ${txType})`);
-            
+
             if (txType === 'BUY' || txType === 'SELL') {
               // Wrap in async IIFE to allow await
               (async () => {
                 console.log(`✅ Processing ${result.type} transaction...`);
-                
+
                 // Extract token address once (used by both wallet tracking and token queue)
                 const tokenAddress = this.extractTokenAddress(result);
-                
+
                 if (!tokenAddress) {
                   console.log(`⚠️ No valid token found in ${result.type} transaction (mintFrom: ${result.mintFrom?.substring(0, 8)}, mintTo: ${result.mintTo?.substring(0, 8)})`);
                   return;
                 }
-                
+
                 console.log(`🔎 Token extracted: ${tokenAddress.substring(0, 8)}...`);
 
                 // Handle buy/sell event flow:
-                // 1. Get marketcap for this buy/sell event (await before wallet tracking)
-                let marketCapResult = null;
-                try {
-                  marketCapResult = await marketCapService.calculateMarketCap(sig, tokenAddress);
+                // 1. Get token price in SOL from parseTransaction result
+                const tokenPriceSol = result.price ? parseFloat(result.price.toString()) : null;
+
+                if (tokenPriceSol === null || isNaN(tokenPriceSol)) {
+                  console.log(`⚠️ No valid price found in transaction result for ${sig}`);
+                } else {
+                  console.log(`💰 Token price in SOL: ${tokenPriceSol}`);
+
+                  // 2. Fetch SOL price from database
+                  const solPriceUsd = await dbService.getLatestSolPrice();
                   
-                  if (marketCapResult.success && typeof marketCapResult.marketCap === 'number') {
-                    console.log(`🧮 MarketCap for ${sig}: $${marketCapResult.marketCap}`);
-                    const totalSupply = marketCapResult.tokenSupply ? marketCapResult.tokenSupply : undefined;
-                    dbService.updateTransactionMarketCap(sig, marketCapResult.marketCap, totalSupply).catch((e) => {
-                      console.error(`Failed to persist market cap for ${sig}:`, e?.message || e);
-                    });
+                  if (!solPriceUsd) {
+                    console.log(`⚠️ Failed to fetch SOL price from database for ${sig}`);
                   } else {
-                    console.log(`⚠️ MarketCap error for ${sig}: ${marketCapResult.error}`);
+                    // 3. Calculate token price in USD
+                    const tokenPriceUsd = tokenPriceSol * solPriceUsd;
+                    console.log(`💵 Token price in USD: $${tokenPriceUsd}`);
+
+                    // 4. Fetch total supply using web3.js
+                    const supplyData = await this.getTokenTotalSupply(tokenAddress);
+                    
+                    if (supplyData) {
+                      const { supply: totalSupply, decimals } = supplyData;
+                      console.log(`📊 Total supply: ${totalSupply} (decimals: ${decimals})`);
+
+                      // 5. Calculate market cap = total supply * token price in USD
+                      const marketCap = totalSupply * tokenPriceUsd;
+                      console.log(`🧮 MarketCap for ${sig}: $${marketCap}`);
+
+                      // 6. Update database with market cap, total supply, and token prices
+                      dbService.updateTransactionMarketCap(
+                        sig, 
+                        marketCap, 
+                        totalSupply,
+                        tokenPriceSol,
+                        tokenPriceUsd
+                      ).catch((e) => {
+                        console.error(`Failed to persist market cap for ${sig}:`, e?.message || e);
+                      });
+
+                      // 7. Track wallet-token pair with market cap info
+                      walletTrackingService.trackWalletToken(
+                        result.feePayer,
+                        tokenAddress,
+                        result.in_amount?.toString() || '0',
+                        result.out_amount?.toString() || '0',
+                        result.type,
+                        {
+                          success: true,
+                          marketCap,
+                          tokenSupply: totalSupply,
+                          tokenAddress
+                        }
+                      ).catch(error => {
+                        console.error(`Failed to track wallet-token pair: ${error.message}`);
+                      });
+                    } else {
+                      console.log(`⚠️ Failed to fetch total supply for ${tokenAddress.substring(0, 8)}...`);
+                      
+                      // Still update token prices even if we can't get supply
+                      dbService.updateTransactionMarketCap(
+                        sig, 
+                        null, 
+                        null,
+                        tokenPriceSol,
+                        tokenPriceUsd
+                      ).catch((e) => {
+                        console.error(`Failed to persist token prices for ${sig}:`, e?.message || e);
+                      });
+
+                      // Track wallet without market cap
+                      walletTrackingService.trackWalletToken(
+                        result.feePayer,
+                        tokenAddress,
+                        result.in_amount?.toString() || '0',
+                        result.out_amount?.toString() || '0',
+                        result.type,
+                        null
+                      ).catch(error => {
+                        console.error(`Failed to track wallet-token pair: ${error.message}`);
+                      });
+                    }
                   }
-                } catch (err: any) {
-                  console.error(`MarketCap calculation failed for ${sig}:`, err?.message || err);
                 }
 
-                // 2. Track wallet-token pair (integrated with buy/sell handling) - uses marketcap from above
-                walletTrackingService.trackWalletToken(
-                  result.feePayer,
-                  tokenAddress,
-                  result.in_amount?.toString() || '0',
-                  result.out_amount?.toString() || '0',
-                  result.type,
-                  marketCapResult
-                ).catch(error => {
-                  console.error(`Failed to track wallet-token pair: ${error.message}`);
-                });
-
-                // 3. Add token to queue for info extraction
+                // 8. Add token to queue for info extraction
                 this.extractAndQueueToken(tokenAddress);
               })().catch(error => {
                 console.error(`Error processing buy/sell event:`, error?.message || error);
@@ -260,8 +314,7 @@ class TransactionTracker {
 
         if (lastSlot && retryCount < MAX_RETRY_WITH_LAST_SLOT) {
           console.log(
-            `#${retryCount} retrying with last slot ${lastSlot}, remaining retries ${
-              MAX_RETRY_WITH_LAST_SLOT - retryCount
+            `#${retryCount} retrying with last slot ${lastSlot}, remaining retries ${MAX_RETRY_WITH_LAST_SLOT - retryCount
             }`,
           );
           // sets the fromSlot to the last slot received before the stream was interrupted, if it exists
@@ -304,11 +357,41 @@ class TransactionTracker {
   }
 
   /**
+   * Fetch total supply for a token using web3.js
+   * @param tokenAddress - Token mint address
+   * @returns Total supply in human-readable format (adjusted for decimals) or null if failed
+   */
+  private async getTokenTotalSupply(tokenAddress: string): Promise<{ supply: number; decimals: number } | null> {
+    if (!this.solanaConnection) {
+      console.error('❌ Solana connection not initialized');
+      return null;
+    }
+
+    try {
+      const mintPublicKey = new PublicKey(tokenAddress);
+      const tokenSupply = await this.solanaConnection.getTokenSupply(mintPublicKey);
+      
+      if (!tokenSupply || !tokenSupply.value) {
+        return null;
+      }
+
+      const rawSupply = parseFloat(tokenSupply.value.amount);
+      const decimals = tokenSupply.value.decimals;
+      const supply = rawSupply / Math.pow(10, decimals);
+
+      return { supply, decimals };
+    } catch (error: any) {
+      console.error(`❌ Failed to fetch token supply for ${tokenAddress.substring(0, 8)}...:`, error?.message || error);
+      return null;
+    }
+  }
+
+  /**
    * Add token to queue for info extraction
    */
   private extractAndQueueToken(tokenMint: string): void {
     console.log(`🪙 Adding token to queue: ${tokenMint.substring(0, 8)}...`);
-    
+
     // Add to queue (non-blocking)
     tokenQueueService.addToken(tokenMint).catch(error => {
       console.error(`Failed to add token to queue: ${error.message}`);
@@ -375,7 +458,7 @@ class TransactionTracker {
 
 
   // get transaction data using fetch
-  async getTransactionDetail( signature: string ){
+  async getTransactionDetail(signature: string) {
     const response = await fetch(`https://pro-api.solscan.io/v2.0/transaction/detail${signature}`, {
       method: 'GET',
       headers: {
@@ -396,10 +479,10 @@ class TransactionTracker {
     }
 
     this.shouldStop = true;
-    
+
     // Stop token queue processor
     tokenQueueService.stop();
-    
+
     // End current stream if exists
     if (this.currentStream) {
       try {
@@ -411,7 +494,7 @@ class TransactionTracker {
 
     // Wait a bit for cleanup
     await new Promise(resolve => setTimeout(resolve, 500));
-    
+
     this.isRunning = false;
     return { success: true, message: "Tracker stopped successfully" };
   }
@@ -422,7 +505,7 @@ class TransactionTracker {
   async analyzeWallet(walletAddress: string): Promise<any> {
     try {
       const shyftApiKey = process.env.SHYFT_API_KEY;
-      
+
       if (!shyftApiKey) {
         throw new Error("SHYFT_API_KEY not found in environment variables");
       }
@@ -462,7 +545,7 @@ class TransactionTracker {
           if (token.address === "So11111111111111111111111111111111111111112") {
             solBalance = token.balance;
           }
-          
+
           // Add all tokens (including wrapped SOL) to the list
           if (token.balance > 0) {
             tokens.push({
@@ -482,7 +565,7 @@ class TransactionTracker {
         const publicKey = new PublicKey(walletAddress);
         const nativeBalance = await this.solanaConnection.getBalance(publicKey);
         const nativeSol = nativeBalance / LAMPORTS_PER_SOL;
-        
+
         // Add native SOL to total if we have it
         solBalance = nativeSol;
       }

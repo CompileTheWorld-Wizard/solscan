@@ -30,6 +30,7 @@ export function parsePumpFunTransaction(tx: any) {
     mintTo : parsedPumpfunTxn.type == 'sell' ? SOL_MINT : parsedPumpfunTxn.mint,
     in_amount : parsedPumpfunTxn.in_amount,
     out_amount : parsedPumpfunTxn.out_amount,
+    price : parsedPumpfunTxn.price,
   }
   // console.log( result ) ;
   // console.log(
