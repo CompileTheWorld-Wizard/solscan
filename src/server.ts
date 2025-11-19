@@ -1349,19 +1349,242 @@ async function getWalletBuySellCounts(walletAddress: string): Promise<{ totalBuy
 }
 
 /**
- * GET /api/dashboard-data/:wallet - Get dashboard data for a wallet
- * Returns comprehensive token data with all calculated metrics
- * Query params: page (default: 1), limit (default: 50)
+ * POST /api/dashboard-statistics/:wallet - Get dashboard statistics from ALL data (not filtered/paginated)
+ * Returns wallet statistics calculated from all tokens
  */
-app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
+app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
   try {
     const { wallet } = req.params;
     const SOL_MINT = 'So11111111111111111111111111111111111111112';
     const SOL_DECIMALS = 9;
     
-    // Get pagination parameters
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 50;
+    // Get all wallet trades (ALL data, no pagination/filtering)
+    const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
+    const walletTrades = walletTradesResult.data;
+    
+    if (!walletTrades || walletTrades.length === 0) {
+      return res.json({ 
+        success: true, 
+        statistics: {
+          totalWalletPNL: 0,
+          cumulativePNL: 0,
+          riskRewardProfit: 0,
+          netInvested: 0,
+          walletAvgBuySize: 0,
+          devAvgBuySize: 0,
+          avgPNLPerToken: 0,
+          sellStatistics: []
+        }
+      });
+    }
+    
+    // Get all token mints
+    const allTokenMints = walletTrades.map((trade: any) => trade.token_address);
+    const uniqueTokenMints = [...new Set(allTokenMints)];
+    
+    // Get token information for all tokens
+    const tokens = await dbService.getTokensByMints(uniqueTokenMints);
+    const tokenInfoMap = new Map();
+    tokens.forEach((token: any) => {
+      tokenInfoMap.set(token.mint_address, token);
+    });
+    
+    // Process ALL tokens to calculate statistics
+    const allTokensData = await Promise.all(walletTrades.map(async (trade: any) => {
+      const token = trade.token_address;
+      const tokenInfo = tokenInfoMap.get(token) || null;
+      
+      // Get all transactions for this wallet+token pair
+      const transactions = await dbService.getTransactionsByWalletToken(wallet, token);
+      
+      // Sort transactions by block timestamp ASC
+      transactions.sort((a: any, b: any) => {
+        const timeA = a.blockTimestamp ? new Date(a.blockTimestamp).getTime() : new Date(a.created_at).getTime();
+        const timeB = b.blockTimestamp ? new Date(b.blockTimestamp).getTime() : new Date(b.created_at).getTime();
+        return timeA - timeB;
+      });
+      
+      // Find first buy transaction
+      const buys = transactions.filter((tx: any) => tx.type?.toLowerCase() === 'buy' && tx.mint_from === SOL_MINT);
+      const firstBuy = buys.length > 0 ? buys[0] : null;
+      
+      // Get token decimals
+      const tokenDecimals = tokenInfo?.dev_buy_token_amount_decimal !== null && tokenInfo?.dev_buy_token_amount_decimal !== undefined
+        ? tokenInfo.dev_buy_token_amount_decimal
+        : 9;
+      
+      // Calculate wallet buy amounts
+      const walletBuyAmountSOL = firstBuy ? (parseFloat(firstBuy.in_amount) || 0) / Math.pow(10, SOL_DECIMALS) : 0;
+      const walletBuyAmountTokens = firstBuy ? (parseFloat(firstBuy.out_amount) || 0) / Math.pow(10, tokenDecimals) : 0;
+      
+      // Get total gas and fees
+      let totalGasAndFees = 0;
+      transactions.forEach((tx: any) => {
+        const tipAmount = (tx.tipAmount != null ? parseFloat(tx.tipAmount) : 0) || 0;
+        const feeAmount = (tx.feeAmount != null ? parseFloat(tx.feeAmount) : 0) || 0;
+        totalGasAndFees += (tipAmount + feeAmount);
+      });
+      
+      // Get all sells
+      const sells = transactions.filter((tx: any) => tx.type?.toLowerCase() === 'sell');
+      
+      // Calculate total sell amount in SOL
+      const totalSellAmountSOL = sells.reduce((sum: number, sell: any) => {
+        return sum + ((parseFloat(sell.out_amount) || 0) / Math.pow(10, SOL_DECIMALS));
+      }, 0);
+      
+      // Calculate PNL
+      const pnlSOL = totalSellAmountSOL - (walletBuyAmountSOL + totalGasAndFees);
+      const pnlPercent = walletBuyAmountSOL > 0 ? (pnlSOL / walletBuyAmountSOL) * 100 : 0;
+      
+      // Dev buy amounts
+      const devBuyAmountSOL = tokenInfo?.dev_buy_amount && tokenInfo?.dev_buy_amount_decimal !== null
+        ? parseFloat(tokenInfo.dev_buy_amount) / Math.pow(10, tokenInfo.dev_buy_amount_decimal)
+        : null;
+      
+      // Get buy timestamp
+      const buyTimestamp = firstBuy ? (firstBuy.blockTimestamp || firstBuy.created_at) : null;
+      
+      // Format sells for statistics
+      const formattedSells = sells.map((sell: any, index: number) => {
+        const sellAmountSOL = (parseFloat(sell.out_amount) || 0) / Math.pow(10, SOL_DECIMALS);
+        const sellAmountTokens = (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals);
+        const sellMarketCap = sell.marketCap ? parseFloat(sell.marketCap) : null;
+        const firstBuyMarketCap = firstBuy?.marketCap || null;
+        const firstSellPNL = firstBuyMarketCap && sellMarketCap && sellMarketCap > 0
+          ? (sellMarketCap / firstBuyMarketCap - 1) * 100
+          : null;
+        const sellPercentOfBuy = walletBuyAmountTokens > 0
+          ? (sellAmountTokens / walletBuyAmountTokens) * 100
+          : null;
+        
+        let holdingTimeSeconds = null;
+        if (buyTimestamp) {
+          const sellTimestamp = sell.blockTimestamp || sell.created_at;
+          if (sellTimestamp) {
+            const buyTime = new Date(buyTimestamp).getTime();
+            const sellTime = new Date(sellTimestamp).getTime();
+            holdingTimeSeconds = Math.floor((sellTime - buyTime) / 1000);
+            if (holdingTimeSeconds < 0) holdingTimeSeconds = null;
+          }
+        }
+        
+        return {
+          sellNumber: index + 1,
+          firstSellPNL,
+          sellPercentOfBuy,
+          holdingTimeSeconds
+        };
+      });
+      
+      return {
+        pnlSOL,
+        pnlPercent,
+        walletBuyAmountSOL,
+        devBuyAmountSOL,
+        sells: formattedSells
+      };
+    }));
+    
+    // Calculate statistics from ALL data
+    const totalWalletPNL = allTokensData.reduce((sum, token) => sum + (token.pnlSOL || 0), 0);
+    const cumulativePNL = allTokensData.reduce((sum, token) => sum + (token.pnlPercent || 0), 0);
+    const netInvested = allTokensData.reduce((sum, token) => sum + (token.walletBuyAmountSOL || 0), 0);
+    const riskRewardProfit = netInvested > 0 ? (totalWalletPNL / netInvested) * 100 : 0;
+    
+    const walletBuySizes = allTokensData.map(token => token.walletBuyAmountSOL || 0).filter(size => size > 0);
+    const walletAvgBuySize = walletBuySizes.length > 0 
+      ? walletBuySizes.reduce((sum, size) => sum + size, 0) / walletBuySizes.length 
+      : 0;
+    
+    const devBuySizes = allTokensData
+      .map(token => token.devBuyAmountSOL)
+      .filter(size => size !== null && size !== undefined && size > 0);
+    const devAvgBuySize = devBuySizes.length > 0 
+      ? devBuySizes.reduce((sum, size) => sum + size, 0) / devBuySizes.length 
+      : 0;
+    
+    const pnlPercents = allTokensData.map(token => token.pnlPercent || 0);
+    const avgPNLPerToken = pnlPercents.length > 0 
+      ? pnlPercents.reduce((sum, pnl) => sum + pnl, 0) / pnlPercents.length 
+      : 0;
+    
+    // Calculate sell statistics
+    const maxSells = Math.max(...allTokensData.map(token => (token.sells || []).length), 0);
+    const sellStatistics = [];
+    
+    for (let sellPosition = 1; sellPosition <= maxSells; sellPosition++) {
+      const profitsAtSell = [];
+      const holdingTimes = [];
+      const sellPercentOfBuyValues = [];
+      
+      allTokensData.forEach(token => {
+        if (token.sells && token.sells.length >= sellPosition) {
+          const sell = token.sells[sellPosition - 1];
+          if (sell.firstSellPNL !== null && sell.firstSellPNL !== undefined) {
+            profitsAtSell.push(sell.firstSellPNL);
+          }
+          if (sell.sellPercentOfBuy !== null && sell.sellPercentOfBuy !== undefined) {
+            sellPercentOfBuyValues.push(sell.sellPercentOfBuy);
+          }
+          if (sell.holdingTimeSeconds !== null && sell.holdingTimeSeconds !== undefined) {
+            holdingTimes.push(sell.holdingTimeSeconds);
+          }
+        }
+      });
+      
+      const avgProfit = profitsAtSell.length > 0
+        ? profitsAtSell.reduce((sum, p) => sum + p, 0) / profitsAtSell.length
+        : null;
+      const avgSellPercentOfBuy = sellPercentOfBuyValues.length > 0
+        ? sellPercentOfBuyValues.reduce((sum, p) => sum + p, 0) / sellPercentOfBuyValues.length
+        : null;
+      const avgHoldingTime = holdingTimes.length > 0
+        ? Math.floor(holdingTimes.reduce((sum, t) => sum + t, 0) / holdingTimes.length)
+        : null;
+      
+      sellStatistics.push({
+        sellNumber: sellPosition,
+        avgProfit,
+        avgSellPercentOfBuy,
+        avgHoldingTime
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      statistics: {
+        totalWalletPNL,
+        cumulativePNL,
+        riskRewardProfit,
+        netInvested,
+        walletAvgBuySize,
+        devAvgBuySize,
+        avgPNLPerToken,
+        sellStatistics
+      }
+    });
+  } catch (error: any) {
+    console.error('Dashboard statistics error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/dashboard-data/:wallet - Get dashboard data for a wallet with filters
+ * Returns comprehensive token data with all calculated metrics
+ * Body: { page: number, limit: number, filters: array }
+ */
+app.post("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
+  try {
+    const { wallet } = req.params;
+    const SOL_MINT = 'So11111111111111111111111111111111111111112';
+    const SOL_DECIMALS = 9;
+    
+    // Get pagination and filter parameters from request body
+    const page = req.body.page || 1;
+    const limit = req.body.limit || 50;
+    const filters = req.body.filters || [];
     const offset = (page - 1) * limit;
     
     // Get total buy/sell counts (from ALL data, not paginated)
@@ -1387,12 +1610,6 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         totalPages: 0
       });
     }
-    
-    // Get total count for pagination (before filtering/pagination)
-    const totalCount = walletTrades.length;
-    
-    // Apply pagination to wallet trades
-    const paginatedWalletTrades = walletTrades.slice(offset, offset + limit);
     
     // Get all token mints (for all trades, to get token info efficiently)
     const allTokenMints = walletTrades.map((trade: any) => trade.token_address);
@@ -1421,8 +1638,8 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
       return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
     };
     
-    // Process only the paginated tokens
-    const dashboardData = await Promise.all(paginatedWalletTrades.map(async (trade: any) => {
+    // Process ALL tokens first (needed for filtering)
+    const allDashboardData = await Promise.all(walletTrades.map(async (trade: any) => {
       const token = trade.token_address;
       const tokenInfo = tokenInfoMap.get(token) || null;
       
@@ -1646,6 +1863,67 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         sells: formattedSells
       };
     }));
+    
+    // Apply filters if any (simplified filter logic)
+    let filteredDashboardData = allDashboardData;
+    if (filters && filters.length > 0) {
+      filteredDashboardData = allDashboardData.filter((token: any) => {
+        for (const filter of filters) {
+          let value: any = null;
+          
+          // Get value based on filter key
+          const filterKey = filter.key;
+          if (filterKey.startsWith('sell')) {
+            // Handle sell filters
+            const sells = token.sells || [];
+            if (sells.length === 0) continue;
+            const sellNumber = filter.sellNumber || 1;
+            const sellIndex = sellNumber - 1;
+            if (sellIndex >= 0 && sellIndex < sells.length) {
+              const sell = sells[sellIndex];
+              if (filterKey === 'sellAmountSOL') value = sell.sellAmountSOL;
+              else if (filterKey === 'sellAmountTokens') value = sell.sellAmountTokens;
+              else if (filterKey === 'sellMarketCap') value = sell.marketCap;
+              else if (filterKey === 'sellPercentOfBuy') value = sell.sellPercentOfBuy;
+              else if (filterKey === 'firstSellPNL') value = sell.firstSellPNL;
+              else if (filterKey === 'sellTimestamp') value = sell.timestamp;
+            }
+          } else {
+            // Handle base field filters
+            value = (token as any)[filterKey];
+          }
+          
+          if (value === null || value === undefined) continue;
+          
+          // Apply min/max filters
+          if (filter.min !== null && filter.min !== undefined) {
+            if (filter.type === 'timestamp') {
+              const minDate = new Date(filter.min).getTime();
+              const valueDate = new Date(value).getTime();
+              if (isNaN(valueDate) || valueDate < minDate) return false;
+            } else {
+              if (value < filter.min) return false;
+            }
+          }
+          if (filter.max !== null && filter.max !== undefined) {
+            if (filter.type === 'timestamp') {
+              const maxDate = new Date(filter.max).getTime();
+              const valueDate = new Date(value).getTime();
+              if (isNaN(valueDate) || valueDate > maxDate) return false;
+            } else {
+              if (value > filter.max) return false;
+            }
+          }
+        }
+        return true;
+      });
+    }
+    
+    // Get total count after filtering
+    const totalCount = filteredDashboardData.length;
+    
+    // Apply pagination to filtered data
+    const dashboardData = filteredDashboardData.slice(offset, offset + limit);
     
     const totalPages = Math.max(1, Math.ceil(totalCount / limit));
     

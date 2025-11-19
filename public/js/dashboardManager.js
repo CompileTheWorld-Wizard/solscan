@@ -461,7 +461,7 @@ function addFilter(dataPointKey) {
     
     activeFilters.push(filter);
     renderFilters();
-    applyFilters();
+    // Don't auto-apply, wait for user to click "Apply Filters" button
 }
 
 /**
@@ -470,7 +470,7 @@ function addFilter(dataPointKey) {
 function removeFilter(filterId) {
     activeFilters = activeFilters.filter(f => f.id !== filterId);
     renderFilters();
-    applyFilters();
+    // Don't auto-apply, wait for user to click "Apply Filters" button
 }
 
 /**
@@ -572,7 +572,7 @@ function renderFilters() {
                 }
                 
                 filter.sellNumber = newSellNumber;
-                applyFilters();
+                // Don't auto-apply, wait for user to click "Apply Filters" button
             };
             
             sellNumberDiv.appendChild(sellNumberSelect);
@@ -627,7 +627,7 @@ function renderFilters() {
                 } else {
                     filter.min = null;
                 }
-                applyFilters();
+                // Don't auto-apply, wait for user to click "Apply Filters" button
             };
             timestampDiv.appendChild(startInput);
             
@@ -650,7 +650,7 @@ function renderFilters() {
                 } else {
                     filter.max = null;
                 }
-                applyFilters();
+                // Don't auto-apply, wait for user to click "Apply Filters" button
             };
             timestampDiv.appendChild(endInput);
             
@@ -866,7 +866,7 @@ function setupDynamicDualRangeSlider(filterKey, config) {
                 filter.max = null;
             }
             updateProgress();
-            applyFilters();
+            // Don't auto-apply, wait for user to click "Apply Filters" button
             return;
         }
         
@@ -901,7 +901,7 @@ function setupDynamicDualRangeSlider(filterKey, config) {
         }
         
         updateProgress();
-        applyFilters();
+        // Don't auto-apply, wait for user to click "Apply Filters" button
     }
     
     // Sync input with slider
@@ -938,7 +938,7 @@ function setupDynamicDualRangeSlider(filterKey, config) {
         }
         
         updateProgress();
-        applyFilters();
+        // Don't auto-apply, wait for user to click "Apply Filters" button
     }
     
     // Make sliders interactive
@@ -1026,7 +1026,7 @@ function setupDualRangeSlider(prefix, min, max, defaultMin, defaultMax) {
         }
         
         updateProgress();
-        applyFilters();
+        // Don't auto-apply, wait for user to click "Apply Filters" button
     }
     
     // Sync input with slider
@@ -1051,7 +1051,7 @@ function setupDualRangeSlider(prefix, min, max, defaultMin, defaultMax) {
         }
         
         updateProgress();
-        applyFilters();
+        // Don't auto-apply, wait for user to click "Apply Filters" button
     }
     
     // Make sliders interactive - handle z-index based on which is closer to mouse
@@ -1095,110 +1095,154 @@ function setupDualRangeSlider(prefix, min, max, defaultMin, defaultMax) {
 /**
  * Apply filters to dashboard data
  */
-function applyFilters() {
-    filteredData = dashboardData.filter(token => {
-        // Check each active filter
-        for (const filter of activeFilters) {
-            const dataPoint = DATA_POINTS.find(dp => dp.key === filter.key);
-            if (!dataPoint) continue;
-            
-            let value = null;
-            
-            // Handle array fields (sells)
-            if (dataPoint.isArray && dataPoint.field === 'sells') {
-                const sells = token[dataPoint.field] || [];
-                if (sells.length === 0) {
-                    // If no sells, check if we should filter this out
-                    // For now, we'll skip filtering if there are no sells
-                    continue;
-                }
-                // Get the value from the specific sell number (1-indexed)
-                const sellNumber = filter.sellNumber || 1; // Default to 1st sell if not specified
-                const sellIndex = sellNumber - 1; // Convert to 0-indexed
-                
-                if (sellIndex >= 0 && sellIndex < sells.length) {
-                    const targetSell = sells[sellIndex];
-                    value = targetSell ? targetSell[dataPoint.arrayField] : null;
-                } else {
-                    // If the requested sell number doesn't exist, skip this filter
-                    continue;
-                }
-            } else {
-                value = token[dataPoint.field];
-            }
-            
-            // Skip if value is null/undefined
-            if (value === null || value === undefined) {
-                continue;
-            }
-            
-            // Handle timestamp filters differently
-            if (filter.type === 'timestamp') {
-                // Parse the timestamp value from the data (formatted string like "2024-01-15 14:30:00")
-                let timestampValue = null;
-                try {
-                    if (typeof value === 'string') {
-                        timestampValue = new Date(value).getTime();
-                    } else if (value instanceof Date) {
-                        timestampValue = value.getTime();
-                    }
-                } catch (e) {
-                    // If parsing fails, skip this filter
-                    continue;
-                }
-                
-                if (timestampValue === null || isNaN(timestampValue)) {
-                    continue;
-                }
-                
-                // Apply min/max filters (null/undefined means "not set")
-                if (filter.min !== null && filter.min !== undefined) {
-                    try {
-                        const minDate = new Date(filter.min).getTime();
-                        if (timestampValue < minDate) {
-                            return false;
-                        }
-                    } catch (e) {
-                        // If parsing fails, skip this check
-                    }
-                }
-                if (filter.max !== null && filter.max !== undefined) {
-                    try {
-                        const maxDate = new Date(filter.max).getTime();
-                        if (timestampValue > maxDate) {
-                            return false;
-                        }
-                    } catch (e) {
-                        // If parsing fails, skip this check
-                    }
-                }
-            } else {
-                // Apply min/max filters for numeric values (null/undefined means "not set")
-                if (filter.min !== null && filter.min !== undefined) {
-                    if (value < filter.min) {
-                        return false;
-                    }
-                }
-                if (filter.max !== null && filter.max !== undefined) {
-                    if (value > filter.max) {
-                        return false;
-                    }
-                }
-            }
-        }
-        
-        return true;
-    });
-    
+/**
+ * Apply filters - sends filters to backend and reloads data
+ */
+async function applyFilters() {
     // Reset to first page when filters change
     currentPage = 1;
     
-    // Sort filtered data
-    sortFilteredData();
+    // Reload dashboard data with filters
+    await loadDashboardData();
+}
+
+/**
+ * Update statistics from backend (from ALL data, not filtered)
+ */
+async function updateStatisticsFromBackend() {
+    const select = document.getElementById('dashboardWalletSelect');
+    if (!select || !select.value) return;
     
-    // Re-render table with filtered data
-    renderDashboardTable();
-    updateAverageDataPoints();
+    try {
+        const result = await api.fetchDashboardStatistics(select.value);
+        if (result.success && result.statistics) {
+            const stats = result.statistics;
+            
+            // Update wallet statistics
+            updateStatisticsDisplay(stats);
+            
+            // Update sell statistics
+            updateSellStatisticsFromBackend(stats.sellStatistics || []);
+        }
+    } catch (error) {
+        console.error('Error loading statistics:', error);
+    }
+}
+
+/**
+ * Update statistics display from backend data
+ */
+function updateStatisticsDisplay(stats) {
+    // Total Wallet PNL
+    const totalPNLEl = document.getElementById('totalWalletPNL');
+    if (totalPNLEl) {
+        totalPNLEl.textContent = stats.totalWalletPNL >= 0 
+            ? `+${stats.totalWalletPNL.toFixed(4)} SOL` 
+            : `${stats.totalWalletPNL.toFixed(4)} SOL`;
+        totalPNLEl.style.color = stats.totalWalletPNL >= 0 ? '#10b981' : '#ef4444';
+    }
+    
+    // Cumulative PNL
+    const cumulativePNLEl = document.getElementById('cumulativePNL');
+    if (cumulativePNLEl) {
+        cumulativePNLEl.textContent = stats.cumulativePNL >= 0 
+            ? `+${stats.cumulativePNL.toFixed(2)}%` 
+            : `${stats.cumulativePNL.toFixed(2)}%`;
+        cumulativePNLEl.style.color = stats.cumulativePNL >= 0 ? '#10b981' : '#ef4444';
+    }
+    
+    // Net Invested
+    const netInvestedEl = document.getElementById('netInvested');
+    if (netInvestedEl) {
+        netInvestedEl.textContent = `${stats.netInvested.toFixed(4)} SOL`;
+        netInvestedEl.style.color = '#e0e7ff';
+    }
+    
+    // Risk/Reward Profit
+    const riskRewardProfitEl = document.getElementById('riskRewardProfit');
+    if (riskRewardProfitEl) {
+        riskRewardProfitEl.textContent = stats.riskRewardProfit >= 0 
+            ? `+${stats.riskRewardProfit.toFixed(2)}%` 
+            : `${stats.riskRewardProfit.toFixed(2)}%`;
+        riskRewardProfitEl.style.color = stats.riskRewardProfit >= 0 ? '#10b981' : '#ef4444';
+    }
+    
+    // Wallet Average Buy Size
+    const walletAvgBuySizeEl = document.getElementById('walletAvgBuySize');
+    if (walletAvgBuySizeEl) {
+        walletAvgBuySizeEl.textContent = stats.walletAvgBuySize > 0 
+            ? `${stats.walletAvgBuySize.toFixed(4)} SOL` 
+            : '-';
+        walletAvgBuySizeEl.style.color = '#e0e7ff';
+    }
+    
+    // Dev Average Buy Size
+    const devAvgBuySizeEl = document.getElementById('devAvgBuySize');
+    if (devAvgBuySizeEl) {
+        devAvgBuySizeEl.textContent = stats.devAvgBuySize > 0 
+            ? `${stats.devAvgBuySize.toFixed(4)} SOL` 
+            : '-';
+        devAvgBuySizeEl.style.color = '#e0e7ff';
+    }
+    
+    // Average PNL per Token
+    const avgPNLPerTokenEl = document.getElementById('avgPNLPerToken');
+    if (avgPNLPerTokenEl) {
+        avgPNLPerTokenEl.textContent = stats.avgPNLPerToken >= 0 
+            ? `+${stats.avgPNLPerToken.toFixed(2)}%` 
+            : `${stats.avgPNLPerToken.toFixed(2)}%`;
+        avgPNLPerTokenEl.style.color = stats.avgPNLPerToken >= 0 ? '#10b981' : '#ef4444';
+    }
+}
+
+/**
+ * Update sell statistics from backend data
+ */
+function updateSellStatisticsFromBackend(sellStatistics) {
+    const container = document.getElementById('sellStatisticsContainer');
+    if (!container) return;
+    
+    if (!sellStatistics || sellStatistics.length === 0) {
+        container.innerHTML = '<div style="color: #94a3b8; text-align: center; padding: 20px;">No sells found</div>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    
+    sellStatistics.forEach(stat => {
+        const card = document.createElement('div');
+        card.style.cssText = 'padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;';
+        
+        const sellNumber = stat.sellNumber === 1 ? '1st' : stat.sellNumber === 2 ? '2nd' : stat.sellNumber === 3 ? '3rd' : `${stat.sellNumber}th`;
+        const title = document.createElement('div');
+        title.style.cssText = 'font-size: 0.85rem; color: #94a3b8; margin-bottom: 10px; font-weight: 600;';
+        title.textContent = `${sellNumber} Sell`;
+        card.appendChild(title);
+        
+        if (stat.avgProfit !== null && stat.avgProfit !== undefined) {
+            const profitEl = document.createElement('div');
+            profitEl.style.cssText = 'font-size: 0.75rem; color: #94a3b8; margin-bottom: 5px;';
+            profitEl.textContent = `Avg Profit: ${stat.avgProfit >= 0 ? '+' : ''}${stat.avgProfit.toFixed(2)}%`;
+            profitEl.style.color = stat.avgProfit >= 0 ? '#10b981' : '#ef4444';
+            card.appendChild(profitEl);
+        }
+        
+        if (stat.avgSellPercentOfBuy !== null && stat.avgSellPercentOfBuy !== undefined) {
+            const percentEl = document.createElement('div');
+            percentEl.style.cssText = 'font-size: 0.75rem; color: #94a3b8; margin-bottom: 5px;';
+            percentEl.textContent = `Avg Sell % of Buy: ${stat.avgSellPercentOfBuy.toFixed(2)}%`;
+            card.appendChild(percentEl);
+        }
+        
+        if (stat.avgHoldingTime !== null && stat.avgHoldingTime !== undefined) {
+            const timeEl = document.createElement('div');
+            timeEl.style.cssText = 'font-size: 0.75rem; color: #94a3b8;';
+            timeEl.textContent = `Avg Holding Time: ${formatDuration(stat.avgHoldingTime)}`;
+            card.appendChild(timeEl);
+        }
+        
+        container.appendChild(card);
+    });
 }
 
 /**
@@ -1492,10 +1536,15 @@ export async function loadDashboardData() {
     }
     
     try {
-        const result = await api.fetchDashboardData(walletAddress, currentPage, itemsPerPage);
+        // Load statistics from ALL data (not filtered/paginated)
+        await updateStatisticsFromBackend();
+        
+        // Load dashboard data with current filters
+        const result = await api.fetchDashboardData(walletAddress, currentPage, itemsPerPage, activeFilters);
         if (result.success && result.data) {
             // Update data smoothly
             dashboardData = result.data;
+            filteredData = result.data; // Data is already filtered from backend
             
             // Store pagination info from backend
             totalCount = result.totalCount || 0;
@@ -1549,9 +1598,9 @@ export async function loadDashboardData() {
             // Calculate max sells across current page tokens
             maxSells = Math.max(...dashboardData.map(token => (token.sells || []).length), 0);
             
-            // Apply current filters (this will re-render the table)
-            // Note: Filters are applied client-side on the current page data
-            applyFilters();
+            // Sort and render table (filters already applied from backend)
+            sortFilteredData();
+            renderDashboardTable();
             
             // Smoothly restore table opacity
             if (tableEl) {
@@ -1596,104 +1645,12 @@ export async function loadDashboardData() {
 }
 
 /**
- * Update wallet statistics
+ * Update wallet statistics - now uses backend data from ALL tokens (not filtered/paginated)
+ * This function is kept for backward compatibility but statistics come from backend
  */
 function updateAverageDataPoints() {
-    if (!filteredData || filteredData.length === 0) {
-        // Reset all stats to '-' if no data (but keep open positions as it's independent)
-        const statIds = ['totalWalletPNL', 'cumulativePNL', 'riskRewardProfit', 'netInvested', 
-                        'walletAvgBuySize', 'devAvgBuySize', 'avgPNLPerToken'];
-        statIds.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) {
-                el.textContent = '-';
-                el.style.color = '#e0e7ff';
-            }
-        });
-        return;
-    }
-    
-    // 1. Total Wallet PNL SOL - Sum of PNL per token in SOL
-    const totalPNL = filteredData.reduce((sum, token) => sum + (token.pnlSOL || 0), 0);
-    const totalPNLEl = document.getElementById('totalWalletPNL');
-    if (totalPNLEl) {
-        totalPNLEl.textContent = totalPNL >= 0 
-            ? `+${totalPNL.toFixed(4)} SOL` 
-            : `${totalPNL.toFixed(4)} SOL`;
-        totalPNLEl.style.color = totalPNL >= 0 ? '#10b981' : '#ef4444';
-    }
-    
-    // 2. Cumulative PNL % - Sum of % PNL per token
-    const cumulativePNL = filteredData.reduce((sum, token) => sum + (token.pnlPercent || 0), 0);
-    const cumulativePNLEl = document.getElementById('cumulativePNL');
-    if (cumulativePNLEl) {
-        cumulativePNLEl.textContent = cumulativePNL >= 0 
-            ? `+${cumulativePNL.toFixed(2)}%` 
-            : `${cumulativePNL.toFixed(2)}%`;
-        cumulativePNLEl.style.color = cumulativePNL >= 0 ? '#10b981' : '#ef4444';
-    }
-    
-    // 3. Net Invested - Sum of Wallet Buy Amount in SOL
-    const netInvested = filteredData.reduce((sum, token) => sum + (token.walletBuyAmountSOL || 0), 0);
-    const netInvestedEl = document.getElementById('netInvested');
-    if (netInvestedEl) {
-        netInvestedEl.textContent = `${netInvested.toFixed(4)} SOL`;
-        netInvestedEl.style.color = '#e0e7ff';
-    }
-    
-    // 4. Risk/Reward Profit % - Total Wallet PNL SOL / Net Invested
-    const riskRewardProfit = netInvested > 0 ? (totalPNL / netInvested) * 100 : 0;
-    const riskRewardProfitEl = document.getElementById('riskRewardProfit');
-    if (riskRewardProfitEl) {
-        riskRewardProfitEl.textContent = riskRewardProfit >= 0 
-            ? `+${riskRewardProfit.toFixed(2)}%` 
-            : `${riskRewardProfit.toFixed(2)}%`;
-        riskRewardProfitEl.style.color = riskRewardProfit >= 0 ? '#10b981' : '#ef4444';
-    }
-    
-    // 5. Wallet Average Buy Size in SOL - Average of Wallet Buy Amount in SOL
-    const walletBuySizes = filteredData.map(token => token.walletBuyAmountSOL || 0).filter(size => size > 0);
-    const walletAvgBuySize = walletBuySizes.length > 0 
-        ? walletBuySizes.reduce((sum, size) => sum + size, 0) / walletBuySizes.length 
-        : 0;
-    const walletAvgBuySizeEl = document.getElementById('walletAvgBuySize');
-    if (walletAvgBuySizeEl) {
-        walletAvgBuySizeEl.textContent = walletAvgBuySize > 0 
-            ? `${walletAvgBuySize.toFixed(4)} SOL` 
-            : '-';
-        walletAvgBuySizeEl.style.color = '#e0e7ff';
-    }
-    
-    // 6. Dev Average Buy Size in SOL - Average of Dev Buy Amount in SOL
-    const devBuySizes = filteredData
-        .map(token => token.devBuyAmountSOL)
-        .filter(size => size !== null && size !== undefined && size > 0);
-    const devAvgBuySize = devBuySizes.length > 0 
-        ? devBuySizes.reduce((sum, size) => sum + size, 0) / devBuySizes.length 
-        : 0;
-    const devAvgBuySizeEl = document.getElementById('devAvgBuySize');
-    if (devAvgBuySizeEl) {
-        devAvgBuySizeEl.textContent = devAvgBuySize > 0 
-            ? `${devAvgBuySize.toFixed(4)} SOL` 
-            : '-';
-        devAvgBuySizeEl.style.color = '#e0e7ff';
-    }
-    
-    // 7. Average PNL per Token - Average of % PNL per token
-    const pnlPercents = filteredData.map(token => token.pnlPercent || 0);
-    const avgPNLPerToken = pnlPercents.length > 0 
-        ? pnlPercents.reduce((sum, pnl) => sum + pnl, 0) / pnlPercents.length 
-        : 0;
-    const avgPNLPerTokenEl = document.getElementById('avgPNLPerToken');
-    if (avgPNLPerTokenEl) {
-        avgPNLPerTokenEl.textContent = avgPNLPerToken >= 0 
-            ? `+${avgPNLPerToken.toFixed(2)}%` 
-            : `${avgPNLPerToken.toFixed(2)}%`;
-        avgPNLPerTokenEl.style.color = avgPNLPerToken >= 0 ? '#10b981' : '#ef4444';
-    }
-    
-    // 8. Calculate average profit and holding time per sell position
-    updateSellStatistics();
+    // Statistics are now loaded from backend via updateStatisticsFromBackend()
+    // This function is kept for compatibility but does nothing
 }
 
 /**
@@ -1719,138 +1676,12 @@ function formatDuration(seconds) {
 }
 
 /**
- * Update sell statistics (average profit and holding time per sell position)
+ * Update sell statistics - now uses backend data from ALL tokens (not filtered/paginated)
+ * This function is kept for backward compatibility but statistics come from backend
  */
 function updateSellStatistics() {
-    const container = document.getElementById('sellStatisticsContainer');
-    if (!container) return;
-    
-    if (!filteredData || filteredData.length === 0) {
-        container.innerHTML = '<div style="color: #94a3b8; text-align: center; padding: 20px;">No data available</div>';
-        return;
-    }
-    
-    // Find maximum number of sells across all tokens
-    const maxSells = Math.max(...filteredData.map(token => (token.sells || []).length), 0);
-    
-    if (maxSells === 0) {
-        container.innerHTML = '<div style="color: #94a3b8; text-align: center; padding: 20px;">No sells found</div>';
-        return;
-    }
-    
-    // Clear container
-    container.innerHTML = '';
-    
-    // Calculate averages for each sell position
-    for (let sellPosition = 1; sellPosition <= maxSells; sellPosition++) {
-        const profitsAtSell = [];
-        const holdingTimes = [];
-        const sellPercentOfBuyValues = [];
-        
-        // Collect data for this sell position across all tokens
-        filteredData.forEach(token => {
-            if (token.sells && token.sells.length >= sellPosition) {
-                const sell = token.sells[sellPosition - 1]; // 0-indexed
-                
-                // Collect nth Sell PNL (Wallet Buy Market Cap / nth Sell Market Cap)
-                if (sell.firstSellPNL !== null && sell.firstSellPNL !== undefined) {
-                    profitsAtSell.push(sell.firstSellPNL);
-                }
-                
-                // Collect Sell % of Buy
-                if (sell.sellPercentOfBuy !== null && sell.sellPercentOfBuy !== undefined) {
-                    sellPercentOfBuyValues.push(sell.sellPercentOfBuy);
-                }
-                
-                // Collect holding time
-                if (sell.holdingTimeSeconds !== null && sell.holdingTimeSeconds !== undefined) {
-                    holdingTimes.push(sell.holdingTimeSeconds);
-                }
-            }
-        });
-        
-        // Calculate averages
-        // Average profit of nth sell = Average of nth sell PNL (already in percentage)
-        const avgProfit = profitsAtSell.length > 0
-            ? profitsAtSell.reduce((sum, p) => sum + p, 0) / profitsAtSell.length
-            : null;
-        
-        // Average Sell % of Buy
-        const avgSellPercentOfBuy = sellPercentOfBuyValues.length > 0
-            ? sellPercentOfBuyValues.reduce((sum, p) => sum + p, 0) / sellPercentOfBuyValues.length
-            : null;
-        
-        const avgHoldingTime = holdingTimes.length > 0
-            ? Math.floor(holdingTimes.reduce((sum, t) => sum + t, 0) / holdingTimes.length)
-            : null;
-        
-        // Create card for this sell position
-        const sellNumber = sellPosition === 1 ? '1st' : sellPosition === 2 ? '2nd' : sellPosition === 3 ? '3rd' : `${sellPosition}th`;
-        
-        const card = document.createElement('div');
-        card.style.cssText = 'padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;';
-        
-        const title = document.createElement('div');
-        title.style.cssText = 'font-size: 0.9rem; font-weight: 600; color: #cbd5e1; margin-bottom: 12px; text-align: center;';
-        title.textContent = `${sellNumber} Sell`;
-        card.appendChild(title);
-        
-        // Average Profit
-        const profitLabel = document.createElement('div');
-        profitLabel.style.cssText = 'font-size: 0.75rem; color: #94a3b8; margin-bottom: 5px;';
-        profitLabel.textContent = 'Average Profit';
-        card.appendChild(profitLabel);
-        
-        const profitValue = document.createElement('div');
-        profitValue.style.cssText = 'font-size: 1.1rem; font-weight: 600; margin-bottom: 12px;';
-        if (avgProfit !== null) {
-            // Display as percentage (already calculated as percentage in server)
-            profitValue.textContent = formatPercent(avgProfit);
-            profitValue.style.color = '#e0e7ff';
-        } else {
-            profitValue.textContent = '-';
-            profitValue.style.color = '#94a3b8';
-        }
-        card.appendChild(profitValue);
-        
-        // Average Sell % of Buy
-        const sellPercentLabel = document.createElement('div');
-        sellPercentLabel.style.cssText = 'font-size: 0.75rem; color: #94a3b8; margin-bottom: 5px;';
-        sellPercentLabel.textContent = 'Average Sell % of Buy';
-        card.appendChild(sellPercentLabel);
-        
-        const sellPercentValue = document.createElement('div');
-        sellPercentValue.style.cssText = 'font-size: 1.1rem; font-weight: 600; margin-bottom: 12px;';
-        if (avgSellPercentOfBuy !== null) {
-            sellPercentValue.textContent = formatPercent(avgSellPercentOfBuy);
-            sellPercentValue.style.color = '#e0e7ff';
-        } else {
-            sellPercentValue.textContent = '-';
-            sellPercentValue.style.color = '#94a3b8';
-        }
-        card.appendChild(sellPercentValue);
-        
-        // Average Holding Time (in seconds)
-        // Average of holding time on nth sell in seconds for all tokens (except tokens without nth sell)
-        const timeLabel = document.createElement('div');
-        timeLabel.style.cssText = 'font-size: 0.75rem; color: #94a3b8; margin-bottom: 5px;';
-        timeLabel.textContent = 'Average Holding Time';
-        card.appendChild(timeLabel);
-        
-        const timeValue = document.createElement('div');
-        timeValue.style.cssText = 'font-size: 1.1rem; font-weight: 600;';
-        if (avgHoldingTime !== null) {
-            // Display formatted duration only (formatDuration already includes appropriate units)
-            timeValue.textContent = formatDuration(avgHoldingTime);
-            timeValue.style.color = '#e0e7ff';
-        } else {
-            timeValue.textContent = '-';
-            timeValue.style.color = '#94a3b8';
-        }
-        card.appendChild(timeValue);
-        
-        container.appendChild(card);
-    }
+    // Statistics are now loaded from backend via updateSellStatisticsFromBackend()
+    // This function is kept for compatibility but does nothing
 }
 
 /**
@@ -2460,11 +2291,10 @@ window.loadFilterPreset = async function() {
             // Render filters
             renderFilters();
             
-            // Apply filters
-            applyFilters();
+            // Don't auto-apply, wait for user to click "Apply Filters" button
             
             const { showNotification } = await import('./utils.js');
-            showNotification('Filter preset loaded successfully', 'success');
+            showNotification('Filter preset loaded successfully. Click "Apply Filters" to apply.', 'success');
         } else {
             const { showNotification } = await import('./utils.js');
             showNotification(result.error || 'Failed to load preset', 'error');
@@ -3047,5 +2877,6 @@ window.exportDashboardToExcel = async function() {
     XLSX.writeFile(wb, filename);
 };
 
-// Make loadDashboardData available globally
+// Make functions available globally
 window.loadDashboardData = loadDashboardData;
+window.applyFilters = applyFilters;

@@ -317,20 +317,52 @@ export async function downloadAllTokensExcel(walletAddress) {
 }
 
 /**
- * Fetch dashboard data for a wallet
+ * Fetch dashboard statistics for a wallet (from ALL data, not filtered/paginated)
+ * @param {string} walletAddress - Wallet address
+ */
+export async function fetchDashboardStatistics(walletAddress) {
+    try {
+        const response = await fetch(`/api/dashboard-statistics/${encodeURIComponent(walletAddress)}`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch dashboard statistics');
+        }
+
+        const data = await response.json();
+        return { 
+            success: true, 
+            statistics: data.statistics || {}
+        };
+    } catch (error) {
+        console.error('Error fetching dashboard statistics:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Fetch dashboard data for a wallet with filters
  * @param {string} walletAddress - Wallet address
  * @param {number} page - Page number (default: 1)
  * @param {number} limit - Items per page (default: 50)
+ * @param {array} filters - Array of filter objects (default: [])
  */
-export async function fetchDashboardData(walletAddress, page = 1, limit = 50) {
+export async function fetchDashboardData(walletAddress, page = 1, limit = 50, filters = []) {
     try {
-        const queryParams = new URLSearchParams({
-            page: String(page),
-            limit: String(limit)
-        });
-        const response = await fetch(`/api/dashboard-data/${encodeURIComponent(walletAddress)}?${queryParams}`, {
-            method: 'GET',
-            credentials: 'include'
+        const response = await fetch(`/api/dashboard-data/${encodeURIComponent(walletAddress)}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            credentials: 'include',
+            body: JSON.stringify({
+                page,
+                limit,
+                filters
+            })
         });
 
         if (!response.ok) {
