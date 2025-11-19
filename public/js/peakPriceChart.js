@@ -307,6 +307,21 @@ export async function updatePeakPriceChart() {
                     tooltip: {
                         callbacks: {
                             title: function(context) {
+                                const datasetLabel = context[0].dataset.label || '';
+                                // Check if this is an average line
+                                if (datasetLabel.includes('Avg Peak Before') || 
+                                    datasetLabel.includes('Avg 1st Sell') || 
+                                    datasetLabel.includes('Avg Peak After')) {
+                                    // Extract the type from the label
+                                    if (datasetLabel.includes('Peak Before')) {
+                                        return 'Average: Peak before 1st Sell';
+                                    } else if (datasetLabel.includes('1st Sell')) {
+                                        return 'Average: 1st Sell';
+                                    } else if (datasetLabel.includes('Peak After')) {
+                                        return 'Average: Peak after 1st Sell';
+                                    }
+                                    return 'Average';
+                                }
                                 // Get token info from the data point
                                 const dataPoint = context[0].raw;
                                 if (dataPoint && dataPoint.token) {
@@ -326,9 +341,27 @@ export async function updatePeakPriceChart() {
                                 } else {
                                     formattedValue = `$${value.toFixed(2)}`;
                                 }
+                                
+                                const datasetLabel = context.dataset.label || '';
+                                // Check if this is an average line
+                                if (datasetLabel.includes('Avg Peak Before') || 
+                                    datasetLabel.includes('Avg 1st Sell') || 
+                                    datasetLabel.includes('Avg Peak After')) {
+                                    return `Average Market Cap: ${formattedValue}`;
+                                }
+                                
                                 return `Market Cap: ${formattedValue}`;
                             },
                             afterBody: function(context) {
+                                const datasetLabel = context[0].dataset.label || '';
+                                // Don't show token address for average lines
+                                if (datasetLabel.includes('Avg Peak Before') || 
+                                    datasetLabel.includes('Avg 1st Sell') || 
+                                    datasetLabel.includes('Avg Peak After')) {
+                                    return [];
+                                }
+                                
+                                // Get token info from the data point
                                 const dataPoint = context[0].raw;
                                 if (dataPoint && dataPoint.tokenAddress) {
                                     return [
