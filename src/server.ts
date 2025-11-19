@@ -1514,6 +1514,9 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
       const tokenPeakMarketCapBeforeFirstSell = trade.peak_buy_to_sell_mcap ? parseFloat(trade.peak_buy_to_sell_mcap.toString()) : null;
       const tokenPeakMarketCap10sAfterFirstSell = trade.peak_sell_to_end_mcap ? parseFloat(trade.peak_sell_to_end_mcap.toString()) : null;
       
+      // Get first sell price from database
+      const firstSellPrice = trade.first_sell_price ? parseFloat(trade.first_sell_price.toString()) : null;
+      
       // Get open position count at the time of buy
       const openPositionCount = trade.open_position_count !== null && trade.open_position_count !== undefined 
         ? parseInt(trade.open_position_count.toString(), 10) 
@@ -1596,6 +1599,7 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         tokenPeakPrice10sAfterFirstSell: tokenPeakPrice10sAfterFirstSell,
         tokenPeakMarketCapBeforeFirstSell: tokenPeakMarketCapBeforeFirstSell,
         tokenPeakMarketCap10sAfterFirstSell: tokenPeakMarketCap10sAfterFirstSell,
+        firstSellPrice: firstSellPrice,
         
         // Position data
         walletBuyPositionAfterDev: walletBuyPositionAfterDev,

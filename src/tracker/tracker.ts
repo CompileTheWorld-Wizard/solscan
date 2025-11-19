@@ -136,6 +136,8 @@ class TransactionTracker {
             // Record current time when transaction is received (Unix epoch in seconds, UTC)
             const blockTimestamp = Math.floor(Date.now() / 1000);
 
+            console.log(`${result.type} Transaction triggered. Swap ${result.mint_from}(${result.in_amount}) -> ${result.mint_to}(${result.out_amount})`)
+
             dbService.saveTransaction(sig, {
               platform: result.platform,
               type: result.type,
@@ -176,28 +178,21 @@ class TransactionTracker {
                 if (tokenPriceSol === null || isNaN(tokenPriceSol)) {
                   console.log(`⚠️ No valid price found in transaction result for ${sig}`);
                 } else {
-                  console.log(`💰 Token price in SOL: ${tokenPriceSol}`);
-
                   // 2. Fetch SOL price from database
                   const solPriceUsd = await dbService.getLatestSolPrice();
                   
                   if (!solPriceUsd) {
                     console.log(`⚠️ Failed to fetch SOL price from database for ${sig}`);
                   } else {
-                    // 3. Calculate token price in USD
                     const tokenPriceUsd = tokenPriceSol * solPriceUsd;
-                    console.log(`💵 Token price in USD: $${tokenPriceUsd}`);
-
-                    // 4. Fetch total supply using web3.js
                     const supplyData = await this.getTokenTotalSupply(tokenAddress);
                     
                     if (supplyData) {
                       const { supply: totalSupply, decimals } = supplyData;
                       console.log(`📊 Total supply: ${totalSupply} (decimals: ${decimals})`);
 
-                      // 5. Calculate market cap = total supply * token price in USD
+                      // Calculate market cap = total supply * token price in USD
                       const marketCap = totalSupply * tokenPriceUsd;
-                      console.log(`🧮 MarketCap for ${sig}: $${marketCap}`);
 
                       // 6. Update database with market cap, total supply, and token prices
                       dbService.updateTransactionMarketCap(

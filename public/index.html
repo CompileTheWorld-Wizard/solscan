@@ -224,6 +224,15 @@
                                 <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 5px;">📊 Active Time</div>
                                 <div style="font-size: 1.2rem; font-weight: 600; color: #3b82f6;">View Chart</div>
                             </div>
+                            <div
+                                style="padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155; cursor: pointer; transition: all 0.2s;"
+                                onclick="window.openPeakPriceChart()"
+                                onmouseover="this.style.borderColor='#3b82f6'; this.style.background='#1e293b'"
+                                onmouseout="this.style.borderColor='#334155'; this.style.background='#1a1f2e'"
+                                title="View Peak Price Chart">
+                                <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 5px;">📈 Peak Price</div>
+                                <div style="font-size: 1.2rem; font-weight: 600; color: #3b82f6;">View Chart</div>
+                            </div>
                         </div>
                     </div>
 
@@ -579,12 +588,36 @@
         </div>
     </div>
 
+    <!-- Peak Price Chart Dialog -->
+    <div id="peakPriceChartModal" class="modal-overlay" style="display: none; align-items: center; justify-content: center;">
+        <div class="modal" style="max-width: 900px; max-height: 90vh;">
+            <div class="modal-header">
+                <h2>📈 Token Peak Price Chart</h2>
+                <button class="modal-close" onclick="window.closePeakPriceChart()">×</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto;">
+                <div style="margin-bottom: 20px; color: #94a3b8; font-size: 0.85rem;">
+                    This chart shows peak prices for tokens with first sell: peak price before 1st sell, 1st sell price, and peak price 10s after 1st sell.
+                </div>
+                <div style="position: relative; height: 500px; margin-bottom: 20px;">
+                    <canvas id="peakPriceChartCanvas"></canvas>
+                </div>
+                <div id="peakPriceChartLoading" style="text-align: center; padding: 40px; color: #94a3b8; display: none;">
+                    Loading chart data...
+                </div>
+                <div id="peakPriceChartError" style="text-align: center; padding: 20px; color: #ef4444; display: none;">
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script type="module" src="/js/app.js"></script>
     <script type="module" src="/js/passwordManager.js"></script>
     <script type="module" src="/js/dashboardManager.js"></script>
     <script type="module" src="/js/activeTimeChart.js"></script>
+    <script type="module" src="/js/peakPriceChart.js"></script>
 </body>
 
 </html>
