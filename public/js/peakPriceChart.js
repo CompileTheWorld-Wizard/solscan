@@ -157,6 +157,14 @@ export async function updatePeakPriceChart() {
         // Helper function to add jitter (random offset between -0.15 and 0.15)
         const addJitter = () => (Math.random() - 0.5) * 0.3;
         
+        // Calculate sums for averages
+        let peakBeforeSum = 0;
+        let peakBeforeCount = 0;
+        let firstSellSum = 0;
+        let firstSellCount = 0;
+        let peakAfterSum = 0;
+        let peakAfterCount = 0;
+        
         dataPoints.forEach((dp) => {
             if (dp.peakMarketCapBeforeSell !== null && dp.peakMarketCapBeforeSell !== undefined) {
                 peakBeforeData.push({ 
@@ -165,6 +173,8 @@ export async function updatePeakPriceChart() {
                     token: dp.token,
                     tokenAddress: dp.tokenAddress
                 });
+                peakBeforeSum += dp.peakMarketCapBeforeSell;
+                peakBeforeCount++;
             }
             if (dp.firstSellMarketCap !== null && dp.firstSellMarketCap !== undefined) {
                 firstSellData.push({ 
@@ -173,6 +183,8 @@ export async function updatePeakPriceChart() {
                     token: dp.token,
                     tokenAddress: dp.tokenAddress
                 });
+                firstSellSum += dp.firstSellMarketCap;
+                firstSellCount++;
             }
             if (dp.peakMarketCapAfterSell !== null && dp.peakMarketCapAfterSell !== undefined) {
                 peakAfterData.push({ 
@@ -181,8 +193,27 @@ export async function updatePeakPriceChart() {
                     token: dp.token,
                     tokenAddress: dp.tokenAddress
                 });
+                peakAfterSum += dp.peakMarketCapAfterSell;
+                peakAfterCount++;
             }
         });
+        
+        // Calculate averages
+        const avgPeakBefore = peakBeforeCount > 0 ? peakBeforeSum / peakBeforeCount : null;
+        const avgFirstSell = firstSellCount > 0 ? firstSellSum / firstSellCount : null;
+        const avgPeakAfter = peakAfterCount > 0 ? peakAfterSum / peakAfterCount : null;
+        
+        // Format average value for display
+        const formatMarketCap = (value) => {
+            if (value === null || value === undefined) return 'N/A';
+            if (value >= 1000000) {
+                return `$${(value / 1000000).toFixed(2)}M`;
+            } else if (value >= 1000) {
+                return `$${(value / 1000).toFixed(2)}K`;
+            } else {
+                return `$${value.toFixed(2)}`;
+            }
+        };
         
         // Chart.js configuration for scatter plot
         const ctx = canvas.getContext('2d');
@@ -192,7 +223,7 @@ export async function updatePeakPriceChart() {
             data: {
                 datasets: [
                     {
-                        label: 'Peak before 1st Sell',
+                        label: `Peak before 1st Sell (Avg: ${formatMarketCap(avgPeakBefore)})`,
                         data: peakBeforeData,
                         backgroundColor: 'rgba(59, 130, 246, 0.6)',
                         borderColor: 'rgb(59, 130, 246)',
@@ -200,7 +231,7 @@ export async function updatePeakPriceChart() {
                         pointHoverRadius: 7
                     },
                     {
-                        label: '1st Sell',
+                        label: `1st Sell (Avg: ${formatMarketCap(avgFirstSell)})`,
                         data: firstSellData,
                         backgroundColor: 'rgba(34, 197, 94, 0.6)',
                         borderColor: 'rgb(34, 197, 94)',
@@ -208,13 +239,49 @@ export async function updatePeakPriceChart() {
                         pointHoverRadius: 7
                     },
                     {
-                        label: 'Peak after 1st Sell',
+                        label: `Peak after 1st Sell (Avg: ${formatMarketCap(avgPeakAfter)})`,
                         data: peakAfterData,
                         backgroundColor: 'rgba(168, 85, 247, 0.6)',
                         borderColor: 'rgb(168, 85, 247)',
                         pointRadius: 5,
                         pointHoverRadius: 7
-                    }
+                    },
+                    // Average lines for Peak Before
+                    ...(avgPeakBefore !== null ? [{
+                        label: 'Avg Peak Before',
+                        data: [{ x: -0.5, y: avgPeakBefore }, { x: 0.5, y: avgPeakBefore }],
+                        type: 'line',
+                        borderColor: 'rgba(59, 130, 246, 0.8)',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        pointRadius: 0,
+                        fill: false,
+                        showLine: true
+                    }] : []),
+                    // Average lines for 1st Sell
+                    ...(avgFirstSell !== null ? [{
+                        label: 'Avg 1st Sell',
+                        data: [{ x: 0.5, y: avgFirstSell }, { x: 1.5, y: avgFirstSell }],
+                        type: 'line',
+                        borderColor: 'rgba(34, 197, 94, 0.8)',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        pointRadius: 0,
+                        fill: false,
+                        showLine: true
+                    }] : []),
+                    // Average lines for Peak After
+                    ...(avgPeakAfter !== null ? [{
+                        label: 'Avg Peak After',
+                        data: [{ x: 1.5, y: avgPeakAfter }, { x: 2.5, y: avgPeakAfter }],
+                        type: 'line',
+                        borderColor: 'rgba(168, 85, 247, 0.8)',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        pointRadius: 0,
+                        fill: false,
+                        showLine: true
+                    }] : [])
                 ]
             },
             options: {
@@ -228,6 +295,12 @@ export async function updatePeakPriceChart() {
                             color: '#e0e7ff',
                             font: {
                                 size: 12
+                            },
+                            filter: function(item, chart) {
+                                // Hide the average line datasets from legend (they're shown in main labels)
+                                return !item.text.includes('Avg Peak Before') && 
+                                       !item.text.includes('Avg 1st Sell') && 
+                                       !item.text.includes('Avg Peak After');
                             }
                         }
                     },
