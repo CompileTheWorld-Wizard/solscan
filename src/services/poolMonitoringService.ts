@@ -14,6 +14,9 @@ import * as path from 'path';
 import { isObject } from "lodash";
 import * as bs58 from "bs58";
 
+const RETRY_DELAY_MS = 1000;
+const MAX_RETRY_WITH_LAST_SLOT = 5;
+
 // const PUMP_PROGRAM_ID = '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P';
 
 interface PeakData {
@@ -66,6 +69,7 @@ class LiquidityPoolMonitor {
   currentStream: any;
   isStreaming: boolean;
   shouldStop: boolean;
+  isRunning: boolean;
   grpcUrl: string;
   xToken: string;
   monitoredPools: Set<string>; // Track which pools we're subscribed to
@@ -78,6 +82,7 @@ class LiquidityPoolMonitor {
     this.currentStream = null;
     this.isStreaming = false;
     this.shouldStop = false;
+    this.isRunning = false;
     this.monitoredPools = new Set();
     
     // Get gRPC credentials from environment
@@ -333,14 +338,8 @@ class LiquidityPoolMonitor {
       throw new Error('gRPC client not initialized');
     }
 
-    // Don't start if there are no pools to monitor
-    if (this.monitoredPools.size === 0) {
-      console.log('⚠️ Cannot start stream: no pools to monitor');
-      return;
-    }
-
-    // Prevent multiple streams - if already streaming, don't start another
-    if (this.isStreaming && this.currentStream) {
+    // Prevent multiple streams - if already running, don't start another
+    if (this.isRunning) {
       console.log('⚠️ Stream already running, skipping start');
       return;
     }
@@ -356,25 +355,62 @@ class LiquidityPoolMonitor {
     }
 
     this.shouldStop = false;
-    this.isStreaming = true;
+    this.isRunning = true;
+    this.isStreaming = false;
 
-    // Start streaming in background
-    this.handleStream().catch(error => {
-      console.error('gRPC stream error:', error);
+    // Start streaming in background with retry mechanism
+    this.subscribeCommand().then(() => {
+      this.isRunning = false;
       this.isStreaming = false;
-      this.currentStream = null;
-      
-      // Retry after delay only if there are pools to monitor and we're not stopping
-      if (!this.shouldStop && this.monitoredPools.size > 0) {
-        setTimeout(() => {
-          // Double-check before retrying
-          if (!this.shouldStop && this.monitoredPools.size > 0 && !this.isStreaming) {
-            console.log('🔄 Retrying stream connection...');
-            this.startStream();
-          }
-        }, 1000);
-      }
+    }).catch(error => {
+      console.error('gRPC stream error:', error);
+      this.isRunning = false;
+      this.isStreaming = false;
     });
+  }
+
+  /**
+   * Subscribe to the stream with retry mechanism (similar to tracker)
+   */
+  private async subscribeCommand(): Promise<void> {
+    let retryCount = 0;
+
+    while (this.isRunning && !this.shouldStop) {
+      try {
+        const result = await this.handleStream();
+        
+        // If we finished normally and should stop, break the loop
+        if (this.shouldStop) {
+          break;
+        }
+      } catch (err: any) {
+        // If we should stop, break the loop
+        if (this.shouldStop) {
+          break;
+        }
+        console.log(err);
+        console.error(
+          `Stream error, retrying in ${RETRY_DELAY_MS}ms...`,
+        );
+
+        // In case the stream is interrupted, it waits for a while before retrying
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+
+        if (err.hasRcvdMSg) retryCount = 0;
+
+        if (retryCount < MAX_RETRY_WITH_LAST_SLOT) {
+          console.log(
+            `#${retryCount} retrying, remaining retries ${MAX_RETRY_WITH_LAST_SLOT - retryCount}`,
+          );
+          retryCount++;
+        } else {
+          console.log("Retrying from latest (max retries reached)");
+          retryCount = 0;
+        }
+      }
+    }
+
+    console.log("🛑 Pool monitoring stream stopped");
   }
 
   private async handleStream(): Promise<void> {
@@ -385,137 +421,153 @@ class LiquidityPoolMonitor {
     console.log('🔌 Starting gRPC stream for pool monitoring...');
     const stream = await this.grpcClient.subscribe();
     this.currentStream = stream;
+    this.isStreaming = true;
+    let hasRcvdMSg = false;
 
-    // Handle stream events
-    stream.on("error", (error) => {
-      console.error("❌ gRPC stream error:", error);
-      this.isStreaming = false;
-      // Only end if this is still the current stream
-      if (this.currentStream === stream) {
-        this.currentStream = null;
+    return new Promise((resolve, reject) => {
+      // Handle stream events
+      stream.on("error", (error) => {
+        console.error("❌ gRPC stream error:", error);
         stream.end();
-      }
-    });
+        reject({ error, hasRcvdMSg });
+      });
 
-    stream.on("end", () => {
-      console.log("🔌 gRPC stream ended");
-      // Only update state if this is still the current stream
-      if (this.currentStream === stream) {
-        this.isStreaming = false;
-        this.currentStream = null;
-      }
-    });
+      stream.on("end", () => {
+        console.log("🔌 gRPC stream ended");
+        resolve();
+      });
 
-    stream.on("close", () => {
-      console.log("🔌 gRPC stream closed");
-      // Only update state if this is still the current stream
-      if (this.currentStream === stream) {
-        this.isStreaming = false;
-        this.currentStream = null;
-      }
-    });
+      stream.on("close", () => {
+        console.log("🔌 gRPC stream closed");
+        resolve();
+      });
 
-    // Handle account updates
-    stream.on("data", async (data) => {
-      try {
-        if (data?.account) {
-          const poolAddress = bs58.encode(data.account.account.pubkey);
-          // Account data is already base64 encoded string
-          const accountData = data.account.account.data;
-          
-          console.log(`📥 Received account update for pool ${poolAddress.substring(0, 8)}...`);
-          this.handlePoolUpdate(poolAddress, accountData);
+      // Handle account updates
+      stream.on("data", async (data) => {
+        try {
+          if (this.shouldStop) {
+            stream.end();
+            return;
+          }
+
+          if (data?.account) {
+            hasRcvdMSg = true;
+            const poolAddress = bs58.encode(data.account.account.pubkey);
+            // Account data is already base64 encoded string
+            const accountData = data.account.account.data;
+            
+            console.log(`📥 Received account update for pool ${poolAddress.substring(0, 8)}...`);
+            this.handlePoolUpdate(poolAddress, accountData);
+          }
+        } catch (error) {
+          console.error('Error processing gRPC data:', error);
         }
-      } catch (error) {
-        console.error('Error processing gRPC data:', error);
+      });
+
+      // Build subscription request
+      // If pools are empty, send empty subscription request
+      // Otherwise, send request with monitored pools
+      let req: SubscribeRequest;
+      
+      if (this.monitoredPools.size === 0) {
+        // Send empty subscription when pool is empty
+        req = {
+          slots: {},
+          accounts: {},
+          transactions: {},
+          blocks: {},
+          blocksMeta: {},
+          accountsDataSlice: [],
+          transactionsStatus: {},
+          entry: {}
+        };
+        console.log('📤 Sending empty subscription request (no pools to monitor)');
+      } else {
+        req = {
+          slots: {},
+          accounts: {
+            pumpfun: {
+              account: Array.from(this.monitoredPools),
+              filters: [],
+              owner: []
+            }
+          },
+          transactions: {},
+          blocks: {},
+          blocksMeta: {},
+          accountsDataSlice: [],
+          commitment: CommitmentLevel.PROCESSED,
+          entry: {},
+          transactionsStatus: {}
+        };
+        console.log(`📤 Subscribing to ${this.monitoredPools.size} pool(s) via gRPC`);
       }
-    });
 
-    // Build initial subscription request with all monitored pools
-    // This should only be called when there's at least one pool
-    if (this.monitoredPools.size === 0) {
-      console.log('⚠️ No pools to subscribe to, ending stream');
-      stream.end();
-      this.isStreaming = false;
-      return;
-    }
-
-    const req: SubscribeRequest = {
-      slots: {},
-      accounts: {
-        pumpfun: {
-          account: Array.from(this.monitoredPools),
-          filters: [],
-          owner: []
-        }
-      },
-      transactions: {},
-      blocks: {},
-      blocksMeta: {},
-      accountsDataSlice: [],
-      commitment: CommitmentLevel.PROCESSED,
-      entry: {},
-      transactionsStatus: {}
-    };
-
-    // Send initial subscribe request
-    await new Promise<void>((resolve, reject) => {
+      // Send initial subscribe request
       stream.write(req, (err: any) => {
         if (err === null || err === undefined) {
-          console.log(`✅ Subscribed to ${this.monitoredPools.size} pool(s) via gRPC`);
-          resolve();
+          if (this.monitoredPools.size === 0) {
+            console.log(`✅ Sent empty subscription request`);
+          } else {
+            console.log(`✅ Subscribed to ${this.monitoredPools.size} pool(s) via gRPC`);
+          }
         } else {
-          reject(err);
+          reject({ error: err, hasRcvdMSg });
         }
       });
     });
   }
 
   async updateSubscription(): Promise<void> {
-    // If no pools to monitor, stop the stream if it's running
-    if (this.monitoredPools.size === 0) {
-      if (this.currentStream && this.isStreaming) {
-        console.log('🛑 No pools to monitor, stopping gRPC stream...');
-        this.shouldStop = true;
-        try {
-          this.currentStream.cancel();
-          this.currentStream.end();
-        } catch (error) {
-          // Ignore errors
-        }
-        this.currentStream = null;
-        this.isStreaming = false;
-      }
+    // If stream is not running, start it
+    if (!this.isRunning) {
+      await this.startStream();
       return;
     }
 
-    // If stream is not running, start it
+    // If stream is not active yet, wait for it
     if (!this.currentStream || !this.isStreaming) {
-      await this.startStream();
+      console.log('⚠️ Stream not ready yet, will update when ready');
       return;
     }
 
     // Dynamically update the subscription without restarting the stream
     try {
-      const req: SubscribeRequest = {
-        slots: {},
-        accounts: {
-          pumpfun: {
-            account: Array.from(this.monitoredPools),
-            filters: [],
-            owner: []
-          }
-        },
-        transactions: {},
-        blocks: {},
-        blocksMeta: {},
-        accountsDataSlice: [],
-        commitment: CommitmentLevel.PROCESSED,
-        entry: {},
-        transactionsStatus: {}
-      };
-
-      console.log(`🔄 Updating gRPC subscription: ${this.monitoredPools.size} pool(s) - ${Array.from(this.monitoredPools).map(p => p.substring(0, 8)).join(', ')}`);
+      let req: SubscribeRequest;
+      
+      if (this.monitoredPools.size === 0) {
+        // Send empty subscription when pool is empty
+        req = {
+          slots: {},
+          accounts: {},
+          transactions: {},
+          blocks: {},
+          blocksMeta: {},
+          accountsDataSlice: [],
+          transactionsStatus: {},
+          entry: {}
+        };
+        console.log('🔄 Updating gRPC subscription: sending empty subscription (no pools to monitor)');
+      } else {
+        req = {
+          slots: {},
+          accounts: {
+            pumpfun: {
+              account: Array.from(this.monitoredPools),
+              filters: [],
+              owner: []
+            }
+          },
+          transactions: {},
+          blocks: {},
+          blocksMeta: {},
+          accountsDataSlice: [],
+          commitment: CommitmentLevel.PROCESSED,
+          entry: {},
+          transactionsStatus: {}
+        };
+        console.log(`🔄 Updating gRPC subscription: ${this.monitoredPools.size} pool(s) - ${Array.from(this.monitoredPools).map(p => p.substring(0, 8)).join(', ')}`);
+      }
       
       // Wait for the subscription update to be sent
       await new Promise<void>((resolve, reject) => {
@@ -527,7 +579,11 @@ class LiquidityPoolMonitor {
         
         streamRef.write(req, (err: any) => {
           if (err === null || err === undefined) {
-            console.log(`✅ Updated gRPC subscription: ${this.monitoredPools.size} pool(s)`);
+            if (this.monitoredPools.size === 0) {
+              console.log(`✅ Updated gRPC subscription: empty subscription sent`);
+            } else {
+              console.log(`✅ Updated gRPC subscription: ${this.monitoredPools.size} pool(s)`);
+            }
             resolve();
           } else {
             reject(err);
@@ -536,22 +592,7 @@ class LiquidityPoolMonitor {
       });
     } catch (error) {
       console.error('Failed to update subscription:', error);
-      // If update fails, restart the stream only if we still have pools
-      if (this.monitoredPools.size > 0) {
-        if (this.currentStream) {
-          try {
-            this.currentStream.end();
-          } catch (e) {
-            // Ignore
-          }
-        }
-        this.isStreaming = false;
-        this.currentStream = null;
-        await new Promise(resolve => setTimeout(resolve, 500));
-        if (this.monitoredPools.size > 0) {
-          await this.startStream();
-        }
-      }
+      // If update fails, the retry mechanism in subscribeCommand will handle it
     }
   }
 
@@ -815,12 +856,19 @@ class LiquidityPoolMonitor {
 
   async cleanup(): Promise<void> {
     this.shouldStop = true;
+    this.isRunning = false;
     if (this.currentStream) {
-      this.currentStream.end();
+      try {
+        this.currentStream.end();
+      } catch (error) {
+        // Ignore errors
+      }
     }
     this.sessions.clear();
     this.poolToSessions.clear();
     this.monitoredPools.clear();
+    this.isStreaming = false;
+    this.currentStream = null;
   }
 }
 

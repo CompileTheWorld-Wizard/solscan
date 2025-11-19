@@ -50,7 +50,8 @@ class TransactionTracker {
     });
 
     // Initialize Solana RPC connection for wallet analysis
-    const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+    const shyftApiKey = process.env.SHYFT_API_KEY;
+    const rpcUrl = `https://rpc.shyft.to/${shyftApiKey}`;
     this.solanaConnection = new Connection(rpcUrl, "confirmed");
 
     // Initialize wallet tracking service with Solana connection for pool monitoring

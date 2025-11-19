@@ -198,27 +198,16 @@ export class WalletTrackingService {
       if (txType === 'BUY') {
         // Calculate open positions count based on buy/sell counts
         try {
-          // Step 1: Fetch all holding tokens using getTokenAccountsByOwner (actual token accounts)
-          const shyftApiKey = process.env.SHYFT_API_KEY;
-          let connection: Connection;
-          
-          if (shyftApiKey) {
-            const shyftRpcUrl = `https://rpc.shyft.to?api_key=${shyftApiKey}`;
-            connection = new Connection(shyftRpcUrl, 'confirmed');
-          } else {
-            const fallbackRpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-            connection = new Connection(fallbackRpcUrl, 'confirmed');
-          }
           
           const publicKey = new PublicKey(walletAddress);
           
           // Get parsed token accounts (SPL Token Program)
-          const parsedTokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
+          const parsedTokenAccounts = await this.solanaConnection.getParsedTokenAccountsByOwner(publicKey, {
             programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
           });
           
           // Get parsed token accounts (SPL Token-2022 Program)
-          const parsed2022TokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
+          const parsed2022TokenAccounts = await this.solanaConnection.getParsedTokenAccountsByOwner(publicKey, {
             programId: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
           });
           
