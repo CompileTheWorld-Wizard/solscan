@@ -1359,7 +1359,7 @@ function createSortableHeader(label, columnKey, isSellColumn, sellIndex = null) 
 /**
  * Clear all dashboard data and UI elements
  */
-function clearDashboardData() {
+export function clearDashboardData() {
     // Clear table content
     const thead = document.getElementById('dashboardTableHead');
     const tbody = document.getElementById('dashboardTableBody');

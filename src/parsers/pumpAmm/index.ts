@@ -36,7 +36,8 @@ export function parsePumpAmmTransaction(tx: any) {
     mintTo : formattedSwapTxn.type == 'sell' ? SOL_MINT : formattedSwapTxn.mint,
     in_amount : formattedSwapTxn.in_amount,
     out_amount : formattedSwapTxn.out_amount,
-    price : formattedSwapTxn.price
+    price : formattedSwapTxn.price,
+    pool : formattedSwapTxn.pool
   } ;
   // console.log(result);
   return result ;

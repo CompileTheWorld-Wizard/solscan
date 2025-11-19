@@ -15,7 +15,7 @@ export function parseSwapTransactionOutput(parsedInstruction) {
   const { name: type, accounts = [], args = {} } = swapInstruction;
   const baseAmountIn = args?.amount;
 
-  const bondingCurve = accounts.find(a => a.name === 'bondingCurve')?.pubkey;
+  const bondingCurve = accounts.find(a => a.name === 'bonding_curve')?.pubkey;
   const userPubkey = accounts.find(a => a.name === 'user')?.pubkey;
   const mint = accounts.find(a => a.name === 'mint')?.pubkey;
 
@@ -65,6 +65,7 @@ export function parseSwapTransactionOutput(parsedInstruction) {
     bonding_curve: bondingCurve,
     in_amount: inAmount,
     out_amount: finalOutAmount,
-    price: formattedPrice
+    price: formattedPrice,
+    pool: bondingCurve
   };
 }

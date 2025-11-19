@@ -224,10 +224,15 @@ export async function removeWalletFromAnalysis() {
                 await updateAnalysisWalletSelect();
             }
             
-            // Refresh dashboard wallet select
+            // Refresh dashboard wallet select and clear dashboard data if active
             if (dashboardSelect) {
-                const { initializeDashboard } = await import('./dashboardManager.js');
+                const { initializeDashboard, clearDashboardData } = await import('./dashboardManager.js');
                 await initializeDashboard();
+                
+                // Clear dashboard data if dashboard tab is active
+                if (state.currentTab === 'dashboard') {
+                    clearDashboardData();
+                }
             }
             
             // Refresh transactions tab if it's active

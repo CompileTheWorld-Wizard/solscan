@@ -31,6 +31,7 @@ export function parsePumpFunTransaction(tx: any) {
     in_amount : parsedPumpfunTxn.in_amount,
     out_amount : parsedPumpfunTxn.out_amount,
     price : parsedPumpfunTxn.price,
+    pool : parsedPumpfunTxn.pool,
   }
   // console.log( result ) ;
   // console.log(

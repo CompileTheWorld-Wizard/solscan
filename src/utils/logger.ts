@@ -43,7 +43,71 @@ class Logger {
   }
 
   /**
-   * Format log message with timestamp
+   * Get module name from call stack
+   */
+  private getModuleName(): string {
+    try {
+      const stack = new Error().stack;
+      if (!stack) return 'UNKNOWN';
+      
+      const stackLines = stack.split('\n');
+      // Skip the first 3 lines (Error, getModuleName, write)
+      // Look for the first file that's not logger.ts
+      for (let i = 3; i < stackLines.length; i++) {
+        const line = stackLines[i];
+        if (!line) continue;
+        
+        // Extract file path from stack line
+        // Format: "    at functionName (file:line:col)" or "    at file:line:col"
+        const match = line.match(/\(([^)]+)\)|at\s+([^\s]+)/);
+        if (match) {
+          const filePath = match[1] || match[2];
+          if (!filePath || filePath.includes('logger.ts') || filePath.includes('node_modules')) continue;
+          
+          // Extract module name from path
+          // e.g., "D:\Upwork\solscan\src\tracker\tracker.ts" -> "tracker"
+          // e.g., "D:\Upwork\solscan\src\services\poolMonitoringService.ts" -> "poolMonitoringService"
+          const pathParts = filePath.split(/[/\\]/);
+          const fileName = pathParts[pathParts.length - 1];
+          const moduleName = fileName.replace(/\.(ts|js)$/, '');
+          
+          // Find src or dist directory index
+          const srcIndex = pathParts.findIndex(part => part === 'src' || part === 'dist');
+          if (srcIndex >= 0 && srcIndex < pathParts.length - 1) {
+            // Get path after src/dist
+            const afterSrc = pathParts.slice(srcIndex + 1);
+            if (afterSrc.length > 1) {
+              // If in subdirectory, use last two parts: "services/poolMonitoringService"
+              const parentDir = afterSrc[afterSrc.length - 2];
+              if (parentDir && parentDir !== 'src' && parentDir !== 'dist') {
+                return `${parentDir}/${moduleName}`;
+              }
+            }
+          }
+          
+          return moduleName;
+        }
+      }
+    } catch (error) {
+      // If stack parsing fails, return unknown
+    }
+    return 'UNKNOWN';
+  }
+
+  /**
+   * Format timestamp for console (shorter format)
+   */
+  private formatTimestamp(): string {
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    const ms = String(now.getMilliseconds()).padStart(3, '0');
+    return `${hours}:${minutes}:${seconds}.${ms}`;
+  }
+
+  /**
+   * Format log message with timestamp for file
    */
   private formatMessage(level: string, ...args: any[]): string {
     const timestamp = new Date().toISOString();
@@ -58,7 +122,26 @@ class Logger {
       return String(arg);
     }).join(' ');
     
-    return `[${timestamp}] [${level}] ${message}\n`;
+    return `[${timestamp}] ${message}\n`;
+  }
+
+  /**
+   * Format console message with timestamp and module
+   */
+  private formatConsoleMessage(module: string, ...args: any[]): string {
+    const timestamp = this.formatTimestamp();
+    const message = args.map(arg => {
+      if (typeof arg === 'object') {
+        try {
+          return JSON.stringify(arg, null, 2);
+        } catch (e) {
+          return String(arg);
+        }
+      }
+      return String(arg);
+    }).join(' ');
+    
+    return `[${timestamp}] ${message}`;
   }
 
   /**
@@ -68,9 +151,13 @@ class Logger {
     // Update log file if date changed
     this.updateLogFile();
     
-    // Write to console using original method (with error handling for broken pipes)
+    // Get module name from call stack
+    const moduleName = this.getModuleName();
+    
+    // Write to console with formatted message (with error handling for broken pipes)
     try {
-      consoleMethod(...args);
+      const formattedMessage = this.formatConsoleMessage(moduleName, ...args);
+      consoleMethod(formattedMessage);
     } catch (error: any) {
       // Handle EPIPE and other stream errors gracefully
       // These typically occur when stdout/stderr is closed or redirected

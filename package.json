@@ -42,12 +42,14 @@
     "shyft-parser-v1": "npm:@shyft-to/solana-transaction-parser@1.1.17",
     "shyft-parser-v2": "npm:@shyft-to/solana-transaction-parser@2.0.0",
     "uuid": "^13.0.0",
+    "ws": "^8.18.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/body-parser": "^1.19.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.5",
+    "@types/ws": "^8.5.13",
     "ts-node": "^10.9.2",
     "typescript": "^4.9.3"
   }

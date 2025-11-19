@@ -325,6 +325,25 @@ class DatabaseService {
         console.warn('⚠️ Failed to add token_price_usd column (may already exist):', error);
       }
 
+      // Migration: Add peak price columns to wallets table
+      try {
+        const hasPeakBuyToSellPriceSol = await this.columnExists('wallets', 'peak_buy_to_sell_price_sol');
+        if (!hasPeakBuyToSellPriceSol) {
+          await this.pool.query(`
+            ALTER TABLE wallets 
+            ADD COLUMN peak_buy_to_sell_price_sol NUMERIC(20, 9),
+            ADD COLUMN peak_buy_to_sell_price_usd NUMERIC(20, 9),
+            ADD COLUMN peak_buy_to_sell_mcap NUMERIC(20, 2),
+            ADD COLUMN peak_sell_to_end_price_sol NUMERIC(20, 9),
+            ADD COLUMN peak_sell_to_end_price_usd NUMERIC(20, 9),
+            ADD COLUMN peak_sell_to_end_mcap NUMERIC(20, 2)
+          `);
+          console.log('✅ Added peak price columns to wallets table');
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to add peak price columns (may already exist):', error);
+      }
+
       // Migration: Create wallet_stats table if it doesn't exist (for existing databases)
       try {
         const hasWalletStats = await this.tableExists('wallet_stats');
@@ -1505,6 +1524,12 @@ class DatabaseService {
           first_sell_supply,
           first_sell_price,
           first_sell_decimals,
+          peak_buy_to_sell_price_sol,
+          peak_buy_to_sell_price_usd,
+          peak_buy_to_sell_mcap,
+          peak_sell_to_end_price_sol,
+          peak_sell_to_end_price_usd,
+          peak_sell_to_end_mcap,
           created_at
         FROM wallets
         WHERE wallet_address = $1
@@ -1666,6 +1691,61 @@ class DatabaseService {
     } catch (error) {
       console.error(`Failed to get total buy tokens for ${walletAddress} - ${tokenAddress}:`, error);
       return 0;
+    }
+  }
+
+  /**
+   * Get buy and sell counts for all tokens held by a wallet
+   * Returns a map of token address to { buyCount, sellCount }
+   */
+  async getBuySellCountsPerToken(walletAddress: string): Promise<Map<string, { buyCount: number; sellCount: number }>> {
+    try {
+      const SOL_MINT = 'So11111111111111111111111111111111111111112';
+      const result = new Map<string, { buyCount: number; sellCount: number }>();
+      
+      // Get all unique tokens that the wallet has traded from the wallets table
+      const tokensQuery = `
+        SELECT DISTINCT token_address
+        FROM wallets
+        WHERE wallet_address = $1
+      `;
+      
+      const tokensResult = await this.pool.query(tokensQuery, [walletAddress]);
+      const tokens = tokensResult.rows.map((row: any) => row.token_address);
+      
+      // For each token, count buys and sells
+      for (const tokenAddress of tokens) {
+        // Count buys: wallet buys token (mint_to = token, mint_from = SOL)
+        const buyQuery = `
+          SELECT COUNT(*) as count
+          FROM transactions
+          WHERE fee_payer = $1
+            AND UPPER(TRIM(type)) = 'BUY'
+            AND mint_from = $2
+            AND mint_to = $3
+        `;
+        const buyResult = await this.pool.query(buyQuery, [walletAddress, SOL_MINT, tokenAddress]);
+        const buyCount = parseInt(buyResult.rows[0]?.count || '0', 10);
+        
+        // Count sells: wallet sells token (mint_from = token, mint_to = SOL)
+        const sellQuery = `
+          SELECT COUNT(*) as count
+          FROM transactions
+          WHERE fee_payer = $1
+            AND UPPER(TRIM(type)) = 'SELL'
+            AND mint_from = $2
+            AND mint_to = $3
+        `;
+        const sellResult = await this.pool.query(sellQuery, [walletAddress, tokenAddress, SOL_MINT]);
+        const sellCount = parseInt(sellResult.rows[0]?.count || '0', 10);
+        
+        result.set(tokenAddress, { buyCount, sellCount });
+      }
+      
+      return result;
+    } catch (error) {
+      console.error(`Failed to get buy/sell counts per token for ${walletAddress}:`, error);
+      return new Map();
     }
   }
 
@@ -2036,6 +2116,66 @@ class DatabaseService {
     } catch (error: any) {
       console.error(`❌ Failed to delete filter preset:`, error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Update peak prices for a wallet-token pair
+   */
+  async updateWalletPeakPrices(
+    walletAddress: string,
+    tokenAddress: string,
+    peakBuyToSellPriceSol: number,
+    peakBuyToSellPriceUsd: number,
+    peakBuyToSellMcap: number,
+    peakSellToEndPriceSol: number,
+    peakSellToEndPriceUsd: number,
+    peakSellToEndMcap: number
+  ): Promise<void> {
+    try {
+      const query = `
+        UPDATE wallets
+        SET peak_buy_to_sell_price_sol = $3,
+            peak_buy_to_sell_price_usd = $4,
+            peak_buy_to_sell_mcap = $5,
+            peak_sell_to_end_price_sol = $6,
+            peak_sell_to_end_price_usd = $7,
+            peak_sell_to_end_mcap = $8
+        WHERE wallet_address = $1 AND token_address = $2
+      `;
+      await this.pool.query(query, [
+        walletAddress,
+        tokenAddress,
+        peakBuyToSellPriceSol || null,
+        peakBuyToSellPriceUsd || null,
+        peakBuyToSellMcap || null,
+        peakSellToEndPriceSol || null,
+        peakSellToEndPriceUsd || null,
+        peakSellToEndMcap || null
+      ]);
+      console.log(`💾 Peak prices updated for wallet ${walletAddress.substring(0, 8)}... - token ${tokenAddress.substring(0, 8)}...`);
+    } catch (error: any) {
+      console.error(`❌ Failed to update peak prices:`, error.message);
+    }
+  }
+
+  /**
+   * Check if this is the first buy for a wallet-token pair
+   */
+  async isFirstBuy(walletAddress: string, tokenAddress: string): Promise<boolean> {
+    try {
+      const query = `
+        SELECT first_buy_timestamp
+        FROM wallets
+        WHERE wallet_address = $1 AND token_address = $2
+      `;
+      const result = await this.pool.query(query, [walletAddress, tokenAddress]);
+      
+      // If no record exists or first_buy_timestamp is null, it's the first buy
+      return result.rows.length === 0 || result.rows[0].first_buy_timestamp === null;
+    } catch (error: any) {
+      console.error(`❌ Failed to check first buy:`, error.message);
+      return false;
     }
   }
 

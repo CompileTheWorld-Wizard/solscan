@@ -6,10 +6,12 @@
  * Tracks:
  * - First Buy Timestamp & Amount
  * - First Sell Timestamp & Amount
+ * - Pool monitoring for first buys
  */
 
 import { Connection, PublicKey } from '@solana/web3.js';
 import { dbService } from '../database';
+import { PoolMonitoringService } from './poolMonitoringService';
 
 interface MarketCapResult {
   success: boolean;
@@ -18,14 +20,28 @@ interface MarketCapResult {
   tokenBalance?: number;
   solAmount?: number;
   tokenAddress?: string;
+  price?: number; // Token price in USD
+  decimals?: number; // Token decimals
   error?: string;
 }
 
 export class WalletTrackingService {
+  private poolMonitoringService: PoolMonitoringService | null = null;
+  private solanaConnection: Connection | null = null;
+
+  /**
+   * Initialize with Solana connection for pool monitoring
+   */
+  async initialize(solanaConnection: Connection): Promise<void> {
+    this.solanaConnection = solanaConnection;
+    this.poolMonitoringService = await PoolMonitoringService.getInstance(solanaConnection);
+  }
+
   /**
    * Track wallet-token pair from buy/sell event
    * Records first buy/sell for a wallet-token pair
    * Uses marketcap from tracker (passed as marketCapResult) instead of fetching it
+   * Starts pool monitoring for first buys
    */
   async trackWalletToken(
     walletAddress: string,
@@ -33,7 +49,8 @@ export class WalletTrackingService {
     inAmount: string,
     outAmount: string,
     transactionType: string,
-    marketCapResult: MarketCapResult | null = null
+    marketCapResult: MarketCapResult | null = null,
+    poolAddress?: string
   ): Promise<void> {
     try {
       const txType = transactionType.toUpperCase();
@@ -70,72 +87,109 @@ export class WalletTrackingService {
 
       console.log(`👛 [Wallet: ${walletAddress.substring(0, 8)}...] [Token: ${tokenAddress.substring(0, 8)}...] [Type: ${txType}] [Amount: ${amount}]`);
       
-      // Build market data using marketcap from tracker (if available)
+      // Build market data from parsed transaction (marketCapResult) if available
       let marketData: {
         supply: string | null;
         price: number | null;
         decimals: number | null;
         market_cap: number | null;
       } | null = null;
-      
-      let isEmptyData = false;
 
-      // Use marketcap from tracker (marketCapResult) if available
-      if (marketCapResult && marketCapResult.success && typeof marketCapResult.marketCap === 'number') {
-        // Build market data using calculated marketcap from tracker
+      // Use data from parsed transaction (marketCapResult) if available
+      if (marketCapResult) {
+        // Build market data using data from parsed transaction
+        // Include price/decimals even if marketCap is not available
         marketData = {
-          market_cap: marketCapResult.marketCap,
+          market_cap: marketCapResult.marketCap !== undefined ? marketCapResult.marketCap : null,
           supply: marketCapResult.tokenSupply ? marketCapResult.tokenSupply.toString() : null,
-          price: null, // Price is stored in transaction table (token_price_sol and token_price_usd)
-          decimals: null // Decimals available from token supply fetch
+          price: marketCapResult.price !== undefined ? marketCapResult.price : null,
+          decimals: marketCapResult.decimals !== undefined ? marketCapResult.decimals : null
         };
-        console.log(`   MCap (from tracker): $${marketCapResult.marketCap}, Supply: ${marketData.supply || 'N/A'}`);
+        if (marketCapResult.success && typeof marketCapResult.marketCap === 'number') {
+          console.log(`   MCap (from transaction): $${marketCapResult.marketCap}, Supply: ${marketData.supply || 'N/A'}, Price: ${marketData.price || 'N/A'}, Decimals: ${marketData.decimals || 'N/A'}`);
+        } else {
+          console.log(`   Price (from transaction): ${marketData.price || 'N/A'}, Decimals: ${marketData.decimals || 'N/A'}, MCap: N/A`);
+        }
+      } else {
+        // No market data from transaction - set to null
+        marketData = null;
+        console.log(`   Market data: Not available from transaction`);
+      }
+
+      // Check if this is the first buy BEFORE saving (for pool monitoring)
+      let isFirstBuy = false;
+      if (txType === 'BUY') {
+        isFirstBuy = await dbService.isFirstBuy(walletAddress, tokenAddress);
+      }
+
+      
+      // Handle pool monitoring for pump.fun and pump AMM
+      // Start monitoring ASAP after confirming first buy (non-blocking)
+      if (txType === 'BUY' && poolAddress && isFirstBuy && this.poolMonitoringService) {
+        // Start pool monitoring immediately (non-blocking) - don't wait for anything
+        const maxDuration = parseInt(process.env.POOL_MONITORING_MAX_DURATION || '60', 10); // Default 1 min
         
-        // Still fetch price/decimals if needed (non-blocking, optional)
-        dbService.fetchMcapFromSolscan(tokenAddress).then(fetchResult => {
-          if (fetchResult && !fetchResult.isEmpty && marketData) {
-            // Update price and decimals if available
-            if (fetchResult.price !== null) marketData.price = fetchResult.price;
-            if (fetchResult.decimals !== null) marketData.decimals = fetchResult.decimals;
-            // Optionally update supply if more accurate
-            if (fetchResult.supply) marketData.supply = fetchResult.supply;
+        // Prepare initial price data from buy transaction and start monitoring (non-blocking)
+        (async () => {
+          try {
+            let initialPriceData: { priceUsd: number; priceSol: number; marketCap: number } | undefined;
+            if (marketCapResult && marketCapResult.price !== undefined && marketCapResult.marketCap !== undefined) {
+              // Get SOL price to calculate price in SOL (non-blocking, but we'll start monitoring even if this fails)
+              try {
+                const solPriceUsd = await dbService.getLatestSolPrice();
+                if (solPriceUsd && solPriceUsd > 0) {
+                  const priceSol = marketCapResult.price / solPriceUsd;
+                  initialPriceData = {
+                    priceUsd: marketCapResult.price,
+                    priceSol: priceSol,
+                    marketCap: marketCapResult.marketCap
+                  };
+                }
+              } catch (solPriceError) {
+                // If we can't get SOL price, still start monitoring with USD price and market cap
+                initialPriceData = {
+                  priceUsd: marketCapResult.price,
+                  priceSol: 0, // Will be updated when we get pool updates
+                  marketCap: marketCapResult.marketCap
+                };
+              }
+            }
             
-            // Update wallet-token pair with price/decimals
-            dbService.updateWalletTokenMarketData(
+            // Start monitoring immediately (even if initialPriceData is partial)
+            await this.poolMonitoringService.startMonitoring(
               walletAddress,
               tokenAddress,
-              txType as 'BUY' | 'SELL',
-              marketData
-            ).catch(() => {
-              // Silent fail for optional update
-            });
+              poolAddress,
+              maxDuration,
+              initialPriceData
+            );
+            console.log(`🔍 Started pool monitoring for first buy: ${walletAddress.substring(0, 8)}... - ${tokenAddress.substring(0, 8)}...`);
+          } catch (error: any) {
+            console.error(`Failed to start pool monitoring:`, error.message);
           }
-        }).catch(() => {
-          // Silent fail for optional price/decimals fetch
-        });
-      } else {
-        // Fallback: fetch market data if tracker didn't provide it
+        })();
+      } else if (txType === 'SELL' && this.poolMonitoringService) {
+        // Signal sell event to stop monitoring after 10 seconds
+        // Prepare sell price data from sell transaction
+        let sellPriceData: { priceUsd: number; priceSol: number; marketCap: number } | undefined;
+        if (marketCapResult && marketCapResult.price !== undefined && marketCapResult.marketCap !== undefined) {
+          // Get SOL price to calculate price in SOL
+          const solPriceUsd = await dbService.getLatestSolPrice();
+          if (solPriceUsd && solPriceUsd > 0) {
+            const priceSol = marketCapResult.price / solPriceUsd;
+            sellPriceData = {
+              priceUsd: marketCapResult.price,
+              priceSol: priceSol,
+              marketCap: marketCapResult.marketCap
+            };
+          }
+        }
+        
         try {
-          const fetchResult = await dbService.fetchMcapFromSolscan(tokenAddress);
-          
-          // Check if result indicates empty data (token not indexed yet)
-          if (fetchResult && fetchResult.isEmpty === true) {
-            isEmptyData = true;
-            console.log(`   ⏳ Token not indexed in Solscan yet, will retry in 60 seconds...`);
-          } else {
-            marketData = fetchResult;
-            if (marketData) {
-              if (marketData.market_cap !== null) {
-                console.log(`   MCap: ${marketData.market_cap}, Supply: ${marketData.supply || 'N/A'}, Price: ${marketData.price || 'N/A'}`);
-              } else {
-                console.log(`   MCap: Not available, Supply: ${marketData.supply || 'N/A'}, Price: ${marketData.price || 'N/A'}`);
-              }
-            } else {
-              console.log(`   Market data: Not available`);
-            }
-          }
+          this.poolMonitoringService.signalSell(walletAddress, tokenAddress, sellPriceData);
+          console.log(`🛑 Signaled sell event for pool monitoring: ${walletAddress.substring(0, 8)}... - ${tokenAddress.substring(0, 8)}...`);
         } catch (error: any) {
-          console.warn(`⚠️ Failed to fetch market data, continuing without it:`, error.message);
+          console.error(`Failed to signal sell event:`, error.message);
         }
       }
 
@@ -144,82 +198,27 @@ export class WalletTrackingService {
 
       // If this is a BUY event, record the open positions count
       if (txType === 'BUY') {
-        // Get current open positions count for this wallet
+        // Calculate open positions count based on buy/sell counts
         try {
-          const shyftApiKey = process.env.SHYFT_API_KEY;
-          let connection: Connection;
+          // Get buy/sell counts for all tokens held by this wallet
+          const buySellCounts = await dbService.getBuySellCountsPerToken(walletAddress);
           
-          if (shyftApiKey) {
-            const shyftRpcUrl = `https://rpc.shyft.to?api_key=${shyftApiKey}`;
-            connection = new Connection(shyftRpcUrl, 'confirmed');
-          } else {
-            const fallbackRpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-            connection = new Connection(fallbackRpcUrl, 'confirmed');
+          // Calculate open trades: for each token, if buys > sells, count as 1, else 0
+          let openTradeCount = 0;
+          for (const [mint, counts] of buySellCounts.entries()) {
+            if (counts.buyCount > counts.sellCount) {
+              openTradeCount += 1;
+            }
           }
           
-          const publicKey = new PublicKey(walletAddress);
-          
-          // Get parsed token accounts
-          const parsedTokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
-            programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
-          });
-          const parsed2022TokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
-            programId: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
-          });
-          
-          // Count only accounts with non-zero balance
-          const openPositionsCount = parsedTokenAccounts.value.filter(account => {
-            const parsedInfo = account.account.data.parsed?.info;
-            if (parsedInfo && parsedInfo.tokenAmount) {
-              return parseFloat(parsedInfo.tokenAmount.uiAmountString || '0') > 0;
-            }
-            return false;
-          }).length + parsed2022TokenAccounts.value.filter(account => {
-            const parsedInfo = account.account.data.parsed?.info;
-            if (parsedInfo && parsedInfo.tokenAmount) {
-              return parseFloat(parsedInfo.tokenAmount.uiAmountString || '0') > 0;
-            }
-            return false;
-          }).length;
-          
           // Update wallet stats (non-blocking)
-          dbService.updateWalletStatsOnBuy(walletAddress, openPositionsCount).catch((error) => {
+          dbService.updateWalletStatsOnBuy(walletAddress, openTradeCount).catch((error) => {
             console.error(`Failed to update wallet stats on buy:`, error);
           });
         } catch (error: any) {
           console.error(`Failed to get open positions count for wallet stats:`, error.message);
           // Don't throw - this is non-critical
         }
-      }
-
-      // If data was empty, schedule a retry after 60 seconds (non-blocking)
-      if (isEmptyData) {
-        setTimeout(async () => {
-          try {
-            console.log(`🔄 Retrying market data fetch for ${tokenAddress.substring(0, 8)}... after 60 seconds...`);
-            const retryMarketData = await dbService.fetchMcapFromSolscan(tokenAddress);
-            
-            if (retryMarketData && !retryMarketData.isEmpty) {
-              // Update the saved wallet-token pair with market data
-              await dbService.updateWalletTokenMarketData(
-                walletAddress,
-                tokenAddress,
-                txType as 'BUY' | 'SELL',
-                retryMarketData
-              );
-              
-              if (retryMarketData.market_cap !== null) {
-                console.log(`   ✅ Retry successful - MCap: ${retryMarketData.market_cap}, Supply: ${retryMarketData.supply || 'N/A'}`);
-              } else {
-                console.log(`   ✅ Retry successful - Supply: ${retryMarketData.supply || 'N/A'}, MCap: Not available`);
-              }
-            } else {
-              console.log(`   ⚠️ Token still not indexed, skipping update`);
-            }
-          } catch (error: any) {
-            console.warn(`⚠️ Error in market data retry:`, error.message);
-          }
-        }, 60000); // Retry after 60 seconds
       }
 
     } catch (error: any) {

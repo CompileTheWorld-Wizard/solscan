@@ -114,13 +114,16 @@ export function parseSwapTransactionOutput(parsedInstruction, transaction) {
         ? determineOutAmount()
         : base_amount_in;
 
+    const pool = parsedEvent?.pool
+
     const transactionEvent = {
         type: swapInstruction.name,
         user: signerPubkey,
         mint: mint,
         out_amount: amountOut,
         in_amount: amountIn,
-        price: formattedPrice
+        price: formattedPrice,
+        pool
     };
 
     return transactionEvent;

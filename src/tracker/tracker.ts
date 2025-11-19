@@ -53,6 +53,11 @@ class TransactionTracker {
     const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
     this.solanaConnection = new Connection(rpcUrl, "confirmed");
 
+    // Initialize wallet tracking service with Solana connection for pool monitoring
+    walletTrackingService.initialize(this.solanaConnection).catch(error => {
+      console.error('Failed to initialize wallet tracking service:', error);
+    });
+
     console.log("✅ Tracker initialized");
   }
 
@@ -61,7 +66,7 @@ class TransactionTracker {
    */
   setAddresses(addresses: string[]) {
     this.addresses = addresses.filter(addr => addr.trim().length > 0);
-    console.log('\n' + '='.repeat(60));
+    console.log('='.repeat(60));
     console.log('📍 ADDRESSES SET FROM WEB INTERFACE:');
     console.log('='.repeat(60));
     this.addresses.forEach((addr, index) => {
@@ -120,6 +125,7 @@ class TransactionTracker {
           console.log("Got tx:", sig, "slot:", currentSlot);
 
           const result = parseTransaction(data.transaction);
+          console.log(`Token address: ${result.mint_from}, ${result.mint_to}, Pool address: ${result.pool}`)
 
           // Save to database asynchronously (non-blocking)
           if (result) {
@@ -215,8 +221,11 @@ class TransactionTracker {
                           success: true,
                           marketCap,
                           tokenSupply: totalSupply,
-                          tokenAddress
-                        }
+                          tokenAddress,
+                          price: tokenPriceUsd,
+                          decimals: decimals
+                        },
+                        result.pool // Pass pool address for monitoring
                       ).catch(error => {
                         console.error(`Failed to track wallet-token pair: ${error.message}`);
                       });
@@ -234,14 +243,19 @@ class TransactionTracker {
                         console.error(`Failed to persist token prices for ${sig}:`, e?.message || e);
                       });
 
-                      // Track wallet without market cap
+                      // Track wallet without market cap (but with price)
                       walletTrackingService.trackWalletToken(
                         result.feePayer,
                         tokenAddress,
                         result.in_amount?.toString() || '0',
                         result.out_amount?.toString() || '0',
                         result.type,
-                        null
+                        {
+                          success: false,
+                          price: tokenPriceUsd,
+                          // No marketCap, tokenSupply, or decimals available
+                        },
+                        result.pool // Pass pool address for monitoring
                       ).catch(error => {
                         console.error(`Failed to track wallet-token pair: ${error.message}`);
                       });
@@ -420,7 +434,7 @@ class TransactionTracker {
     // Start token queue processor
     tokenQueueService.start();
 
-    console.log('\n' + '🚀 '.repeat(30));
+    console.log('🚀 '.repeat(30));
     console.log('STARTING TRANSACTION TRACKING');
     console.log('Using addresses from web interface inputs:');
     this.addresses.forEach((addr, index) => {

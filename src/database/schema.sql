@@ -93,6 +93,12 @@ CREATE TABLE IF NOT EXISTS wallets (
     first_sell_supply VARCHAR(100),
     first_sell_price NUMERIC(20, 8),
     first_sell_decimals INTEGER,
+    peak_buy_to_sell_price_sol NUMERIC(20, 9),
+    peak_buy_to_sell_price_usd NUMERIC(20, 9),
+    peak_buy_to_sell_mcap NUMERIC(20, 2),
+    peak_sell_to_end_price_sol NUMERIC(20, 9),
+    peak_sell_to_end_price_usd NUMERIC(20, 9),
+    peak_sell_to_end_mcap NUMERIC(20, 2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(wallet_address, token_address)
 );

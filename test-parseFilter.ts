@@ -31,7 +31,7 @@ class ParseFilterTester {
       // "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", // RaydiumCpmm
       // "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo", // MeteoraDLMM
       // "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK", // RaydiumClmm
-      // "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", // PumpAmm
+      "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", // PumpAmm
       // "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", // PumpFun
     ];
   }
@@ -242,7 +242,7 @@ class ParseFilterTester {
     this.successCount = 0;
     this.failureCount = 0;
 
-    console.log('\n' + '🚀 '.repeat(30));
+    console.log('🚀 '.repeat(30));
     console.log('STARTING PARSEFILTER TEST');
     console.log(`Will process up to ${MAX_TRANSACTIONS_TO_TEST} transactions`);
     console.log('Using test addresses:');

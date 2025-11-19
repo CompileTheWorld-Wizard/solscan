@@ -1335,52 +1335,25 @@ app.delete("/api/wallets/:walletAddress", requireAuth, async (req, res) => {
 });
 
 /**
- * Get token account count for a wallet using getTokenAccountsByOwner
+ * Get open positions count for a wallet based on buy/sell counts
+ * For each token: if buys > sells, count as 1 open position, else 0
  * @param walletAddress - The wallet address to check
- * @returns The count of token accounts (open positions)
+ * @returns The count of open positions (tokens where buys > sells)
  */
 async function getOpenPositionsCount(walletAddress: string): Promise<number> {
   try {
-    // Initialize Shyft RPC connection
-    const shyftApiKey = process.env.SHYFT_API_KEY;
-    let connection: Connection;
+    // Get buy/sell counts for all tokens held by this wallet
+    const buySellCounts = await dbService.getBuySellCountsPerToken(walletAddress);
     
-    if (shyftApiKey) {
-      // Shyft RPC endpoint format: https://rpc.shyft.to?api_key=YOUR_API_KEY
-      const shyftRpcUrl = `https://rpc.shyft.to?api_key=${shyftApiKey}`;
-      connection = new Connection(shyftRpcUrl, 'confirmed');
-    } else {
-      // Fallback to default Solana RPC or SOLANA_RPC_URL if available
-      const fallbackRpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-      connection = new Connection(fallbackRpcUrl, 'confirmed');
+    // Calculate open trades: for each token, if buys > sells, count as 1, else 0
+    let openTradeCount = 0;
+    for (const [mint, counts] of buySellCounts.entries()) {
+      if (counts.buyCount > counts.sellCount) {
+        openTradeCount += 1;
+      }
     }
     
-    const publicKey = new PublicKey(walletAddress);
-    
-    // Use getParsedTokenAccountsByOwner for better balance checking
-    const parsedTokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
-      programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
-    });
-    const parsed2022TokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
-      programId: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
-    });
-    
-    // Count only accounts with non-zero balance
-    const nonZeroBalanceCount = parsedTokenAccounts.value.filter(account => {
-      const parsedInfo = account.account.data.parsed?.info;
-      if (parsedInfo && parsedInfo.tokenAmount) {
-        return parseFloat(parsedInfo.tokenAmount.uiAmountString || '0') > 0;
-      }
-      return false;
-    }).length + parsed2022TokenAccounts.value.filter(account => {
-      const parsedInfo = account.account.data.parsed?.info;
-      if (parsedInfo && parsedInfo.tokenAmount) {
-        return parseFloat(parsedInfo.tokenAmount.uiAmountString || '0') > 0;
-      }
-      return false;
-    }).length;
-    
-    return nonZeroBalanceCount;
+    return openTradeCount;
   } catch (error: any) {
     console.error(`Error getting open positions count for ${walletAddress}:`, error);
     return 0; // Return 0 on error
@@ -1561,45 +1534,9 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         ? firstBuy.blockNumber - devBuyBlockNumber
         : null;
       
-      // Find peak price before first sell (highest market cap before first sell)
-      let tokenPeakPriceBeforeFirstSell = null;
-      if (sells.length > 0 && firstBuy) {
-        const firstSellTime = sells[0].blockTimestamp ? new Date(sells[0].blockTimestamp).getTime() : new Date(sells[0].created_at).getTime();
-        const buyTime = firstBuy.blockTimestamp ? new Date(firstBuy.blockTimestamp).getTime() : new Date(firstBuy.created_at).getTime();
-        
-        // Find transactions between buy and first sell
-        const transactionsBeforeFirstSell = transactions.filter((tx: any) => {
-          const txTime = tx.blockTimestamp ? new Date(tx.blockTimestamp).getTime() : new Date(tx.created_at).getTime();
-          return txTime >= buyTime && txTime < firstSellTime && tx.marketCap;
-        });
-        
-        if (transactionsBeforeFirstSell.length > 0) {
-          const peakTx = transactionsBeforeFirstSell.reduce((max: any, tx: any) => {
-            return (!max || (tx.marketCap && parseFloat(tx.marketCap) > parseFloat(max.marketCap || 0))) ? tx : max;
-          }, null);
-          tokenPeakPriceBeforeFirstSell = peakTx?.marketCap ? parseFloat(peakTx.marketCap) : null;
-        }
-      }
-      
-      // Find peak price 10 seconds after first sell
-      let tokenPeakPrice10sAfterFirstSell = null;
-      if (sells.length > 0) {
-        const firstSellTime = sells[0].blockTimestamp ? new Date(sells[0].blockTimestamp).getTime() : new Date(sells[0].created_at).getTime();
-        const tenSecondsAfter = firstSellTime + (10 * 1000);
-        
-        // Find transactions within 10 seconds after first sell
-        const transactionsAfterFirstSell = transactions.filter((tx: any) => {
-          const txTime = tx.blockTimestamp ? new Date(tx.blockTimestamp).getTime() : new Date(tx.created_at).getTime();
-          return txTime >= firstSellTime && txTime <= tenSecondsAfter && tx.marketCap;
-        });
-        
-        if (transactionsAfterFirstSell.length > 0) {
-          const peakTx = transactionsAfterFirstSell.reduce((max: any, tx: any) => {
-            return (!max || (tx.marketCap && parseFloat(tx.marketCap) > parseFloat(max.marketCap || 0))) ? tx : max;
-          }, null);
-          tokenPeakPrice10sAfterFirstSell = peakTx?.marketCap ? parseFloat(peakTx.marketCap) : null;
-        }
-      }
+      // Get peak prices from database (pool monitoring data)
+      const tokenPeakPriceBeforeFirstSell = trade.peak_buy_to_sell_price_usd ? parseFloat(trade.peak_buy_to_sell_price_usd.toString()) : null;
+      const tokenPeakPrice10sAfterFirstSell = trade.peak_sell_to_end_price_usd ? parseFloat(trade.peak_sell_to_end_price_usd.toString()) : null;
       
       // Get buy timestamp for holding time calculation
       const buyTimestamp = firstBuy ? (firstBuy.blockTimestamp || firstBuy.created_at) : null;
