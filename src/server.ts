@@ -1351,6 +1351,7 @@ async function getWalletBuySellCounts(walletAddress: string): Promise<{ totalBuy
 /**
  * GET /api/dashboard-data/:wallet - Get dashboard data for a wallet
  * Returns comprehensive token data with all calculated metrics
+ * Query params: page (default: 1), limit (default: 50)
  */
 app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
   try {
@@ -1358,25 +1359,47 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
     const SOL_MINT = 'So11111111111111111111111111111111111111112';
     const SOL_DECIMALS = 9;
     
-    // Get total buy/sell counts
+    // Get pagination parameters
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const offset = (page - 1) * limit;
+    
+    // Get total buy/sell counts (from ALL data, not paginated)
     const { totalBuys, totalSells } = await getWalletBuySellCounts(wallet);
     
-    // Get average open position
+    // Get average open position (from ALL data, not paginated)
     const averageOpenPosition = await dbService.getWalletAverageOpenPosition(wallet);
     
-    // Get all wallet trades
+    // Get all wallet trades (we need all for analytics, but will paginate the processing)
     const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
     const walletTrades = walletTradesResult.data;
     
     if (!walletTrades || walletTrades.length === 0) {
-      return res.json({ success: true, data: [], totalBuys, totalSells, averageOpenPosition });
+      return res.json({ 
+        success: true, 
+        data: [], 
+        totalBuys, 
+        totalSells, 
+        averageOpenPosition,
+        totalCount: 0,
+        page,
+        limit,
+        totalPages: 0
+      });
     }
     
-    // Get all token mints
-    const tokenMints = walletTrades.map((trade: any) => trade.token_address);
+    // Get total count for pagination (before filtering/pagination)
+    const totalCount = walletTrades.length;
     
-    // Get token information for all tokens
-    const tokens = await dbService.getTokensByMints(tokenMints);
+    // Apply pagination to wallet trades
+    const paginatedWalletTrades = walletTrades.slice(offset, offset + limit);
+    
+    // Get all token mints (for all trades, to get token info efficiently)
+    const allTokenMints = walletTrades.map((trade: any) => trade.token_address);
+    const uniqueTokenMints = [...new Set(allTokenMints)];
+    
+    // Get token information for all tokens (fetch once for all trades)
+    const tokens = await dbService.getTokensByMints(uniqueTokenMints);
     const tokenInfoMap = new Map();
     tokens.forEach((token: any) => {
       tokenInfoMap.set(token.mint_address, token);
@@ -1398,8 +1421,8 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
       return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
     };
     
-    // Process each token
-    const dashboardData = await Promise.all(walletTrades.map(async (trade: any) => {
+    // Process only the paginated tokens
+    const dashboardData = await Promise.all(paginatedWalletTrades.map(async (trade: any) => {
       const token = trade.token_address;
       const tokenInfo = tokenInfoMap.get(token) || null;
       
@@ -1624,7 +1647,19 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
       };
     }));
     
-    res.json({ success: true, data: dashboardData, totalBuys, totalSells, averageOpenPosition });
+    const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+    
+    res.json({ 
+      success: true, 
+      data: dashboardData, 
+      totalBuys, 
+      totalSells, 
+      averageOpenPosition,
+      totalCount,
+      page,
+      limit,
+      totalPages
+    });
   } catch (error: any) {
     console.error('Dashboard data error:', error);
     res.status(500).json({ success: false, error: error.message });

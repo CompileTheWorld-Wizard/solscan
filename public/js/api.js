@@ -318,10 +318,17 @@ export async function downloadAllTokensExcel(walletAddress) {
 
 /**
  * Fetch dashboard data for a wallet
+ * @param {string} walletAddress - Wallet address
+ * @param {number} page - Page number (default: 1)
+ * @param {number} limit - Items per page (default: 50)
  */
-export async function fetchDashboardData(walletAddress) {
+export async function fetchDashboardData(walletAddress, page = 1, limit = 50) {
     try {
-        const response = await fetch(`/api/dashboard-data/${encodeURIComponent(walletAddress)}`, {
+        const queryParams = new URLSearchParams({
+            page: String(page),
+            limit: String(limit)
+        });
+        const response = await fetch(`/api/dashboard-data/${encodeURIComponent(walletAddress)}?${queryParams}`, {
             method: 'GET',
             credentials: 'include'
         });
@@ -332,7 +339,17 @@ export async function fetchDashboardData(walletAddress) {
         }
 
         const data = await response.json();
-        return { success: true, data: data.data || [], totalBuys: data.totalBuys || 0, totalSells: data.totalSells || 0, averageOpenPosition: data.averageOpenPosition || 0 };
+        return { 
+            success: true, 
+            data: data.data || [], 
+            totalBuys: data.totalBuys || 0, 
+            totalSells: data.totalSells || 0, 
+            averageOpenPosition: data.averageOpenPosition || 0,
+            totalCount: data.totalCount || 0,
+            page: data.page || page,
+            limit: data.limit || limit,
+            totalPages: data.totalPages || 1
+        };
     } catch (error) {
         console.error('Error fetching dashboard data:', error);
         return { success: false, error: error.message };

@@ -15,6 +15,8 @@ let averageOpenPosition = 0;
 // Pagination state
 let currentPage = 1;
 let itemsPerPage = 50;
+let totalCount = 0; // Total count from backend (all items, not filtered)
+let totalPages = 1; // Total pages from backend
 
 // Sorting state
 let sortColumn = null;
@@ -1490,16 +1492,21 @@ export async function loadDashboardData() {
     }
     
     try {
-        const result = await api.fetchDashboardData(walletAddress);
+        const result = await api.fetchDashboardData(walletAddress, currentPage, itemsPerPage);
         if (result.success && result.data) {
             // Update data smoothly
             dashboardData = result.data;
             
-            // Store total buys/sells counts
+            // Store pagination info from backend
+            totalCount = result.totalCount || 0;
+            totalPages = result.totalPages || 1;
+            currentPage = result.page || currentPage;
+            
+            // Store total buys/sells counts (from ALL data, not paginated)
             totalBuys = result.totalBuys || 0;
             totalSells = result.totalSells || 0;
             
-            // Store average open position
+            // Store average open position (from ALL data, not paginated)
             averageOpenPosition = result.averageOpenPosition || 0;
             
             // Update total buys display smoothly
@@ -1539,13 +1546,11 @@ export async function loadDashboardData() {
                 }, 150);
             }
             
-            // Calculate max sells across all tokens
+            // Calculate max sells across current page tokens
             maxSells = Math.max(...dashboardData.map(token => (token.sells || []).length), 0);
             
-            // Reset to first page when loading new data
-            currentPage = 1;
-            
             // Apply current filters (this will re-render the table)
+            // Note: Filters are applied client-side on the current page data
             applyFilters();
             
             // Smoothly restore table opacity
@@ -1857,11 +1862,7 @@ function renderDashboardTable() {
     
     if (!thead || !tbody) return;
     
-    // Calculate pagination
-    const totalItems = filteredData.length;
-    const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
-    
-    // Ensure currentPage is valid
+    // Ensure currentPage is valid (based on backend pagination)
     if (currentPage > totalPages) {
         currentPage = totalPages;
     }
@@ -1869,13 +1870,12 @@ function renderDashboardTable() {
         currentPage = 1;
     }
     
-    // Sort filtered data before pagination
+    // Sort filtered data (client-side sorting on current page)
     sortFilteredData();
     
-    // Get data for current page
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const dataToRender = filteredData.slice(startIndex, endIndex);
+    // Use filtered data directly (already paginated from backend)
+    // Note: Filters are applied client-side on the current page
+    const dataToRender = filteredData;
     
     // Get visible columns based on visibility settings
     const visibleColumns = COLUMN_DEFINITIONS.filter(col => columnVisibility[col.key] !== false);
@@ -2092,8 +2092,10 @@ function renderDashboardTable() {
         tbody.appendChild(row);
     });
     
-    // Render pagination controls
-    renderPagination(totalPages, totalItems, startIndex, endIndex);
+    // Render pagination controls (using backend pagination info)
+    const paginationStartIndex = (currentPage - 1) * itemsPerPage;
+    const paginationEndIndex = Math.min(paginationStartIndex + dataToRender.length, totalCount);
+    renderPagination(totalPages, totalCount, paginationStartIndex, paginationEndIndex);
 }
 
 /**
@@ -2143,10 +2145,11 @@ function renderPagination(totalPages, totalItems, startIndex, endIndex) {
     });
     // Set the value after options are added, as a string
     itemsPerPageSelect.value = String(itemsPerPage);
-    itemsPerPageSelect.addEventListener('change', (e) => {
+    itemsPerPageSelect.addEventListener('change', async (e) => {
         itemsPerPage = parseInt(e.target.value, 10);
         currentPage = 1;
-        renderDashboardTable();
+        // Reload data from backend with new page size
+        await loadDashboardData();
     });
     itemsPerPageContainer.appendChild(itemsPerPageSelect);
     controls.appendChild(itemsPerPageContainer);
@@ -2156,17 +2159,17 @@ function renderPagination(totalPages, totalItems, startIndex, endIndex) {
     nav.style.cssText = 'display: flex; align-items: center; gap: 5px;';
     
     // First button
-    const firstBtn = createPaginationButton('', currentPage === 1, () => {
+    const firstBtn = createPaginationButton('', currentPage === 1, async () => {
         currentPage = 1;
-        renderDashboardTable();
+        await loadDashboardData();
     }, 'first');
     nav.appendChild(firstBtn);
     
     // Previous button
-    const prevBtn = createPaginationButton('', currentPage === 1, () => {
+    const prevBtn = createPaginationButton('', currentPage === 1, async () => {
         if (currentPage > 1) {
             currentPage--;
-            renderDashboardTable();
+            await loadDashboardData();
         }
     }, 'prev');
     nav.appendChild(prevBtn);
@@ -2181,9 +2184,9 @@ function renderPagination(totalPages, totalItems, startIndex, endIndex) {
     }
     
     if (startPage > 1) {
-        const firstPageBtn = createPaginationButton('1', false, () => {
+        const firstPageBtn = createPaginationButton('1', false, async () => {
             currentPage = 1;
-            renderDashboardTable();
+            await loadDashboardData();
         });
         nav.appendChild(firstPageBtn);
         
@@ -2196,9 +2199,9 @@ function renderPagination(totalPages, totalItems, startIndex, endIndex) {
     }
     
     for (let i = startPage; i <= endPage; i++) {
-        const pageBtn = createPaginationButton(i.toString(), i === currentPage, () => {
+        const pageBtn = createPaginationButton(i.toString(), i === currentPage, async () => {
             currentPage = i;
-            renderDashboardTable();
+            await loadDashboardData();
         });
         if (i === currentPage) {
             pageBtn.style.background = 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)';
@@ -2215,26 +2218,26 @@ function renderPagination(totalPages, totalItems, startIndex, endIndex) {
             nav.appendChild(ellipsis);
         }
         
-        const lastPageBtn = createPaginationButton(totalPages.toString(), false, () => {
+        const lastPageBtn = createPaginationButton(totalPages.toString(), false, async () => {
             currentPage = totalPages;
-            renderDashboardTable();
+            await loadDashboardData();
         });
         nav.appendChild(lastPageBtn);
     }
     
     // Next button
-    const nextBtn = createPaginationButton('', currentPage === totalPages, () => {
+    const nextBtn = createPaginationButton('', currentPage === totalPages, async () => {
         if (currentPage < totalPages) {
             currentPage++;
-            renderDashboardTable();
+            await loadDashboardData();
         }
     }, 'next');
     nav.appendChild(nextBtn);
     
     // Last button
-    const lastBtn = createPaginationButton('', currentPage === totalPages, () => {
+    const lastBtn = createPaginationButton('', currentPage === totalPages, async () => {
         currentPage = totalPages;
-        renderDashboardTable();
+        await loadDashboardData();
     }, 'last');
     nav.appendChild(lastBtn);
     
