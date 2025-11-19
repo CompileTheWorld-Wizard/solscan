@@ -198,13 +198,79 @@ export class WalletTrackingService {
       if (txType === 'BUY') {
         // Calculate open positions count based on buy/sell counts
         try {
-          // Get buy/sell counts for all tokens held by this wallet
-          const buySellCounts = await dbService.getBuySellCountsPerToken(walletAddress);
+          // Step 1: Fetch all holding tokens using getTokenAccountsByOwner (actual token accounts)
+          const shyftApiKey = process.env.SHYFT_API_KEY;
+          let connection: Connection;
           
-          // Calculate open trades: for each token, if buys > sells, count as 1, else 0
+          if (shyftApiKey) {
+            const shyftRpcUrl = `https://rpc.shyft.to?api_key=${shyftApiKey}`;
+            connection = new Connection(shyftRpcUrl, 'confirmed');
+          } else {
+            const fallbackRpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+            connection = new Connection(fallbackRpcUrl, 'confirmed');
+          }
+          
+          const publicKey = new PublicKey(walletAddress);
+          
+          // Get parsed token accounts (SPL Token Program)
+          const parsedTokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
+            programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+          });
+          
+          // Get parsed token accounts (SPL Token-2022 Program)
+          const parsed2022TokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, {
+            programId: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
+          });
+          
+          // Get all token mints that have non-zero balance
+          const holdingTokenMints = new Set<string>();
+          
+          // Process SPL Token accounts
+          for (const account of parsedTokenAccounts.value) {
+            const parsedInfo = account.account.data.parsed?.info;
+            if (parsedInfo && parsedInfo.tokenAmount) {
+              const balance = parseFloat(parsedInfo.tokenAmount.uiAmountString || '0');
+              if (balance > 0) {
+                const mint = parsedInfo.mint;
+                if (mint) {
+                  holdingTokenMints.add(mint);
+                }
+              }
+            }
+          }
+          
+          // Process Token-2022 accounts
+          for (const account of parsed2022TokenAccounts.value) {
+            const parsedInfo = account.account.data.parsed?.info;
+            if (parsedInfo && parsedInfo.tokenAmount) {
+              const balance = parseFloat(parsedInfo.tokenAmount.uiAmountString || '0');
+              if (balance > 0) {
+                const mint = parsedInfo.mint;
+                if (mint) {
+                  holdingTokenMints.add(mint);
+                }
+              }
+            }
+          }
+          
+          // Step 2: For each holding token, calculate buy/sell counts individually
+          const SOL_MINT = 'So11111111111111111111111111111111111111112';
           let openTradeCount = 0;
-          for (const [mint, counts] of buySellCounts.entries()) {
-            if (counts.buyCount > counts.sellCount) {
+          
+          for (const tokenMint of holdingTokenMints) {
+            // Skip SOL mint
+            if (tokenMint === SOL_MINT) {
+              continue;
+            }
+            
+            // Calculate buy count for this specific token
+            const buyCount = await dbService.getBuyCountForToken(walletAddress, tokenMint);
+            
+            // Calculate sell count for this specific token
+            const sellCount = await dbService.getSellCountForToken(walletAddress, tokenMint);
+            
+            // Only count if buyCount > sellCount
+            if (buyCount > sellCount) {
               openTradeCount += 1;
             }
           }

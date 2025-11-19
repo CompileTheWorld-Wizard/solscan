@@ -1659,57 +1659,46 @@ class DatabaseService {
   }
 
   /**
-   * Get buy and sell counts for all tokens held by a wallet
-   * Returns a map of token address to { buyCount, sellCount }
+   * Get buy count for a specific wallet-token pair
    */
-  async getBuySellCountsPerToken(walletAddress: string): Promise<Map<string, { buyCount: number; sellCount: number }>> {
+  async getBuyCountForToken(walletAddress: string, tokenAddress: string): Promise<number> {
     try {
       const SOL_MINT = 'So11111111111111111111111111111111111111112';
-      const result = new Map<string, { buyCount: number; sellCount: number }>();
-      
-      // Get all unique tokens that the wallet has traded from the wallets table
-      const tokensQuery = `
-        SELECT DISTINCT token_address
-        FROM wallets
-        WHERE wallet_address = $1
+      const buyQuery = `
+        SELECT COUNT(*) as count
+        FROM transactions
+        WHERE fee_payer = $1
+          AND UPPER(TRIM(type)) = 'BUY'
+          AND mint_from = $2
+          AND mint_to = $3
       `;
-      
-      const tokensResult = await this.pool.query(tokensQuery, [walletAddress]);
-      const tokens = tokensResult.rows.map((row: any) => row.token_address);
-      
-      // For each token, count buys and sells
-      for (const tokenAddress of tokens) {
-        // Count buys: wallet buys token (mint_to = token, mint_from = SOL)
-        const buyQuery = `
-          SELECT COUNT(*) as count
-          FROM transactions
-          WHERE fee_payer = $1
-            AND UPPER(TRIM(type)) = 'BUY'
-            AND mint_from = $2
-            AND mint_to = $3
-        `;
-        const buyResult = await this.pool.query(buyQuery, [walletAddress, SOL_MINT, tokenAddress]);
-        const buyCount = parseInt(buyResult.rows[0]?.count || '0', 10);
-        
-        // Count sells: wallet sells token (mint_from = token, mint_to = SOL)
-        const sellQuery = `
-          SELECT COUNT(*) as count
-          FROM transactions
-          WHERE fee_payer = $1
-            AND UPPER(TRIM(type)) = 'SELL'
-            AND mint_from = $2
-            AND mint_to = $3
-        `;
-        const sellResult = await this.pool.query(sellQuery, [walletAddress, tokenAddress, SOL_MINT]);
-        const sellCount = parseInt(sellResult.rows[0]?.count || '0', 10);
-        
-        result.set(tokenAddress, { buyCount, sellCount });
-      }
-      
-      return result;
+      const buyResult = await this.pool.query(buyQuery, [walletAddress, SOL_MINT, tokenAddress]);
+      return parseInt(buyResult.rows[0]?.count || '0', 10);
     } catch (error) {
-      console.error(`Failed to get buy/sell counts per token for ${walletAddress}:`, error);
-      return new Map();
+      console.error(`Failed to get buy count for ${walletAddress} - ${tokenAddress}:`, error);
+      return 0;
+    }
+  }
+
+  /**
+   * Get sell count for a specific wallet-token pair
+   */
+  async getSellCountForToken(walletAddress: string, tokenAddress: string): Promise<number> {
+    try {
+      const SOL_MINT = 'So11111111111111111111111111111111111111112';
+      const sellQuery = `
+        SELECT COUNT(*) as count
+        FROM transactions
+        WHERE fee_payer = $1
+          AND UPPER(TRIM(type)) = 'SELL'
+          AND mint_from = $2
+          AND mint_to = $3
+      `;
+      const sellResult = await this.pool.query(sellQuery, [walletAddress, tokenAddress, SOL_MINT]);
+      return parseInt(sellResult.rows[0]?.count || '0', 10);
+    } catch (error) {
+      console.error(`Failed to get sell count for ${walletAddress} - ${tokenAddress}:`, error);
+      return 0;
     }
   }
 

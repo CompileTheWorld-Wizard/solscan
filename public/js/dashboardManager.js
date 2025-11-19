@@ -131,6 +131,8 @@ const DATA_POINTS = [
     { key: 'walletBuyAmountSOL', label: 'Wallet Buy Amount in SOL', type: 'sol', field: 'walletBuyAmountSOL' },
     { key: 'walletGasAndFeesAmount', label: 'Wallet Gas & Fees Amount', type: 'sol', field: 'walletGasAndFeesAmount' },
     { key: 'walletBuyMarketCap', label: 'Wallet Buy Market Cap', type: 'marketcap', field: 'walletBuyMarketCap' },
+    { key: 'tokenPeakMarketCapBeforeFirstSell', label: 'Token Peak Market Cap Before 1st Sell', type: 'marketcap', field: 'tokenPeakMarketCapBeforeFirstSell' },
+    { key: 'tokenPeakMarketCap10sAfterFirstSell', label: 'Token Peak Market Cap 10s After 1st Sell', type: 'marketcap', field: 'tokenPeakMarketCap10sAfterFirstSell' },
     { key: 'walletBuyBlockNumberAfterDev', label: 'Wallet Block # after dev', type: 'marketcap', field: 'walletBuyBlockNumberAfterDev' },
     { key: 'walletBuyPositionAfterDev', label: 'Wallet Position after dev', type: 'marketcap', field: 'walletBuyPositionAfterDev' },
     

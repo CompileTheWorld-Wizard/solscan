@@ -1335,32 +1335,6 @@ app.delete("/api/wallets/:walletAddress", requireAuth, async (req, res) => {
 });
 
 /**
- * Get open positions count for a wallet based on buy/sell counts
- * For each token: if buys > sells, count as 1 open position, else 0
- * @param walletAddress - The wallet address to check
- * @returns The count of open positions (tokens where buys > sells)
- */
-async function getOpenPositionsCount(walletAddress: string): Promise<number> {
-  try {
-    // Get buy/sell counts for all tokens held by this wallet
-    const buySellCounts = await dbService.getBuySellCountsPerToken(walletAddress);
-    
-    // Calculate open trades: for each token, if buys > sells, count as 1, else 0
-    let openTradeCount = 0;
-    for (const [mint, counts] of buySellCounts.entries()) {
-      if (counts.buyCount > counts.sellCount) {
-        openTradeCount += 1;
-      }
-    }
-    
-    return openTradeCount;
-  } catch (error: any) {
-    console.error(`Error getting open positions count for ${walletAddress}:`, error);
-    return 0; // Return 0 on error
-  }
-}
-
-/**
  * Get total buy and sell transaction counts for a wallet
  * @param walletAddress - The wallet address to check
  * @returns Object with totalBuys and totalSells counts
