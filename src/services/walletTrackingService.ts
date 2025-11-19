@@ -315,6 +315,15 @@ export class WalletTrackingService {
       return [];
     }
   }
+
+  /**
+   * Cleanup - clear pool monitoring when tracking stops
+   */
+  async cleanup(): Promise<void> {
+    if (this.poolMonitoringService) {
+      await this.poolMonitoringService.cleanup();
+    }
+  }
 }
 
 // Export singleton instance

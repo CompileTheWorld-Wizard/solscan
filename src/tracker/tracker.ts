@@ -428,6 +428,18 @@ class TransactionTracker {
       this.initialize();
     }
 
+    // Ensure any previous stream is completely closed
+    if (this.currentStream) {
+      try {
+        this.currentStream.end();
+        this.currentStream = null;
+      } catch (error) {
+        // Ignore errors
+      }
+      // Wait for stream to fully close
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
     this.isRunning = true;
     this.shouldStop = false;
 
@@ -497,9 +509,47 @@ class TransactionTracker {
     // Stop token queue processor
     tokenQueueService.stop();
 
-    // End current stream if exists
+    // Cleanup pool monitoring service
+    await walletTrackingService.cleanup().catch(error => {
+      console.error('Failed to cleanup pool monitoring service:', error);
+    });
+
+    // Clear old subscription by sending empty subscription request before ending stream
     if (this.currentStream) {
       try {
+        // Send empty subscription to clear old addresses from server
+        const emptyReq: SubscribeRequest = {
+          slots: {},
+          accounts: {},
+          transactions: {},
+          blocks: {},
+          blocksMeta: {},
+          accountsDataSlice: [],
+          transactionsStatus: {},
+          entry: {}
+        };
+        
+        // Send empty subscription to clear old subscription
+        await new Promise<void>((resolve) => {
+          try {
+            this.currentStream.write(emptyReq, (err: any) => {
+              if (err) {
+                console.error("Error sending empty subscription:", err);
+              } else {
+                console.log("✅ Sent empty subscription to clear old addresses");
+              }
+              resolve();
+            });
+          } catch (error) {
+            console.error("Error writing empty subscription:", error);
+            resolve();
+          }
+        });
+
+        // Wait a bit for the empty subscription to be processed
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        // Now end the stream
         this.currentStream.end();
       } catch (error) {
         console.error("Error ending stream:", error);
@@ -509,7 +559,13 @@ class TransactionTracker {
     // Wait a bit for cleanup
     await new Promise(resolve => setTimeout(resolve, 500));
 
+    // Clear stream reference
+    this.currentStream = null;
     this.isRunning = false;
+    
+    // Clear addresses to ensure fresh start next time
+    this.addresses = [];
+    
     return { success: true, message: "Tracker stopped successfully" };
   }
 

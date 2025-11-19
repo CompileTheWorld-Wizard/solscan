@@ -855,20 +855,64 @@ class LiquidityPoolMonitor {
   }
 
   async cleanup(): Promise<void> {
+    console.log('🧹 Cleaning up pool monitoring service...');
+    
     this.shouldStop = true;
     this.isRunning = false;
-    if (this.currentStream) {
+    
+    // Clear old subscription by sending empty subscription request before ending stream
+    if (this.currentStream && this.isStreaming) {
       try {
+        // Send empty subscription to clear old pools from server
+        const emptyReq: SubscribeRequest = {
+          slots: {},
+          accounts: {},
+          transactions: {},
+          blocks: {},
+          blocksMeta: {},
+          accountsDataSlice: [],
+          transactionsStatus: {},
+          entry: {}
+        };
+        
+        // Send empty subscription to clear old subscription
+        await new Promise<void>((resolve) => {
+          try {
+            this.currentStream.write(emptyReq, (err: any) => {
+              if (err) {
+                console.error("Error sending empty subscription:", err);
+              } else {
+                console.log("✅ Sent empty subscription to clear old pools");
+              }
+              resolve();
+            });
+          } catch (error) {
+            console.error("Error writing empty subscription:", error);
+            resolve();
+          }
+        });
+
+        // Wait a bit for the empty subscription to be processed
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        // Now end the stream
         this.currentStream.end();
       } catch (error) {
-        // Ignore errors
+        console.error("Error ending stream:", error);
       }
     }
+    
+    // Wait a bit for cleanup
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    // Clear all sessions and pools
     this.sessions.clear();
     this.poolToSessions.clear();
     this.monitoredPools.clear();
     this.isStreaming = false;
     this.currentStream = null;
+    
+    console.log('✅ Pool monitoring service cleaned up');
   }
 }
 
