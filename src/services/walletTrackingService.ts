@@ -193,10 +193,8 @@ export class WalletTrackingService {
         }
       }
 
-      // Save wallet-token pair to database (save first even if market data is empty)
-      await dbService.saveWalletTokenPair(walletAddress, tokenAddress, txType as 'BUY' | 'SELL', amount, marketData);
-
-      // If this is a BUY event, record the open positions count
+      // If this is a BUY event, calculate and record the open positions count
+      let openPositionCount: number | null = null;
       if (txType === 'BUY') {
         // Calculate open positions count based on buy/sell counts
         try {
@@ -211,15 +209,16 @@ export class WalletTrackingService {
             }
           }
           
-          // Update wallet stats (non-blocking)
-          dbService.updateWalletStatsOnBuy(walletAddress, openTradeCount).catch((error) => {
-            console.error(`Failed to update wallet stats on buy:`, error);
-          });
+          openPositionCount = openTradeCount;
         } catch (error: any) {
           console.error(`Failed to get open positions count for wallet stats:`, error.message);
-          // Don't throw - this is non-critical
+          // Don't throw - this is non-critical, will save with null
         }
       }
+
+      // Save wallet-token pair to database (save first even if market data is empty)
+      // Include open_position_count for BUY events
+      await dbService.saveWalletTokenPair(walletAddress, tokenAddress, txType as 'BUY' | 'SELL', amount, marketData, openPositionCount);
 
     } catch (error: any) {
       console.error(`❌ Error tracking wallet-token pair:`, error.message);

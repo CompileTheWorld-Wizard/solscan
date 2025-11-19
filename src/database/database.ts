@@ -173,16 +173,6 @@ class DatabaseService {
         CREATE INDEX IF NOT EXISTS idx_wallets_first_buy ON wallets(first_buy_timestamp);
         CREATE INDEX IF NOT EXISTS idx_wallets_first_sell ON wallets(first_sell_timestamp);
 
-        CREATE TABLE IF NOT EXISTS wallet_stats (
-          wallet_address VARCHAR(100) PRIMARY KEY,
-          buy_event_count INTEGER DEFAULT 0,
-          open_position_total INTEGER DEFAULT 0,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_wallet_stats_address ON wallet_stats(wallet_address);
-
         CREATE TABLE IF NOT EXISTS credentials (
           id SERIAL PRIMARY KEY,
           password_hash VARCHAR(255) NOT NULL,
@@ -344,24 +334,18 @@ class DatabaseService {
         console.warn('⚠️ Failed to add peak price columns (may already exist):', error);
       }
 
-      // Migration: Create wallet_stats table if it doesn't exist (for existing databases)
+      // Migration: Add open_position_count column to wallets table if it doesn't exist
       try {
-        const hasWalletStats = await this.tableExists('wallet_stats');
-        if (!hasWalletStats) {
+        const hasOpenPositionCount = await this.columnExists('wallets', 'open_position_count');
+        if (!hasOpenPositionCount) {
           await this.pool.query(`
-            CREATE TABLE IF NOT EXISTS wallet_stats (
-              wallet_address VARCHAR(100) PRIMARY KEY,
-              buy_event_count INTEGER DEFAULT 0,
-              open_position_total INTEGER DEFAULT 0,
-              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE INDEX IF NOT EXISTS idx_wallet_stats_address ON wallet_stats(wallet_address);
+            ALTER TABLE wallets 
+            ADD COLUMN open_position_count INTEGER
           `);
-          console.log('✅ Created wallet_stats table');
+          console.log('✅ Added open_position_count column to wallets table');
         }
       } catch (error) {
-        console.warn('⚠️ Failed to create wallet_stats table (may already exist):', error);
+        console.warn('⚠️ Failed to add open_position_count column (may already exist):', error);
       }
 
       this.isInitialized = true;
@@ -812,52 +796,26 @@ class DatabaseService {
    * Update wallet stats when a buy event occurs
    * Increments buy_event_count and adds current open positions to open_position_total
    */
-  async updateWalletStatsOnBuy(walletAddress: string, openPositionsCount: number): Promise<void> {
-    try {
-      const query = `
-        INSERT INTO wallet_stats (wallet_address, buy_event_count, open_position_total, updated_at)
-        VALUES ($1, 1, $2, CURRENT_TIMESTAMP)
-        ON CONFLICT (wallet_address)
-        DO UPDATE SET
-          buy_event_count = wallet_stats.buy_event_count + 1,
-          open_position_total = wallet_stats.open_position_total + $2,
-          updated_at = CURRENT_TIMESTAMP
-      `;
-      await this.pool.query(query, [walletAddress, openPositionsCount]);
-    } catch (error) {
-      console.error('Failed to update wallet stats on buy:', error);
-      // Don't throw - this is non-critical
-    }
-  }
-
   /**
    * Get average open position for a wallet
-   * Returns: sum of all open_position_total / sum of all buy_event_count
+   * Returns: average of all open_position_count values for buy events
    */
   async getWalletAverageOpenPosition(walletAddress: string): Promise<number> {
     try {
       const query = `
         SELECT 
-          buy_event_count,
-          open_position_total
-        FROM wallet_stats
+          AVG(open_position_count) as avg_open_position
+        FROM wallets
         WHERE wallet_address = $1
+          AND open_position_count IS NOT NULL
       `;
       const result = await this.pool.query(query, [walletAddress]);
       
-      if (result.rows.length === 0) {
+      if (result.rows.length === 0 || !result.rows[0].avg_open_position) {
         return 0;
       }
       
-      const row = result.rows[0];
-      const buyEventCount = parseInt(row.buy_event_count) || 0;
-      const openPositionTotal = parseInt(row.open_position_total) || 0;
-      
-      if (buyEventCount === 0) {
-        return 0;
-      }
-      
-      return openPositionTotal / buyEventCount;
+      return parseFloat(result.rows[0].avg_open_position) || 0;
     } catch (error) {
       console.error('Failed to get wallet average open position:', error);
       return 0;
@@ -1351,13 +1309,15 @@ class DatabaseService {
       price: number | null;
       decimals: number | null;
       market_cap: number | null;
-    } | null = null
+    } | null = null,
+    openPositionCount?: number | null
   ): Promise<void> {
     // Use setImmediate to ensure this is truly async and non-blocking
     setImmediate(async () => {
       try {
         if (transactionType === 'BUY') {
           // Insert or update first buy info (only if first_buy_timestamp is NULL)
+          // Also record open_position_count for this buy event
           const query = `
             INSERT INTO wallets (
               wallet_address,
@@ -1367,8 +1327,9 @@ class DatabaseService {
               first_buy_mcap,
               first_buy_supply,
               first_buy_price,
-              first_buy_decimals
-            ) VALUES ($1, $2, CURRENT_TIMESTAMP, $3, $4, $5, $6, $7)
+              first_buy_decimals,
+              open_position_count
+            ) VALUES ($1, $2, CURRENT_TIMESTAMP, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (wallet_address, token_address) 
             DO UPDATE SET
               first_buy_timestamp = COALESCE(wallets.first_buy_timestamp, CURRENT_TIMESTAMP),
@@ -1376,7 +1337,8 @@ class DatabaseService {
               first_buy_mcap = COALESCE(wallets.first_buy_mcap, $4),
               first_buy_supply = COALESCE(wallets.first_buy_supply, $5),
               first_buy_price = COALESCE(wallets.first_buy_price, $6),
-              first_buy_decimals = COALESCE(wallets.first_buy_decimals, $7)
+              first_buy_decimals = COALESCE(wallets.first_buy_decimals, $7),
+              open_position_count = $8
           `;
           await this.pool.query(query, [
             walletAddress, 
@@ -1385,7 +1347,8 @@ class DatabaseService {
             marketData?.market_cap || null,
             marketData?.supply || null,
             marketData?.price || null,
-            marketData?.decimals || null
+            marketData?.decimals || null,
+            openPositionCount !== undefined ? openPositionCount : null
           ]);
           const mcapStr = marketData?.market_cap ? marketData.market_cap.toString() : (marketData?.supply ? `${marketData.supply} (MCap N/A)` : 'N/A');
           console.log(`💾 Wallet BUY tracked: ${walletAddress.substring(0, 8)}... - ${tokenAddress.substring(0, 8)}... (Amount: ${amount}, MCap: ${mcapStr})`);
@@ -1530,6 +1493,7 @@ class DatabaseService {
           peak_sell_to_end_price_sol,
           peak_sell_to_end_price_usd,
           peak_sell_to_end_mcap,
+          open_position_count,
           created_at
         FROM wallets
         WHERE wallet_address = $1

@@ -223,7 +223,29 @@ class LiquidityPoolMonitor {
     // Find all sessions monitoring this pool
     const sessionKeys = this.poolToSessions.get(poolAddress);
     if (!sessionKeys || sessionKeys.size === 0) {
+      // No sessions for this pool - remove it from monitoring
+      this.monitoredPools.delete(poolAddress);
+      this.poolToSessions.delete(poolAddress);
+      console.log(`🧹 Cleaned up orphaned pool ${poolAddress.substring(0, 8)}... (no sessions)`);
       return;
+    }
+    
+    // Clean up stale session references
+    const validSessionKeys = Array.from(sessionKeys).filter(key => this.sessions.has(key));
+    if (validSessionKeys.length !== sessionKeys.size) {
+      // Remove stale references
+      sessionKeys.forEach(key => {
+        if (!this.sessions.has(key)) {
+          sessionKeys.delete(key);
+        }
+      });
+      // If no valid sessions remain, remove pool
+      if (sessionKeys.size === 0) {
+        this.monitoredPools.delete(poolAddress);
+        this.poolToSessions.delete(poolAddress);
+        console.log(`🧹 Cleaned up pool ${poolAddress.substring(0, 8)}... (all sessions were stale)`);
+        return;
+      }
     }
 
     try {
@@ -317,6 +339,22 @@ class LiquidityPoolMonitor {
       return;
     }
 
+    // Prevent multiple streams - if already streaming, don't start another
+    if (this.isStreaming && this.currentStream) {
+      console.log('⚠️ Stream already running, skipping start');
+      return;
+    }
+
+    // Clean up any existing stream reference
+    if (this.currentStream) {
+      try {
+        this.currentStream.end();
+      } catch (error) {
+        // Ignore errors when ending old stream
+      }
+      this.currentStream = null;
+    }
+
     this.shouldStop = false;
     this.isStreaming = true;
 
@@ -324,11 +362,14 @@ class LiquidityPoolMonitor {
     this.handleStream().catch(error => {
       console.error('gRPC stream error:', error);
       this.isStreaming = false;
+      this.currentStream = null;
       
-      // Retry after delay only if there are pools to monitor
+      // Retry after delay only if there are pools to monitor and we're not stopping
       if (!this.shouldStop && this.monitoredPools.size > 0) {
         setTimeout(() => {
-          if (!this.shouldStop && this.monitoredPools.size > 0) {
+          // Double-check before retrying
+          if (!this.shouldStop && this.monitoredPools.size > 0 && !this.isStreaming) {
+            console.log('🔄 Retrying stream connection...');
             this.startStream();
           }
         }, 1000);
@@ -349,17 +390,29 @@ class LiquidityPoolMonitor {
     stream.on("error", (error) => {
       console.error("❌ gRPC stream error:", error);
       this.isStreaming = false;
-      stream.end();
+      // Only end if this is still the current stream
+      if (this.currentStream === stream) {
+        this.currentStream = null;
+        stream.end();
+      }
     });
 
     stream.on("end", () => {
       console.log("🔌 gRPC stream ended");
-      this.isStreaming = false;
+      // Only update state if this is still the current stream
+      if (this.currentStream === stream) {
+        this.isStreaming = false;
+        this.currentStream = null;
+      }
     });
 
     stream.on("close", () => {
       console.log("🔌 gRPC stream closed");
-      this.isStreaming = false;
+      // Only update state if this is still the current stream
+      if (this.currentStream === stream) {
+        this.isStreaming = false;
+        this.currentStream = null;
+      }
     });
 
     // Handle account updates
@@ -424,7 +477,12 @@ class LiquidityPoolMonitor {
       if (this.currentStream && this.isStreaming) {
         console.log('🛑 No pools to monitor, stopping gRPC stream...');
         this.shouldStop = true;
-        this.currentStream.end();
+        try {
+          this.currentStream.cancel();
+          this.currentStream.end();
+        } catch (error) {
+          // Ignore errors
+        }
         this.currentStream = null;
         this.isStreaming = false;
       }
@@ -457,11 +515,17 @@ class LiquidityPoolMonitor {
         transactionsStatus: {}
       };
 
-      console.log(`🔄 Updating gRPC subscription: ${this.monitoredPools.size} pool(s)`);
+      console.log(`🔄 Updating gRPC subscription: ${this.monitoredPools.size} pool(s) - ${Array.from(this.monitoredPools).map(p => p.substring(0, 8)).join(', ')}`);
       
       // Wait for the subscription update to be sent
       await new Promise<void>((resolve, reject) => {
-        this.currentStream.write(req, (err: any) => {
+        const streamRef = this.currentStream;
+        if (!streamRef) {
+          reject(new Error('Stream no longer exists'));
+          return;
+        }
+        
+        streamRef.write(req, (err: any) => {
           if (err === null || err === undefined) {
             console.log(`✅ Updated gRPC subscription: ${this.monitoredPools.size} pool(s)`);
             resolve();
@@ -472,12 +536,21 @@ class LiquidityPoolMonitor {
       });
     } catch (error) {
       console.error('Failed to update subscription:', error);
-      // If update fails, restart the stream
-      this.currentStream.end();
-      this.isStreaming = false;
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // If update fails, restart the stream only if we still have pools
       if (this.monitoredPools.size > 0) {
-        await this.startStream();
+        if (this.currentStream) {
+          try {
+            this.currentStream.end();
+          } catch (e) {
+            // Ignore
+          }
+        }
+        this.isStreaming = false;
+        this.currentStream = null;
+        await new Promise(resolve => setTimeout(resolve, 500));
+        if (this.monitoredPools.size > 0) {
+          await this.startStream();
+        }
       }
     }
   }
@@ -649,13 +722,36 @@ class LiquidityPoolMonitor {
     const poolSessions = this.poolToSessions.get(poolAddress);
     if (poolSessions) {
       poolSessions.delete(sessionKey);
-      if (poolSessions.size === 0) {
+      
+      // Check if there are any remaining active sessions for this pool
+      // First, clean up any stale session references
+      Array.from(poolSessions).forEach(key => {
+        if (!this.sessions.has(key)) {
+          poolSessions.delete(key);
+        }
+      });
+      
+      let hasActiveSessions = false;
+      for (const remainingSessionKey of poolSessions) {
+        const remainingSession = this.sessions.get(remainingSessionKey);
+        if (remainingSession && !remainingSession.stopSignal) {
+          hasActiveSessions = true;
+          break;
+        }
+      }
+      
+      // If no active sessions remain for this pool, remove it from monitoring
+      if (poolSessions.size === 0 || !hasActiveSessions) {
         this.poolToSessions.delete(poolAddress);
         // Remove pool from monitored set BEFORE updating subscription
-        this.monitoredPools.delete(poolAddress);
-        console.log(`➖ Removed pool ${poolAddress.substring(0, 8)}... from monitoring (no active sessions)`);
-        // Update subscription to remove this pool (this will stop stream if no pools left)
-        await this.updateSubscription();
+        const wasRemoved = this.monitoredPools.delete(poolAddress);
+        if (wasRemoved) {
+          console.log(`➖ Removed pool ${poolAddress.substring(0, 8)}... from monitoring (no active sessions, remaining pools: ${this.monitoredPools.size})`);
+          // Update subscription to remove this pool (this will stop stream if no pools left)
+          await this.updateSubscription();
+        }
+      } else {
+        console.log(`ℹ️ Pool ${poolAddress.substring(0, 8)}... still has ${poolSessions.size} active session(s)`);
       }
     }
 

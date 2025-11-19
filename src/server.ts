@@ -1534,9 +1534,16 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         ? firstBuy.blockNumber - devBuyBlockNumber
         : null;
       
-      // Get peak prices from database (pool monitoring data)
+      // Get peak prices and market caps from database (pool monitoring data)
       const tokenPeakPriceBeforeFirstSell = trade.peak_buy_to_sell_price_usd ? parseFloat(trade.peak_buy_to_sell_price_usd.toString()) : null;
       const tokenPeakPrice10sAfterFirstSell = trade.peak_sell_to_end_price_usd ? parseFloat(trade.peak_sell_to_end_price_usd.toString()) : null;
+      const tokenPeakMarketCapBeforeFirstSell = trade.peak_buy_to_sell_mcap ? parseFloat(trade.peak_buy_to_sell_mcap.toString()) : null;
+      const tokenPeakMarketCap10sAfterFirstSell = trade.peak_sell_to_end_mcap ? parseFloat(trade.peak_sell_to_end_mcap.toString()) : null;
+      
+      // Get open position count at the time of buy
+      const openPositionCount = trade.open_position_count !== null && trade.open_position_count !== undefined 
+        ? parseInt(trade.open_position_count.toString(), 10) 
+        : null;
       
       // Get buy timestamp for holding time calculation
       const buyTimestamp = firstBuy ? (firstBuy.blockTimestamp || firstBuy.created_at) : null;
@@ -1613,6 +1620,8 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         // Price data
         tokenPeakPriceBeforeFirstSell: tokenPeakPriceBeforeFirstSell,
         tokenPeakPrice10sAfterFirstSell: tokenPeakPrice10sAfterFirstSell,
+        tokenPeakMarketCapBeforeFirstSell: tokenPeakMarketCapBeforeFirstSell,
+        tokenPeakMarketCap10sAfterFirstSell: tokenPeakMarketCap10sAfterFirstSell,
         
         // Position data
         walletBuyPositionAfterDev: walletBuyPositionAfterDev,
@@ -1620,6 +1629,7 @@ app.get("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         walletBuyBlockNumberAfterDev: walletBuyBlockNumberAfterDev,
         walletBuyTimestamp: formatTimestamp(firstBuy?.blockTimestamp || firstBuy?.created_at),
         walletBuyMarketCap: firstBuyMarketCap,
+        openPositionCount: openPositionCount,
         
         // Gas & fees
         walletGasAndFeesAmount: totalGasAndFees,

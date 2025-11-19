@@ -1260,6 +1260,8 @@ function getRawValue(token, key) {
         case 'walletBuyPercentOfRemainingSupply': return token.walletBuyPercentOfRemainingSupply;
         case 'tokenPeakPriceBeforeFirstSell': return token.tokenPeakPriceBeforeFirstSell;
         case 'tokenPeakPrice10sAfterFirstSell': return token.tokenPeakPrice10sAfterFirstSell;
+        case 'tokenPeakMarketCapBeforeFirstSell': return token.tokenPeakMarketCapBeforeFirstSell;
+        case 'tokenPeakMarketCap10sAfterFirstSell': return token.tokenPeakMarketCap10sAfterFirstSell;
         case 'walletBuyPositionAfterDev': return token.walletBuyPositionAfterDev;
         case 'walletBuyBlockNumber': return token.walletBuyBlockNumber;
         case 'walletBuyBlockNumberAfterDev': return token.walletBuyBlockNumberAfterDev;
@@ -1975,8 +1977,16 @@ function renderDashboardTable() {
             case 'devBuyTokensPercentOfTotalSupply': return formatPercent(token.devBuyTokensPercentOfTotalSupply);
             case 'walletBuyPercentOfTotalSupply': return formatPercent(token.walletBuyPercentOfTotalSupply);
             case 'walletBuyPercentOfRemainingSupply': return formatPercent(token.walletBuyPercentOfRemainingSupply);
-            case 'tokenPeakPriceBeforeFirstSell': return formatNumber(token.tokenPeakPriceBeforeFirstSell, 2);
-            case 'tokenPeakPrice10sAfterFirstSell': return formatNumber(token.tokenPeakPrice10sAfterFirstSell, 2);
+            case 'tokenPeakPriceBeforeFirstSell': {
+                const price = formatNumber(token.tokenPeakPriceBeforeFirstSell, 10);
+                const mcap = token.tokenPeakMarketCapBeforeFirstSell ? ` (MCap: $${formatNumber(token.tokenPeakMarketCapBeforeFirstSell, 2)})` : '';
+                return price + mcap;
+            }
+            case 'tokenPeakPrice10sAfterFirstSell': {
+                const price = formatNumber(token.tokenPeakPrice10sAfterFirstSell, 10);
+                const mcap = token.tokenPeakMarketCap10sAfterFirstSell ? ` (MCap: $${formatNumber(token.tokenPeakMarketCap10sAfterFirstSell, 2)})` : '';
+                return price + mcap;
+            }
             case 'walletBuyPositionAfterDev': return token.walletBuyPositionAfterDev !== null ? `${token.walletBuyPositionAfterDev}ms` : '';
             case 'walletBuyBlockNumber': return token.walletBuyBlockNumber || '';
             case 'walletBuyBlockNumberAfterDev': return token.walletBuyBlockNumberAfterDev !== null ? token.walletBuyBlockNumberAfterDev : '';
@@ -2651,6 +2661,8 @@ function getCellValueForExport(token, key) {
         case 'walletBuyPercentOfRemainingSupply': return token.walletBuyPercentOfRemainingSupply !== null && token.walletBuyPercentOfRemainingSupply !== undefined ? token.walletBuyPercentOfRemainingSupply : '';
         case 'tokenPeakPriceBeforeFirstSell': return token.tokenPeakPriceBeforeFirstSell !== null && token.tokenPeakPriceBeforeFirstSell !== undefined ? token.tokenPeakPriceBeforeFirstSell : '';
         case 'tokenPeakPrice10sAfterFirstSell': return token.tokenPeakPrice10sAfterFirstSell !== null && token.tokenPeakPrice10sAfterFirstSell !== undefined ? token.tokenPeakPrice10sAfterFirstSell : '';
+        case 'tokenPeakMarketCapBeforeFirstSell': return token.tokenPeakMarketCapBeforeFirstSell !== null && token.tokenPeakMarketCapBeforeFirstSell !== undefined ? token.tokenPeakMarketCapBeforeFirstSell : '';
+        case 'tokenPeakMarketCap10sAfterFirstSell': return token.tokenPeakMarketCap10sAfterFirstSell !== null && token.tokenPeakMarketCap10sAfterFirstSell !== undefined ? token.tokenPeakMarketCap10sAfterFirstSell : '';
         case 'walletBuyPositionAfterDev': return token.walletBuyPositionAfterDev !== null ? token.walletBuyPositionAfterDev : '';
         case 'walletBuyBlockNumber': return token.walletBuyBlockNumber || '';
         case 'walletBuyBlockNumberAfterDev': return token.walletBuyBlockNumberAfterDev !== null ? token.walletBuyBlockNumberAfterDev : '';
