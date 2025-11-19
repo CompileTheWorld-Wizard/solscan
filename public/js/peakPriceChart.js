@@ -111,31 +111,31 @@ export async function updatePeakPriceChart() {
             const firstSell = token.sells[0];
             const tokenLabel = token.tokenSymbol || token.tokenName || `Token ${index + 1}`;
             
-            // Get peak price before first sell
-            const peakBeforeSell = token.tokenPeakPriceBeforeFirstSell;
+            // Get peak market cap before first sell
+            const peakMarketCapBeforeSell = token.tokenPeakMarketCapBeforeFirstSell;
             
-            // Get first sell price from dashboard data
-            const firstSellPrice = token.firstSellPrice;
+            // Get first sell market cap from dashboard data
+            const firstSellMarketCap = firstSell.marketCap;
             
-            // Get peak price 10s after first sell
-            const peakAfterSell = token.tokenPeakPrice10sAfterFirstSell;
+            // Get peak market cap 10s after first sell
+            const peakMarketCapAfterSell = token.tokenPeakMarketCap10sAfterFirstSell;
             
-            // Only add data points if we have at least one valid price
-            if (peakBeforeSell !== null || firstSellPrice !== null || peakAfterSell !== null) {
+            // Only add data points if we have at least one valid market cap
+            if (peakMarketCapBeforeSell !== null || firstSellMarketCap !== null || peakMarketCapAfterSell !== null) {
                 
                 labels.push(tokenLabel);
                 dataPoints.push({
                     token: tokenLabel,
                     tokenAddress: token.tokenAddress,
-                    peakBeforeSell: peakBeforeSell,
-                    firstSellPrice: firstSellPrice,
-                    peakAfterSell: peakAfterSell
+                    peakMarketCapBeforeSell: peakMarketCapBeforeSell,
+                    firstSellMarketCap: firstSellMarketCap,
+                    peakMarketCapAfterSell: peakMarketCapAfterSell
                 });
             }
         });
         
         if (dataPoints.length === 0) {
-            errorEl.textContent = 'No peak price data available for tokens with first sell';
+            errorEl.textContent = 'No peak market cap data available for tokens with first sell';
             errorEl.style.display = 'block';
             loadingEl.style.display = 'none';
             return;
@@ -146,20 +146,21 @@ export async function updatePeakPriceChart() {
         canvas.style.display = 'block';
         
         // Prepare chart data - we'll create a scatter plot with three series
-        // Use token index as x-axis
+        // Group dots by type by adding small offsets to x-axis
+        // Peak Before: x - 0.2, 1st Sell: x, Peak After: x + 0.2
         const peakBeforeData = [];
         const firstSellData = [];
         const peakAfterData = [];
         
         dataPoints.forEach((dp, idx) => {
-            if (dp.peakBeforeSell !== null && dp.peakBeforeSell !== undefined) {
-                peakBeforeData.push({ x: idx, y: dp.peakBeforeSell });
+            if (dp.peakMarketCapBeforeSell !== null && dp.peakMarketCapBeforeSell !== undefined) {
+                peakBeforeData.push({ x: idx - 0.2, y: dp.peakMarketCapBeforeSell });
             }
-            if (dp.firstSellPrice !== null && dp.firstSellPrice !== undefined) {
-                firstSellData.push({ x: idx, y: dp.firstSellPrice });
+            if (dp.firstSellMarketCap !== null && dp.firstSellMarketCap !== undefined) {
+                firstSellData.push({ x: idx, y: dp.firstSellMarketCap });
             }
-            if (dp.peakAfterSell !== null && dp.peakAfterSell !== undefined) {
-                peakAfterData.push({ x: idx, y: dp.peakAfterSell });
+            if (dp.peakMarketCapAfterSell !== null && dp.peakMarketCapAfterSell !== undefined) {
+                peakAfterData.push({ x: idx + 0.2, y: dp.peakMarketCapAfterSell });
             }
         });
         
@@ -171,7 +172,7 @@ export async function updatePeakPriceChart() {
             data: {
                 datasets: [
                     {
-                        label: 'Peak Price Before 1st Sell',
+                        label: 'Peak Market Cap Before 1st Sell',
                         data: peakBeforeData,
                         backgroundColor: 'rgba(34, 197, 94, 0.6)',
                         borderColor: 'rgb(34, 197, 94)',
@@ -179,7 +180,7 @@ export async function updatePeakPriceChart() {
                         pointHoverRadius: 8
                     },
                     {
-                        label: '1st Sell Price',
+                        label: '1st Sell Market Cap',
                         data: firstSellData,
                         backgroundColor: 'rgba(239, 68, 68, 0.6)',
                         borderColor: 'rgb(239, 68, 68)',
@@ -187,7 +188,7 @@ export async function updatePeakPriceChart() {
                         pointHoverRadius: 8
                     },
                     {
-                        label: 'Peak Price 10s After 1st Sell',
+                        label: 'Peak Market Cap 10s After 1st Sell',
                         data: peakAfterData,
                         backgroundColor: 'rgba(59, 130, 246, 0.6)',
                         borderColor: 'rgb(59, 130, 246)',
@@ -223,7 +224,16 @@ export async function updatePeakPriceChart() {
                             label: function(context) {
                                 const value = context.parsed.y;
                                 if (value === null || value === undefined) return '';
-                                return `${context.dataset.label}: $${value.toFixed(6)}`;
+                                // Format market cap with appropriate units
+                                let formattedValue;
+                                if (value >= 1000000) {
+                                    formattedValue = `$${(value / 1000000).toFixed(2)}M`;
+                                } else if (value >= 1000) {
+                                    formattedValue = `$${(value / 1000).toFixed(2)}K`;
+                                } else {
+                                    formattedValue = `$${value.toFixed(2)}`;
+                                }
+                                return `${context.dataset.label}: ${formattedValue}`;
                             },
                             afterBody: function(context) {
                                 const xValue = context[0].parsed.x;
@@ -285,7 +295,14 @@ export async function updatePeakPriceChart() {
                         ticks: {
                             color: '#94a3b8',
                             callback: function(value) {
-                                return '$' + value.toFixed(4);
+                                // Format market cap with appropriate units
+                                if (value >= 1000000) {
+                                    return '$' + (value / 1000000).toFixed(2) + 'M';
+                                } else if (value >= 1000) {
+                                    return '$' + (value / 1000).toFixed(2) + 'K';
+                                } else {
+                                    return '$' + value.toFixed(2);
+                                }
                             }
                         },
                         grid: {
@@ -293,7 +310,7 @@ export async function updatePeakPriceChart() {
                         },
                         title: {
                             display: true,
-                            text: 'Price (USD)',
+                            text: 'Market Cap (USD)',
                             color: '#94a3b8'
                         }
                     }
