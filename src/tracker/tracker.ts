@@ -126,7 +126,6 @@ class TransactionTracker {
           console.log("Got tx:", sig, "slot:", currentSlot);
 
           const result = parseTransaction(data.transaction);
-          console.log(`Token address: ${result.mint_from}, ${result.mint_to}, Pool address: ${result.pool}`)
 
           // Save to database asynchronously (non-blocking)
           if (result) {
