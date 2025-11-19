@@ -6,5 +6,4 @@
 export { tokenService } from './tokenService';
 export { tokenQueueService } from './tokenQueueService';
 export { walletTrackingService } from './walletTrackingService';
-export { marketCapService } from './marketCapService';
 

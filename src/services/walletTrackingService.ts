@@ -86,8 +86,8 @@ export class WalletTrackingService {
         marketData = {
           market_cap: marketCapResult.marketCap,
           supply: marketCapResult.tokenSupply ? marketCapResult.tokenSupply.toString() : null,
-          price: null, // Not available from marketCapService calculation
-          decimals: null // Not available from marketCapService calculation
+          price: null, // Price is stored in transaction table (token_price_sol and token_price_usd)
+          decimals: null // Decimals available from token supply fetch
         };
         console.log(`   MCap (from tracker): $${marketCapResult.marketCap}, Supply: ${marketData.supply || 'N/A'}`);
         
