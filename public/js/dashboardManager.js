@@ -22,6 +22,9 @@ let totalPages = 1; // Total pages from backend
 let sortColumn = null;
 let sortDirection = 'asc'; // 'asc' or 'desc'
 
+// Selected row state
+let selectedRowElement = null;
+
 // Dynamic filters - array of filter objects
 let activeFilters = [];
 
@@ -1215,7 +1218,14 @@ function updateSellStatisticsFromBackend(sellStatistics) {
  * Sort filtered data based on current sort column and direction
  */
 function sortFilteredData() {
-    if (!sortColumn || !filteredData || filteredData.length === 0) {
+    if (!filteredData || filteredData.length === 0) {
+        return;
+    }
+    
+    // If no sort column, restore original order from dashboardData
+    if (!sortColumn) {
+        // Restore filteredData to original order from dashboardData
+        filteredData = [...dashboardData];
         return;
     }
     
@@ -1343,6 +1353,7 @@ function createSortableHeader(label, columnKey, isSellColumn, sellIndex = null) 
     if (isCurrentSort) {
         sortIndicator.textContent = sortDirection === 'asc' ? '▲' : '▼';
         sortIndicator.style.color = '#3b82f6';
+        sortIndicator.style.opacity = '1';
     } else {
         sortIndicator.textContent = '⇅';
         sortIndicator.style.opacity = '0.3';
@@ -1368,10 +1379,18 @@ function createSortableHeader(label, columnKey, isSellColumn, sellIndex = null) 
     
     // Add click handler
     th.addEventListener('click', () => {
-        // Toggle sort direction if clicking the same column, otherwise set to ascending
+        // Cycle through: asc -> desc -> no sort -> asc...
         if (sortColumn === columnKey) {
-            sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            // Same column: cycle through states
+            if (sortDirection === 'asc') {
+                sortDirection = 'desc';
+            } else if (sortDirection === 'desc') {
+                // Reset to no sort
+                sortColumn = null;
+                sortDirection = 'asc';
+            }
         } else {
+            // Different column: set to ascending
             sortColumn = columnKey;
             sortDirection = 'asc';
         }
@@ -1510,7 +1529,7 @@ export async function loadDashboardData() {
         if (result.success && result.data) {
             // Update data smoothly
             dashboardData = result.data;
-            filteredData = result.data; // Data is already filtered from backend
+            filteredData = [...result.data]; // Create a copy to preserve original order when sorting is reset
             
             // Store pagination info from backend
             totalCount = result.totalCount || 0;
@@ -1819,6 +1838,34 @@ function renderDashboardTable() {
     dataToRender.forEach(token => {
         const row = document.createElement('tr');
         
+        // Add default row styling
+        row.style.cssText = 'cursor: pointer; transition: background-color 0.2s ease;';
+        
+        // Add hover effect
+        row.addEventListener('mouseenter', () => {
+            if (row !== selectedRowElement) {
+                row.style.backgroundColor = '#253548';
+            }
+        });
+        
+        row.addEventListener('mouseleave', () => {
+            if (row !== selectedRowElement) {
+                row.style.backgroundColor = '';
+            }
+        });
+        
+        // Add click handler to highlight row
+        row.addEventListener('click', () => {
+            // Remove highlight from previously selected row
+            if (selectedRowElement) {
+                selectedRowElement.style.backgroundColor = '';
+            }
+            
+            // Highlight clicked row
+            row.style.backgroundColor = '#3b82f6';
+            selectedRowElement = row;
+        });
+        
         // Base columns - only visible ones
         visibleColumns.forEach(col => {
             const cellContent = getCellValue(token, col.key);
@@ -1888,6 +1935,9 @@ function renderDashboardTable() {
         
         tbody.appendChild(row);
     });
+    
+    // Clear selected row when table is re-rendered (since rows are recreated)
+    selectedRowElement = null;
     
     // Render pagination controls (using backend pagination info)
     const paginationStartIndex = (currentPage - 1) * itemsPerPage;
@@ -2841,6 +2891,201 @@ window.exportDashboardToExcel = async function() {
     
     // Download file
     XLSX.writeFile(wb, filename);
+};
+
+/**
+ * Export all wallets data to Excel
+ */
+window.exportAllWalletsToExcel = async function() {
+    const { showNotification } = await import('./utils.js');
+    const { fetchAllWallets } = await import('./api.js');
+    const { fetchDashboardData } = await import('./api.js');
+    
+    try {
+        // Show loading notification
+        showNotification('Fetching all wallets data... This may take a while.', 'info');
+        
+        // Fetch all wallets
+        const walletsResult = await fetchAllWallets();
+        if (!walletsResult.success || !walletsResult.wallets || walletsResult.wallets.length === 0) {
+            showNotification('No wallets found to export', 'error');
+            return;
+        }
+        
+        const wallets = walletsResult.wallets;
+        let allData = [];
+        let processedCount = 0;
+        
+        // Fetch data for each wallet
+        for (const wallet of wallets) {
+            try {
+                // Fetch all data for this wallet (use large limit to get all data)
+                const result = await fetchDashboardData(wallet, 1, 10000, []);
+                if (result.success && result.data && result.data.length > 0) {
+                    // Add wallet address to each token record
+                    const walletData = result.data.map(token => ({
+                        ...token,
+                        walletAddress: wallet
+                    }));
+                    allData = allData.concat(walletData);
+                }
+                processedCount++;
+                
+                // Update progress (every 10 wallets)
+                if (processedCount % 10 === 0) {
+                    showNotification(`Processing... ${processedCount}/${wallets.length} wallets`, 'info');
+                }
+            } catch (error) {
+                console.error(`Error fetching data for wallet ${wallet}:`, error);
+                // Continue with other wallets
+            }
+        }
+        
+        if (allData.length === 0) {
+            showNotification('No data found to export', 'error');
+            return;
+        }
+        
+        // Get visible columns
+        const visibleColumns = COLUMN_DEFINITIONS.filter(col => columnVisibility[col.key] !== false);
+        
+        // Build header row - add wallet address as first column
+        const baseHeaders = ['Wallet Address', ...visibleColumns.map(col => col.label)];
+        
+        // Find max sells across all data
+        const maxSells = Math.max(...allData.map(token => (token.sells || []).length), 0);
+        
+        // Add sell columns for each sell (up to maxSells) - only visible ones
+        const sellHeaders = [];
+        const visibleSellColumns = SELL_COLUMN_DEFINITIONS.filter(col => sellColumnVisibility[col.key] !== false);
+        
+        for (let i = 1; i <= maxSells; i++) {
+            visibleSellColumns.forEach(col => {
+                let headerLabel = '';
+                switch(col.key) {
+                    case 'sellNumber':
+                        headerLabel = `Wallet Sell Number ${i}`;
+                        break;
+                    case 'sellMarketCap':
+                        headerLabel = `Wallet Sell Market Cap ${i}`;
+                        break;
+                    case 'sellPNL':
+                        headerLabel = `${i === 1 ? 'First' : i === 2 ? '2nd' : i === 3 ? '3rd' : `${i}th`} Sell PNL`;
+                        break;
+                    case 'sellPercentOfBuy':
+                        headerLabel = `Sell % of Buy ${i}`;
+                        break;
+                    case 'sellAmountSOL':
+                        headerLabel = `Wallet Sell Amount in SOL ${i}`;
+                        break;
+                    case 'sellAmountTokens':
+                        headerLabel = `Wallet Sell Amount in Tokens ${i}`;
+                        break;
+                    case 'sellTransactionSignature':
+                        headerLabel = `Transaction Signature ${i}`;
+                        break;
+                    case 'sellTimestamp':
+                        headerLabel = `Wallet Sell Timestamp ${i}`;
+                        break;
+                }
+                if (headerLabel) {
+                    sellHeaders.push(headerLabel);
+                }
+            });
+        }
+        
+        const headers = [...baseHeaders, ...sellHeaders];
+        
+        // Helper function to get cell value for export (same as in exportDashboardToExcel)
+        const getCellValueForExport = (token, key) => {
+            switch(key) {
+                case 'tokenAddress': return token.tokenAddress || '';
+                case 'tokenName': return token.tokenName || '';
+                case 'tokenSymbol': return token.tokenSymbol || '';
+                case 'walletBuyAmountSOL': return token.walletBuyAmountSOL !== null && token.walletBuyAmountSOL !== undefined ? token.walletBuyAmountSOL : '';
+                case 'walletBuyAmountTokens': return token.walletBuyAmountTokens !== null && token.walletBuyAmountTokens !== undefined ? token.walletBuyAmountTokens : '';
+                case 'devBuyAmountSOL': return token.devBuyAmountSOL !== null && token.devBuyAmountSOL !== undefined ? token.devBuyAmountSOL : '';
+                case 'walletBuyPercentOfTotalSupply': return token.walletBuyPercentOfTotalSupply !== null && token.walletBuyPercentOfTotalSupply !== undefined ? token.walletBuyPercentOfTotalSupply : '';
+                case 'walletBuyPercentOfRemainingSupply': return token.walletBuyPercentOfRemainingSupply !== null && token.walletBuyPercentOfRemainingSupply !== undefined ? token.walletBuyPercentOfRemainingSupply : '';
+                case 'walletBuyMarketCap': return token.walletBuyMarketCap !== null && token.walletBuyMarketCap !== undefined ? token.walletBuyMarketCap : '';
+                case 'walletBuyTimestamp': return token.walletBuyTimestamp || '';
+                case 'pnlSOL': return token.pnlSOL !== null && token.pnlSOL !== undefined ? token.pnlSOL : '';
+                case 'pnlPercent': return token.pnlPercent !== null && token.pnlPercent !== undefined ? token.pnlPercent : '';
+                case 'openPositionCount': return token.openPositionCount !== null && token.openPositionCount !== undefined ? token.openPositionCount : '';
+                case 'walletGasAndFeesAmount': return token.walletGasAndFeesAmount !== null && token.walletGasAndFeesAmount !== undefined ? token.walletGasAndFeesAmount : '';
+                default: return token[key] !== null && token[key] !== undefined ? token[key] : '';
+            }
+        };
+        
+        // Helper function to get sell cell value for export (same as in exportDashboardToExcel)
+        const getSellCellValueForExport = (sell, key) => {
+            switch(key) {
+                case 'sellNumber': return sell.sellNumber || '';
+                case 'sellMarketCap': return sell.marketCap !== null && sell.marketCap !== undefined ? sell.marketCap : '';
+                case 'sellPNL': return sell.firstSellPNL !== null && sell.firstSellPNL !== undefined ? sell.firstSellPNL : '';
+                case 'sellPercentOfBuy': return sell.sellPercentOfBuy !== null && sell.sellPercentOfBuy !== undefined ? sell.sellPercentOfBuy : '';
+                case 'sellAmountSOL': return sell.sellAmountSOL !== null && sell.sellAmountSOL !== undefined ? sell.sellAmountSOL : '';
+                case 'sellAmountTokens': return sell.sellAmountTokens !== null && sell.sellAmountTokens !== undefined ? sell.sellAmountTokens : '';
+                case 'sellTransactionSignature': return sell.transactionSignature || '';
+                case 'sellTimestamp': return sell.timestamp || '';
+                default: return '';
+            }
+        };
+        
+        // Build data rows
+        const rows = allData.map(token => {
+            const row = [];
+            
+            // Add wallet address as first column
+            row.push(token.walletAddress || '');
+            
+            // Base columns - only visible ones
+            visibleColumns.forEach(col => {
+                const value = getCellValueForExport(token, col.key);
+                row.push(value);
+            });
+            
+            // Add sell columns - only visible ones
+            for (let i = 0; i < maxSells; i++) {
+                const sell = token.sells && token.sells[i];
+                if (sell) {
+                    visibleSellColumns.forEach(col => {
+                        const value = getSellCellValueForExport(sell, col.key);
+                        row.push(value);
+                    });
+                } else {
+                    // Empty cells for missing sells
+                    visibleSellColumns.forEach(() => {
+                        row.push('');
+                    });
+                }
+            }
+            
+            return row;
+        });
+        
+        // Create workbook
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+        
+        // Set column widths
+        const colWidths = headers.map(() => ({ wch: 15 }));
+        ws['!cols'] = colWidths;
+        
+        // Add worksheet to workbook
+        XLSX.utils.book_append_sheet(wb, ws, 'All Wallets Data');
+        
+        // Generate filename
+        const filename = `All_Wallets_Dashboard_${Date.now()}.xlsx`;
+        
+        // Download file
+        XLSX.writeFile(wb, filename);
+        
+        showNotification(`✅ Exported ${allData.length} tokens from ${wallets.length} wallets`, 'success');
+    } catch (error) {
+        console.error('Error exporting all wallets:', error);
+        showNotification('❌ Error exporting all wallets: ' + error.message, 'error');
+    }
 };
 
 // Make functions available globally

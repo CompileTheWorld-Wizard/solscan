@@ -140,6 +140,12 @@
                                 title="Export Dashboard Data to Excel">
                                 <span>📥</span> Export
                             </button>
+                            <button onclick="window.exportAllWalletsToExcel()"
+                                style="padding: 10px 20px; background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; height: 42px; box-sizing: border-box; white-space: nowrap; display: flex; align-items: center; gap: 6px; transition: all 0.2s;"
+                                onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'"
+                                title="Export All Wallets Data to Excel">
+                                <span>📥</span> Export All
+                            </button>
                             <button id="removeWalletBtn" onclick="window.removeWalletFromAnalysis()"
                                 style="padding: 10px 20px; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; height: 42px; box-sizing: border-box; white-space: nowrap; display: flex; align-items: center; gap: 6px; transition: all 0.2s; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);"
                                 title="Remove wallet and all transactions from database"
