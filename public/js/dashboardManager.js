@@ -1333,7 +1333,7 @@ function getRawSellValue(sell, key) {
  */
 function createSortableHeader(label, columnKey, isSellColumn, sellIndex = null) {
     const th = document.createElement('th');
-    th.style.cssText = 'padding: 12px; border: 1px solid #334155; background: #1a1f2e; color: #e0e7ff; font-weight: 600; text-align: center; white-space: nowrap; cursor: pointer; user-select: none; position: relative;';
+    th.style.cssText = 'padding: 12px; border: 1px solid #334155; background: #1a1f2e; color: #e0e7ff; font-weight: 600; text-align: center; white-space: nowrap; cursor: pointer; user-select: none; position: sticky; top: 0; z-index: 10;';
     
     // Create container for label and sort indicator
     const container = document.createElement('div');

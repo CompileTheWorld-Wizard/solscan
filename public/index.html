@@ -305,10 +305,10 @@
                         <div id="dashboardTableLoading" style="text-align: center; padding: 40px; color: #94a3b8;">
                             Select a wallet to load dashboard data
                         </div>
-                        <div style="overflow-x: auto; border: 1px solid #334155;">
+                        <div id="dashboardTableWrapper" style="overflow-x: auto; overflow-y: auto; max-height: 70vh; border: 1px solid #334155; position: relative;">
                             <table id="dashboardTable"
                                 style="display: none; width: 100%; border-collapse: collapse; background: #0f1419;">
-                                <thead id="dashboardTableHead"></thead>
+                                <thead id="dashboardTableHead" style="position: sticky; top: 0; z-index: 10; background: #0f1419;"></thead>
                                 <tbody id="dashboardTableBody"></tbody>
                             </table>
                         </div>
