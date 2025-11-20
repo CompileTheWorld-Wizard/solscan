@@ -1873,7 +1873,8 @@ app.post("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
           
           // Get value based on filter key
           const filterKey = filter.key;
-          if (filterKey.startsWith('sell')) {
+          // Handle sell filters (including firstSellPNL which doesn't start with 'sell')
+          if (filterKey.startsWith('sell') || filterKey === 'firstSellPNL') {
             // Handle sell filters
             const sells = token.sells || [];
             if (sells.length === 0) continue;

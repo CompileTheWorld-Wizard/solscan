@@ -29,9 +29,6 @@ let activeFilters = [];
 let columnVisibility = {};
 let sellColumnVisibility = {}; // For sell columns: { 'sellNumber': true, 'sellMarketCap': true, ... }
 
-// Auto-refresh interval for dashboard
-let dashboardRefreshInterval = null;
-
 // Column definitions with keys and groups
 const COLUMN_DEFINITIONS = [
     // PNL Group
@@ -206,42 +203,11 @@ export async function initializeDashboard() {
         
         // Render existing filters
         renderFilters();
-        
-        // Start auto-refresh interval (refresh every 30 seconds)
-        startDashboardAutoRefresh();
     } catch (error) {
         console.error('Failed to initialize dashboard:', error);
     }
 }
 
-/**
- * Start auto-refresh interval for dashboard
- */
-function startDashboardAutoRefresh() {
-    // Clear any existing interval
-    if (dashboardRefreshInterval) {
-        clearInterval(dashboardRefreshInterval);
-    }
-    
-    // Refresh every 6 seconds
-    dashboardRefreshInterval = setInterval(() => {
-        const select = document.getElementById('dashboardWalletSelect');
-        if (select && select.value) {
-            // Only refresh if a wallet is selected
-            loadDashboardData();
-        }
-    }, 6000); // 6 seconds
-}
-
-/**
- * Stop auto-refresh interval for dashboard
- */
-function stopDashboardAutoRefresh() {
-    if (dashboardRefreshInterval) {
-        clearInterval(dashboardRefreshInterval);
-        dashboardRefreshInterval = null;
-    }
-}
 
 /**
  * Get filter configuration based on type
@@ -1968,7 +1934,7 @@ function renderPagination(totalPages, totalItems, startIndex, endIndex) {
     
     const itemsPerPageSelect = document.createElement('select');
     itemsPerPageSelect.style.cssText = 'padding: 6px 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 4px; font-size: 0.85rem; cursor: pointer;';
-    [10, 25, 50, 100].forEach(val => {
+    [10, 25, 50, 100, 500, 1000].forEach(val => {
         const option = document.createElement('option');
         option.value = String(val);
         option.textContent = String(val);

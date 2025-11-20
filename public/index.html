@@ -128,6 +128,12 @@
                                 style="flex: 1; padding: 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.85rem; height: 42px; box-sizing: border-box;">
                                 <option value="">-- Select a wallet --</option>
                             </select>
+                            <button onclick="window.loadDashboardData()"
+                                style="padding: 10px 20px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; height: 42px; box-sizing: border-box; white-space: nowrap; display: flex; align-items: center; gap: 6px; transition: all 0.2s;"
+                                onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'"
+                                title="Refresh Dashboard Data">
+                                <span>🔄</span> Refresh
+                            </button>
                             <button onclick="window.exportDashboardToExcel()"
                                 style="padding: 10px 20px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; height: 42px; box-sizing: border-box; white-space: nowrap; display: flex; align-items: center; gap: 6px; transition: all 0.2s;"
                                 onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'"
