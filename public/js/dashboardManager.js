@@ -1856,13 +1856,38 @@ function renderDashboardTable() {
         
         // Add click handler to highlight row
         row.addEventListener('click', () => {
+            // If clicking the same row that's already selected, deselect it
+            if (selectedRowElement === row) {
+                row.style.backgroundColor = '';
+                // Reset link colors
+                const links = row.querySelectorAll('a');
+                links.forEach(link => {
+                    link.style.color = '#3b82f6';
+                    link.style.textDecoration = 'none';
+                });
+                selectedRowElement = null;
+                return;
+            }
+            
             // Remove highlight from previously selected row
             if (selectedRowElement) {
                 selectedRowElement.style.backgroundColor = '';
+                // Reset link colors in previously selected row
+                const prevLinks = selectedRowElement.querySelectorAll('a');
+                prevLinks.forEach(link => {
+                    link.style.color = '#3b82f6';
+                    link.style.textDecoration = 'none';
+                });
             }
             
             // Highlight clicked row
             row.style.backgroundColor = '#3b82f6';
+            // Change link colors in selected row to be more visible (white or light color)
+            const links = row.querySelectorAll('a');
+            links.forEach(link => {
+                link.style.color = '#ffffff';
+                link.style.textDecoration = 'underline';
+            });
             selectedRowElement = row;
         });
         
