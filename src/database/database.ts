@@ -1901,15 +1901,18 @@ class DatabaseService {
       buySizeMax?: number | null;
       pnlMin?: number | null;
       pnlMax?: number | null;
+      columnVisibility?: { [key: string]: boolean };
+      sellColumnVisibility?: { [key: string]: boolean };
     }
   ): Promise<void> {
     try {
-      // Extract new format filters array if present
-      let filtersJson: string;
+      // Build the complete preset object to store
+      let presetData: any = {};
       
+      // Extract new format filters array if present
       if (filters.filters && Array.isArray(filters.filters)) {
         // New format: use filters array directly
-        filtersJson = JSON.stringify(filters.filters);
+        presetData.filters = filters.filters;
       } else {
         // Old format: convert to new format for backward compatibility
         const convertedFilters: any[] = [];
@@ -1953,8 +1956,32 @@ class DatabaseService {
           });
         }
         
-        filtersJson = JSON.stringify(convertedFilters);
+        presetData.filters = convertedFilters;
       }
+      
+      // Include column visibility if provided
+      if (filters.columnVisibility) {
+        presetData.columnVisibility = filters.columnVisibility;
+      }
+      if (filters.sellColumnVisibility) {
+        presetData.sellColumnVisibility = filters.sellColumnVisibility;
+      }
+      
+      // Also include old format for backward compatibility
+      if (filters.devBuySizeMin !== null && filters.devBuySizeMin !== undefined) {
+        presetData.devBuySizeMin = filters.devBuySizeMin;
+        presetData.devBuySizeMax = filters.devBuySizeMax;
+      }
+      if (filters.buySizeMin !== null && filters.buySizeMin !== undefined) {
+        presetData.buySizeMin = filters.buySizeMin;
+        presetData.buySizeMax = filters.buySizeMax;
+      }
+      if (filters.pnlMin !== null && filters.pnlMin !== undefined) {
+        presetData.pnlMin = filters.pnlMin;
+        presetData.pnlMax = filters.pnlMax;
+      }
+      
+      const filtersJson = JSON.stringify(presetData);
       
       const query = `
         INSERT INTO dashboard_filter_presets (
@@ -1992,13 +2019,30 @@ class DatabaseService {
       `;
       
       const result = await this.pool.query(query);
-      // Parse JSON
+      // Parse JSON - now contains full preset data
       return result.rows.map(row => {
         if (row.filtersJson) {
           try {
-            row.filters = typeof row.filtersJson === 'string' 
+            const parsed = typeof row.filtersJson === 'string' 
               ? JSON.parse(row.filtersJson) 
               : row.filtersJson;
+            
+            // If it's an array (old format), wrap it
+            if (Array.isArray(parsed)) {
+              row.filters = parsed;
+            } else {
+              // New format: full preset object
+              row.filters = parsed.filters || [];
+              row.columnVisibility = parsed.columnVisibility;
+              row.sellColumnVisibility = parsed.sellColumnVisibility;
+              // Include old format properties for backward compatibility
+              if (parsed.devBuySizeMin !== undefined) row.devBuySizeMin = parsed.devBuySizeMin;
+              if (parsed.devBuySizeMax !== undefined) row.devBuySizeMax = parsed.devBuySizeMax;
+              if (parsed.buySizeMin !== undefined) row.buySizeMin = parsed.buySizeMin;
+              if (parsed.buySizeMax !== undefined) row.buySizeMax = parsed.buySizeMax;
+              if (parsed.pnlMin !== undefined) row.pnlMin = parsed.pnlMin;
+              if (parsed.pnlMax !== undefined) row.pnlMax = parsed.pnlMax;
+            }
           } catch (e) {
             console.error('Failed to parse filters_json:', e);
             row.filters = [];
@@ -2037,12 +2081,29 @@ class DatabaseService {
       }
       
       const row = result.rows[0];
-      // Parse JSON
+      // Parse JSON - now contains full preset data
       if (row.filtersJson) {
         try {
-          row.filters = typeof row.filtersJson === 'string' 
+          const parsed = typeof row.filtersJson === 'string' 
             ? JSON.parse(row.filtersJson) 
             : row.filtersJson;
+          
+          // If it's an array (old format), wrap it
+          if (Array.isArray(parsed)) {
+            row.filters = parsed;
+          } else {
+            // New format: full preset object
+            row.filters = parsed.filters || [];
+            row.columnVisibility = parsed.columnVisibility;
+            row.sellColumnVisibility = parsed.sellColumnVisibility;
+            // Include old format properties for backward compatibility
+            if (parsed.devBuySizeMin !== undefined) row.devBuySizeMin = parsed.devBuySizeMin;
+            if (parsed.devBuySizeMax !== undefined) row.devBuySizeMax = parsed.devBuySizeMax;
+            if (parsed.buySizeMin !== undefined) row.buySizeMin = parsed.buySizeMin;
+            if (parsed.buySizeMax !== undefined) row.buySizeMax = parsed.buySizeMax;
+            if (parsed.pnlMin !== undefined) row.pnlMin = parsed.pnlMin;
+            if (parsed.pnlMax !== undefined) row.pnlMax = parsed.pnlMax;
+          }
         } catch (e) {
           console.error('Failed to parse filters_json:', e);
           row.filters = [];

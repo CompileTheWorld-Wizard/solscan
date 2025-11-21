@@ -2332,6 +2332,32 @@ window.loadFilterPreset = async function() {
             // Render filters
             renderFilters();
             
+            // Restore column visibility if present in preset
+            if (preset.columnVisibility) {
+                columnVisibility = { ...preset.columnVisibility };
+                // Ensure all columns have a visibility setting (default to true if missing)
+                COLUMN_DEFINITIONS.forEach(col => {
+                    if (columnVisibility[col.key] === undefined) {
+                        columnVisibility[col.key] = true;
+                    }
+                });
+            }
+            if (preset.sellColumnVisibility) {
+                sellColumnVisibility = { ...preset.sellColumnVisibility };
+                // Ensure all sell columns have a visibility setting (default to true if missing)
+                SELL_COLUMN_DEFINITIONS.forEach(col => {
+                    if (sellColumnVisibility[col.key] === undefined) {
+                        sellColumnVisibility[col.key] = true;
+                    }
+                });
+            }
+            
+            // Save column visibility to localStorage
+            saveColumnVisibility();
+            
+            // Apply column visibility to the table
+            renderDashboardTable();
+            
             // Don't auto-apply, wait for user to click "Apply Filters" button
             
             const { showNotification } = await import('./utils.js');
@@ -2472,6 +2498,10 @@ window.saveFilterPreset = async function() {
     
     // Merge both formats
     const filtersToSave = { ...filters, ...oldFormatFilters };
+    
+    // Include column visibility in the preset
+    filtersToSave.columnVisibility = { ...columnVisibility };
+    filtersToSave.sellColumnVisibility = { ...sellColumnVisibility };
     
     try {
         const result = await api.saveDashboardFilterPreset(nameInput.value.trim(), filtersToSave);
