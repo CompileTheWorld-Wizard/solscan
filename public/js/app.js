@@ -15,6 +15,7 @@ import { previousPage, nextPage } from './transactionManager.js';
 import { switchTab, refreshAnalysis } from './tabManager.js';
 import { analyzeSelectedWallet, analysisPreviousPage, analysisNextPage } from './analysisManager.js';
 import { addSkipToken } from './skipTokens.js';
+import { fetchSolPrice } from './api.js';
 import './walletFilter.js'; // Initialize wallet filter
 import './headerStats.js'; // Initialize header stats
 import { initializeDashboard } from './dashboardManager.js';
@@ -52,9 +53,49 @@ export function init() {
     // Initialize dashboard
     initializeDashboard();
     
+    // Initialize SOL price display
+    updateSolPrice();
+    
     // Check status periodically (only update if something actually changed)
     // Increased interval to 10 seconds to reduce unnecessary checks
     setInterval(fetchStatus, 10000);
+    
+    // Update SOL price every 30 seconds
+    setInterval(updateSolPrice, 30000);
+}
+
+/**
+ * Update SOL price display
+ */
+async function updateSolPrice() {
+    try {
+        const result = await fetchSolPrice();
+        const priceElement = document.getElementById('solPriceValue');
+        
+        if (result.success && priceElement && result.price !== null && result.price !== undefined) {
+            const price = parseFloat(result.price);
+            if (!isNaN(price)) {
+                // Format price with 2 decimal places
+                priceElement.textContent = price.toFixed(2);
+                priceElement.style.color = '#10b981'; // Green color
+            } else {
+                priceElement.textContent = '--';
+                priceElement.style.color = '#94a3b8';
+            }
+        } else {
+            if (priceElement) {
+                priceElement.textContent = '--';
+                priceElement.style.color = '#94a3b8';
+            }
+        }
+    } catch (error) {
+        console.error('Failed to update SOL price:', error);
+        const priceElement = document.getElementById('solPriceValue');
+        if (priceElement) {
+            priceElement.textContent = '--';
+            priceElement.style.color = '#94a3b8';
+        }
+    }
 }
 
 // Copy address to clipboard function

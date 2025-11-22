@@ -505,3 +505,25 @@ export async function deleteDashboardFilterPreset(name) {
     }
 }
 
+/**
+ * Fetch current SOL price
+ */
+export async function fetchSolPrice() {
+    try {
+        const response = await fetch('/api/sol-price', {
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch SOL price');
+        }
+
+        const data = await response.json();
+        return { success: true, price: data.price };
+    } catch (error) {
+        console.error('Error fetching SOL price:', error);
+        return { success: false, error: error.message };
+    }
+}
+

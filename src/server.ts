@@ -6,7 +6,7 @@ import path from "path";
 import session from "express-session";
 import ExcelJS from "exceljs";
 import crypto from "crypto";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { setupFileLogging } from "./utils/logger";
 import { dbService } from "./database";
 import { tracker } from "./tracker";
@@ -1358,6 +1358,22 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
     const SOL_MINT = 'So11111111111111111111111111111111111111112';
     const SOL_DECIMALS = 9;
     
+    // Get wallet SOL balance
+    let solBalance = 0;
+    try {
+      const shyftApiKey = process.env.X_TOKEN;
+      if (shyftApiKey) {
+        const rpcUrl = `https://dillwifit.shyft.to/${shyftApiKey}`;
+        const connection = new Connection(rpcUrl, "confirmed");
+        const publicKey = new PublicKey(wallet);
+        const nativeBalance = await connection.getBalance(publicKey);
+        solBalance = nativeBalance / LAMPORTS_PER_SOL;
+      }
+    } catch (error) {
+      console.error('Failed to fetch SOL balance:', error);
+      // Continue without SOL balance if fetch fails
+    }
+    
     // Get all wallet trades (ALL data, no pagination/filtering)
     const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
     const walletTrades = walletTradesResult.data;
@@ -1366,6 +1382,7 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
       return res.json({ 
         success: true, 
         statistics: {
+          solBalance,
           totalWalletPNL: 0,
           cumulativePNL: 0,
           riskRewardProfit: 0,
@@ -1473,7 +1490,8 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
           sellNumber: index + 1,
           firstSellPNL,
           sellPercentOfBuy,
-          holdingTimeSeconds
+          holdingTimeSeconds,
+          sellAmountSOL
         };
       });
       
@@ -1517,6 +1535,7 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
       const profitsAtSell = [];
       const holdingTimes = [];
       const sellPercentOfBuyValues = [];
+      const sellAmountsSOL = [];
       
       allTokensData.forEach(token => {
         if (token.sells && token.sells.length >= sellPosition) {
@@ -1530,6 +1549,10 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
           if (sell.holdingTimeSeconds !== null && sell.holdingTimeSeconds !== undefined) {
             holdingTimes.push(sell.holdingTimeSeconds);
           }
+          // Add sell amount in SOL to the array
+          if (sell.sellAmountSOL !== null && sell.sellAmountSOL !== undefined) {
+            sellAmountsSOL.push(sell.sellAmountSOL);
+          }
         }
       });
       
@@ -1542,18 +1565,23 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
       const avgHoldingTime = holdingTimes.length > 0
         ? Math.floor(holdingTimes.reduce((sum, t) => sum + t, 0) / holdingTimes.length)
         : null;
+      const totalSol = sellAmountsSOL.length > 0
+        ? sellAmountsSOL.reduce((sum, amount) => sum + amount, 0)
+        : 0;
       
       sellStatistics.push({
         sellNumber: sellPosition,
         avgProfit,
         avgSellPercentOfBuy,
-        avgHoldingTime
+        avgHoldingTime,
+        totalSol
       });
     }
     
     res.json({ 
       success: true, 
       statistics: {
+        solBalance,
         totalWalletPNL,
         cumulativePNL,
         riskRewardProfit,
@@ -2029,6 +2057,21 @@ app.delete("/api/dashboard-filter-presets/:name", requireAuth, async (req, res) 
     const { name } = req.params;
     await dbService.deleteDashboardFilterPreset(name);
     res.json({ success: true, message: 'Filter preset deleted successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/sol-price - Get current SOL price
+ */
+app.get("/api/sol-price", requireAuth, async (req, res) => {
+  try {
+    const price = await dbService.getLatestSolPrice();
+    if (price === null) {
+      return res.status(404).json({ success: false, error: 'SOL price not available' });
+    }
+    res.json({ success: true, price });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

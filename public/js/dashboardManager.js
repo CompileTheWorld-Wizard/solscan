@@ -1102,6 +1102,18 @@ async function updateStatisticsFromBackend() {
  * Update statistics display from backend data
  */
 function updateStatisticsDisplay(stats) {
+    // Wallet SOL Balance
+    const walletSolBalanceEl = document.getElementById('walletSolBalance');
+    if (walletSolBalanceEl) {
+        if (stats.solBalance !== null && stats.solBalance !== undefined) {
+            walletSolBalanceEl.textContent = `${stats.solBalance.toFixed(4)} SOL`;
+            walletSolBalanceEl.style.color = '#10b981';
+        } else {
+            walletSolBalanceEl.textContent = '-';
+            walletSolBalanceEl.style.color = '#94a3b8';
+        }
+    }
+    
     // Total Wallet PNL
     const totalPNLEl = document.getElementById('totalWalletPNL');
     if (totalPNLEl) {
@@ -1171,6 +1183,28 @@ function updateSellStatisticsFromBackend(sellStatistics) {
     const container = document.getElementById('sellStatisticsContainer');
     if (!container) return;
     
+    // Calculate total SOL sold from all sells
+    let totalSolSold = 0;
+    if (sellStatistics && sellStatistics.length > 0) {
+        sellStatistics.forEach(stat => {
+            if (stat.totalSol !== null && stat.totalSol !== undefined) {
+                totalSolSold += stat.totalSol;
+            }
+        });
+    }
+    
+    // Update total SOL sold display
+    const totalSolSoldEl = document.getElementById('totalSolSoldValue');
+    if (totalSolSoldEl) {
+        if (totalSolSold > 0) {
+            totalSolSoldEl.textContent = `${totalSolSold.toFixed(4)} SOL`;
+            totalSolSoldEl.style.color = '#10b981';
+        } else {
+            totalSolSoldEl.textContent = '-';
+            totalSolSoldEl.style.color = '#94a3b8';
+        }
+    }
+    
     if (!sellStatistics || sellStatistics.length === 0) {
         container.innerHTML = '<div style="color: #94a3b8; text-align: center; padding: 20px;">No sells found</div>';
         return;
@@ -1178,15 +1212,31 @@ function updateSellStatisticsFromBackend(sellStatistics) {
     
     container.innerHTML = '';
     
+    // Display all sells individually (no grouping)
     sellStatistics.forEach(stat => {
         const card = document.createElement('div');
         card.style.cssText = 'padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;';
         
-        const sellNumber = stat.sellNumber === 1 ? '1st' : stat.sellNumber === 2 ? '2nd' : stat.sellNumber === 3 ? '3rd' : `${stat.sellNumber}th`;
+        // Format sell number (1st, 2nd, 3rd, 4th, 5th, etc.)
+        const getOrdinal = (n) => {
+            const s = ['th', 'st', 'nd', 'rd'];
+            const v = n % 100;
+            return n + (s[(v - 20) % 10] || s[v] || s[0]);
+        };
+        
+        const sellNumber = getOrdinal(stat.sellNumber);
         const title = document.createElement('div');
         title.style.cssText = 'font-size: 0.85rem; color: #94a3b8; margin-bottom: 10px; font-weight: 600;';
         title.textContent = `${sellNumber} Sell`;
         card.appendChild(title);
+        
+        // Total SOL - prominently displayed
+        if (stat.totalSol !== null && stat.totalSol !== undefined && stat.totalSol > 0) {
+            const totalSolEl = document.createElement('div');
+            totalSolEl.style.cssText = 'font-size: 1rem; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;';
+            totalSolEl.innerHTML = `<img src="/img/wsol.svg" alt="SOL" style="width: 18px; height: 18px;"> <span style="color: #10b981;">${stat.totalSol.toFixed(4)} SOL</span>`;
+            card.appendChild(totalSolEl);
+        }
         
         if (stat.avgProfit !== null && stat.avgProfit !== undefined) {
             const profitEl = document.createElement('div');
@@ -1420,7 +1470,7 @@ export function clearDashboardData() {
     filteredData = [];
     
     // Clear average data points
-    const statIds = ['totalWalletPNL', 'cumulativePNL', 'riskRewardProfit', 'netInvested', 
+    const statIds = ['walletSolBalance', 'totalWalletPNL', 'cumulativePNL', 'riskRewardProfit', 'netInvested', 
                     'walletAvgBuySize', 'devAvgBuySize', 'avgPNLPerToken'];
     statIds.forEach(id => {
         const el = document.getElementById(id);
@@ -1447,6 +1497,13 @@ export function clearDashboardData() {
     const sellStatsContainer = document.getElementById('sellStatisticsContainer');
     if (sellStatsContainer) {
         sellStatsContainer.innerHTML = '';
+    }
+    
+    // Clear total SOL sold display
+    const totalSolSoldEl = document.getElementById('totalSolSoldValue');
+    if (totalSolSoldEl) {
+        totalSolSoldEl.textContent = '-';
+        totalSolSoldEl.style.color = '#94a3b8';
     }
     
     // Clear pagination container
