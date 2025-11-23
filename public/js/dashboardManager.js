@@ -1102,7 +1102,7 @@ async function updateStatisticsFromBackend() {
             updateStatisticsDisplay(stats);
             
             // Update sell statistics
-            updateSellStatisticsFromBackend(stats.sellStatistics || []);
+            updateSellStatisticsFromBackend(stats.sellStatistics || [], stats);
         }
     } catch (error) {
         console.error('Error loading statistics:', error);
@@ -1190,13 +1190,13 @@ function updateStatisticsDisplay(stats) {
 /**
  * Update sell statistics from backend data
  */
-function updateSellStatisticsFromBackend(sellStatistics) {
+function updateSellStatisticsFromBackend(sellStatistics, stats) {
     const container = document.getElementById('sellStatisticsContainer');
     if (!container) return;
     
     // Get total sells PNL from backend (includes unsold tokens)
     // This should match totalWalletPNL
-    const totalSellsPNL = stats.totalSellsPNL !== undefined ? stats.totalSellsPNL : 0;
+    const totalSellsPNL = stats && stats.totalSellsPNL !== undefined ? stats.totalSellsPNL : 0;
     
     // Update total sells PNL display
     const totalSolSoldEl = document.getElementById('totalSolSoldValue');
