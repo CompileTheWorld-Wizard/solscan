@@ -1986,6 +1986,189 @@ app.post("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
 });
 
 /**
+ * POST /api/what-if/:wallet - Calculate what-if PNL with adjusted sell times
+ * Body: { firstSellTimeAdjustment: number (seconds), setAllSellsTo: number (seconds, optional) }
+ */
+app.post("/api/what-if/:wallet", requireAuth, async (req, res) => {
+  try {
+    const { wallet } = req.params;
+    const { firstSellTimeAdjustment, setAllSellsTo } = req.body;
+    const SOL_MINT = 'So11111111111111111111111111111111111111112';
+    const SOL_DECIMALS = 9;
+    
+    // Validate parameters
+    if (firstSellTimeAdjustment === undefined && setAllSellsTo === undefined) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Either firstSellTimeAdjustment or setAllSellsTo must be provided' 
+      });
+    }
+    
+    // Get all wallet trades
+    const walletTradesResult = await dbService.getWalletTokens(wallet);
+    const walletTrades = walletTradesResult.data;
+    
+    if (!walletTrades || walletTrades.length === 0) {
+      return res.json({ 
+        success: true, 
+        data: [],
+        whatIfData: []
+      });
+    }
+    
+    // Get all token mints
+    const allTokenMints = walletTrades.map((trade: any) => trade.token_address);
+    const uniqueTokenMints = [...new Set(allTokenMints)];
+    
+    // Get token information
+    const tokens = await dbService.getTokensByMints(uniqueTokenMints);
+    const tokenInfoMap = new Map();
+    tokens.forEach((token: any) => {
+      tokenInfoMap.set(token.mint_address, token);
+    });
+    
+    // Process each trade with what-if calculations
+    const whatIfData = await Promise.all(walletTrades.map(async (trade: any) => {
+      const token = trade.token_address;
+      const tokenInfo = tokenInfoMap.get(token) || null;
+      
+      // Get all transactions for this wallet+token pair
+      const transactions = await dbService.getTransactionsByWalletToken(wallet, token);
+      
+      // Sort transactions by block timestamp ASC
+      transactions.sort((a: any, b: any) => {
+        const timeA = a.blockTimestamp ? new Date(a.blockTimestamp).getTime() : new Date(a.created_at).getTime();
+        const timeB = b.blockTimestamp ? new Date(b.blockTimestamp).getTime() : new Date(b.created_at).getTime();
+        return timeA - timeB;
+      });
+      
+      // Find first buy transaction
+      const buys = transactions.filter((tx: any) => tx.type?.toLowerCase() === 'buy' && tx.mint_from === SOL_MINT);
+      const firstBuy = buys.length > 0 ? buys[0] : null;
+      
+      if (!firstBuy) {
+        return null;
+      }
+      
+      // Get token decimals
+      const tokenDecimals = tokenInfo?.dev_buy_token_amount_decimal !== null && tokenInfo?.dev_buy_token_amount_decimal !== undefined
+        ? tokenInfo.dev_buy_token_amount_decimal
+        : 9;
+      
+      // Calculate wallet buy amounts
+      const walletBuyAmountSOL = (parseFloat(firstBuy.in_amount) || 0) / Math.pow(10, SOL_DECIMALS);
+      const walletBuyAmountTokens = (parseFloat(firstBuy.out_amount) || 0) / Math.pow(10, tokenDecimals);
+      
+      // Get total gas and fees
+      let totalGasAndFees = 0;
+      transactions.forEach((tx: any) => {
+        const tipAmount = (tx.tipAmount != null ? parseFloat(tx.tipAmount) : 0) || 0;
+        const feeAmount = (tx.feeAmount != null ? parseFloat(tx.feeAmount) : 0) || 0;
+        totalGasAndFees += (tipAmount + feeAmount);
+      });
+      
+      // Get all sells (sorted by timestamp ASC)
+      const sells = transactions
+        .filter((tx: any) => tx.type?.toLowerCase() === 'sell')
+        .sort((a: any, b: any) => {
+          const timeA = a.blockTimestamp ? new Date(a.blockTimestamp).getTime() : new Date(a.created_at).getTime();
+          const timeB = b.blockTimestamp ? new Date(b.blockTimestamp).getTime() : new Date(b.created_at).getTime();
+          return timeA - timeB;
+        });
+      
+      if (sells.length === 0) {
+        return null;
+      }
+      
+      // Get buy timestamp
+      const buyTimestamp = firstBuy.blockTimestamp || firstBuy.created_at;
+      const buyTime = new Date(buyTimestamp).getTime();
+      
+      // Get first buy market cap
+      const firstBuyMarketCap = firstBuy?.marketCap ? parseFloat(firstBuy.marketCap) : null;
+      
+      // Calculate what-if PNL for each sell
+      let totalSellAmountSOL = 0;
+      const whatIfSells = await Promise.all(sells.map(async (sell: any, index: number) => {
+        const sellTimestamp = sell.blockTimestamp || sell.created_at;
+        const sellTime = new Date(sellTimestamp).getTime();
+        
+        // Calculate adjusted sell time
+        let adjustedSellTime: number;
+        if (setAllSellsTo !== undefined) {
+          // Set all sells to N seconds after buy
+          adjustedSellTime = buyTime + (setAllSellsTo * 1000);
+        } else if (index === 0 && firstSellTimeAdjustment !== undefined) {
+          // Adjust first sell by ±N seconds
+          adjustedSellTime = sellTime + (firstSellTimeAdjustment * 1000);
+        } else {
+          // Keep original time for other sells
+          adjustedSellTime = sellTime;
+        }
+        
+        // Get market cap at adjusted time from timeseries
+        const adjustedMarketCap = await dbService.getMarketCapAtTimestamp(
+          wallet,
+          token,
+          adjustedSellTime
+        );
+        
+        // Calculate sell amounts
+        const sellAmountSOL = (parseFloat(sell.out_amount) || 0) / Math.pow(10, SOL_DECIMALS);
+        const sellAmountTokens = (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals);
+        
+        // Calculate PNL using adjusted market cap
+        let firstSellPNL = null;
+        if (firstBuyMarketCap && adjustedMarketCap && adjustedMarketCap > 0) {
+          firstSellPNL = (adjustedMarketCap / firstBuyMarketCap - 1) * 100;
+        }
+        
+        totalSellAmountSOL += sellAmountSOL;
+        
+        return {
+          sellNumber: index + 1,
+          originalMarketCap: sell.marketCap ? parseFloat(sell.marketCap) : null,
+          adjustedMarketCap: adjustedMarketCap,
+          firstSellPNL: firstSellPNL,
+          sellAmountSOL: sellAmountSOL,
+          sellAmountTokens: sellAmountTokens,
+          originalTimestamp: sellTimestamp,
+          adjustedTimestamp: new Date(adjustedSellTime).toISOString()
+        };
+      }));
+      
+      // Calculate what-if PNL (using original sell amounts but adjusted market caps for PNL calculation)
+      // Note: We're not changing the actual sell amounts, just the market cap used for PNL calculation
+      // The total sell amount remains the same, but we can show what the PNL would be if they sold at adjusted times
+      const whatIfPnlSOL = totalSellAmountSOL - (walletBuyAmountSOL + totalGasAndFees);
+      const whatIfPnlPercent = walletBuyAmountSOL > 0 ? (whatIfPnlSOL / walletBuyAmountSOL) * 100 : 0;
+      
+      return {
+        tokenAddress: token,
+        walletBuyAmountSOL: walletBuyAmountSOL,
+        walletBuyAmountTokens: walletBuyAmountTokens,
+        firstBuyMarketCap: firstBuyMarketCap,
+        totalGasAndFees: totalGasAndFees,
+        whatIfPnlSOL: whatIfPnlSOL,
+        whatIfPnlPercent: whatIfPnlPercent,
+        sells: whatIfSells
+      };
+    }));
+    
+    // Filter out null results
+    const validWhatIfData = whatIfData.filter((item: any) => item !== null);
+    
+    res.json({
+      success: true,
+      whatIfData: validWhatIfData
+    });
+  } catch (error: any) {
+    console.error('What-if calculation error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * GET /api/wallet-activity/:wallet - Get trading activity aggregated by time interval
  * Query params: interval (hour, quarter_day, day, week, month)
  */

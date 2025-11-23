@@ -527,3 +527,41 @@ export async function fetchSolPrice() {
     }
 }
 
+/**
+ * Calculate what-if PNL with adjusted sell times
+ * @param {string} walletAddress - Wallet address
+ * @param {number} firstSellTimeAdjustment - Adjust first sell time by N seconds (can be negative)
+ * @param {number} setAllSellsTo - Set all sell events to N seconds after buy (optional)
+ */
+export async function calculateWhatIf(walletAddress, firstSellTimeAdjustment, setAllSellsTo) {
+    try {
+        const body = {};
+        if (firstSellTimeAdjustment !== undefined && firstSellTimeAdjustment !== null) {
+            body.firstSellTimeAdjustment = firstSellTimeAdjustment;
+        }
+        if (setAllSellsTo !== undefined && setAllSellsTo !== null) {
+            body.setAllSellsTo = setAllSellsTo;
+        }
+
+        const response = await fetch(`/api/what-if/${encodeURIComponent(walletAddress)}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            credentials: 'include',
+            body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to calculate what-if PNL');
+        }
+
+        const data = await response.json();
+        return { success: true, whatIfData: data.whatIfData || [] };
+    } catch (error) {
+        console.error('Error calculating what-if PNL:', error);
+        return { success: false, error: error.message };
+    }
+}
+

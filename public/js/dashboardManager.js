@@ -33,6 +33,11 @@ let activeFilters = [];
 let columnVisibility = {};
 let sellColumnVisibility = {}; // For sell columns: { 'sellNumber': true, 'sellMarketCap': true, ... }
 
+// What-if mode state
+let whatIfModeEnabled = false;
+let whatIfData = []; // Store what-if calculation results
+let whatIfParams = { firstSellTimeAdjustment: null, setAllSellsTo: null };
+
 // Column definitions with keys and groups
 const COLUMN_DEFINITIONS = [
     // PNL Group
@@ -1494,6 +1499,127 @@ function createSortableHeader(label, columnKey, isSellColumn, sellIndex = null) 
 /**
  * Clear all dashboard data and UI elements
  */
+/**
+ * Toggle what-if mode
+ */
+window.toggleWhatIfMode = function() {
+    const toggle = document.getElementById('whatIfModeToggle');
+    const controls = document.getElementById('whatIfControls');
+    if (!toggle || !controls) return;
+    
+    whatIfModeEnabled = toggle.checked;
+    controls.style.display = whatIfModeEnabled ? 'block' : 'none';
+    
+    if (!whatIfModeEnabled) {
+        // Reset what-if data when disabling
+        whatIfData = [];
+        whatIfParams = { firstSellTimeAdjustment: null, setAllSellsTo: null };
+        // Re-render table without what-if columns
+        renderDashboardTable();
+    }
+};
+
+/**
+ * Calculate what-if PNL
+ */
+window.calculateWhatIf = async function() {
+    const select = document.getElementById('dashboardWalletSelect');
+    if (!select || !select.value) {
+        alert('Please select a wallet first');
+        return;
+    }
+    
+    const walletAddress = select.value;
+    const firstSellAdjustmentInput = document.getElementById('firstSellTimeAdjustment');
+    const setAllSellsInput = document.getElementById('setAllSellsTo');
+    
+    let firstSellTimeAdjustment = null;
+    let setAllSellsTo = null;
+    
+    if (firstSellAdjustmentInput && firstSellAdjustmentInput.value !== '') {
+        firstSellTimeAdjustment = parseFloat(firstSellAdjustmentInput.value);
+        if (isNaN(firstSellTimeAdjustment)) {
+            alert('Invalid first sell time adjustment value');
+            return;
+        }
+    }
+    
+    if (setAllSellsInput && setAllSellsInput.value !== '') {
+        setAllSellsTo = parseFloat(setAllSellsInput.value);
+        if (isNaN(setAllSellsTo)) {
+            alert('Invalid set all sells to value');
+            return;
+        }
+    }
+    
+    if (firstSellTimeAdjustment === null && setAllSellsTo === null) {
+        alert('Please provide at least one adjustment value');
+        return;
+    }
+    
+    // Store params
+    whatIfParams = { firstSellTimeAdjustment, setAllSellsTo };
+    
+    // Show loading
+    const calculateBtn = event?.target || document.querySelector('button[onclick*="calculateWhatIf"]');
+    if (calculateBtn) {
+        calculateBtn.disabled = true;
+        calculateBtn.textContent = '⏳ Calculating...';
+    }
+    
+    try {
+        const result = await api.calculateWhatIf(walletAddress, firstSellTimeAdjustment, setAllSellsTo);
+        if (result.success) {
+            whatIfData = result.whatIfData || [];
+            // Re-render table with what-if columns
+            renderDashboardTable();
+        } else {
+            alert(`Error: ${result.error || 'Failed to calculate what-if PNL'}`);
+        }
+    } catch (error) {
+        console.error('Error calculating what-if:', error);
+        alert(`Error: ${error.message || 'Failed to calculate what-if PNL'}`);
+    } finally {
+        if (calculateBtn) {
+            calculateBtn.disabled = false;
+            calculateBtn.innerHTML = '<span>🔮</span> Calculate What-If';
+        }
+    }
+};
+
+/**
+ * Reset what-if mode
+ */
+window.resetWhatIf = function() {
+    const toggle = document.getElementById('whatIfModeToggle');
+    const firstSellAdjustmentInput = document.getElementById('firstSellTimeAdjustment');
+    const setAllSellsInput = document.getElementById('setAllSellsTo');
+    
+    if (toggle) toggle.checked = false;
+    if (firstSellAdjustmentInput) firstSellAdjustmentInput.value = '';
+    if (setAllSellsInput) setAllSellsInput.value = '';
+    
+    whatIfModeEnabled = false;
+    whatIfData = [];
+    whatIfParams = { firstSellTimeAdjustment: null, setAllSellsTo: null };
+    
+    const controls = document.getElementById('whatIfControls');
+    if (controls) controls.style.display = 'none';
+    
+    // Re-render table without what-if columns
+    renderDashboardTable();
+};
+
+/**
+ * Get what-if data for a token
+ */
+function getWhatIfDataForToken(tokenAddress) {
+    if (!whatIfModeEnabled || !whatIfData || whatIfData.length === 0) {
+        return null;
+    }
+    return whatIfData.find(item => item.tokenAddress === tokenAddress) || null;
+}
+
 export function clearDashboardData() {
     // Clear table content
     const thead = document.getElementById('dashboardTableHead');
@@ -1844,10 +1970,27 @@ function renderDashboardTable() {
     const headerRow = document.createElement('tr');
     
     // Create base column headers
+    let pnlColIndex = -1;
     visibleColumns.forEach((col, index) => {
         const th = createSortableHeader(col.label, col.key, false);
         headerRow.appendChild(th);
+        if (col.key === 'pnlPercent') {
+            pnlColIndex = index;
+        }
     });
+    
+    // Add what-if headers after PNL columns if enabled
+    if (whatIfModeEnabled && whatIfData.length > 0 && pnlColIndex >= 0) {
+        const whatIfSolTh = document.createElement('th');
+        whatIfSolTh.textContent = '🔮 What-If PNL (SOL)';
+        whatIfSolTh.style.cssText = 'padding: 12px; text-align: left; background: #1a1f2e; color: #3b82f6; font-weight: 600; border-bottom: 2px solid #3b82f6; position: sticky; top: 0; z-index: 10;';
+        headerRow.appendChild(whatIfSolTh);
+        
+        const whatIfPercentTh = document.createElement('th');
+        whatIfPercentTh.textContent = '🔮 What-If PNL (%)';
+        whatIfPercentTh.style.cssText = 'padding: 12px; text-align: left; background: #1a1f2e; color: #3b82f6; font-weight: 600; border-bottom: 2px solid #3b82f6; position: sticky; top: 0; z-index: 10;';
+        headerRow.appendChild(whatIfPercentTh);
+    }
     
     // Create sell column headers
     for (let i = 1; i <= maxSells; i++) {
@@ -1887,6 +2030,21 @@ function renderDashboardTable() {
                 // Store sell index and column key in data attributes
                 const th = createSortableHeader(headerLabel, col.key, true, i - 1);
                 headerRow.appendChild(th);
+            }
+            
+            // Add what-if sell headers if enabled
+            if (whatIfModeEnabled && whatIfData.length > 0) {
+                if (col.key === 'sellPNL') {
+                    const whatIfTh = document.createElement('th');
+                    whatIfTh.textContent = `🔮 What-If ${i === 1 ? 'First' : i === 2 ? '2nd' : i === 3 ? '3rd' : `${i}th`} Sell PNL`;
+                    whatIfTh.style.cssText = 'padding: 12px; text-align: left; background: #1a1f2e; color: #3b82f6; font-weight: 600; border-bottom: 2px solid #3b82f6; position: sticky; top: 0; z-index: 10;';
+                    headerRow.appendChild(whatIfTh);
+                } else if (col.key === 'sellMarketCap') {
+                    const whatIfTh = document.createElement('th');
+                    whatIfTh.textContent = `🔮 What-If Sell Market Cap ${i}`;
+                    whatIfTh.style.cssText = 'padding: 12px; text-align: left; background: #1a1f2e; color: #3b82f6; font-weight: 600; border-bottom: 2px solid #3b82f6; position: sticky; top: 0; z-index: 10;';
+                    headerRow.appendChild(whatIfTh);
+                }
             }
         });
     }
@@ -1929,8 +2087,14 @@ function renderDashboardTable() {
             case 'walletBuyMarketCap': return formatNumber(token.walletBuyMarketCap, 2);
             case 'walletGasAndFeesAmount': return formatNumber(token.walletGasAndFeesAmount, 4);
             case 'transactionSignature': return createLink(token.transactionSignature, `https://solscan.io/tx/${token.transactionSignature}`, token.transactionSignature ? token.transactionSignature.substring(0, 8) + '...' : '');
-            case 'buysBeforeFirstSell': return token.buysBeforeFirstSell !== null && token.buysBeforeFirstSell !== undefined ? token.buysBeforeFirstSell.toString() : '';
-            case 'buysAfterFirstSell': return token.buysAfterFirstSell !== null && token.buysAfterFirstSell !== undefined ? token.buysAfterFirstSell.toString() : '';
+            case 'buysBeforeFirstSell': {
+                const value = token.buysBeforeFirstSell;
+                return (value !== null && value !== undefined) ? value.toString() : '0';
+            }
+            case 'buysAfterFirstSell': {
+                const value = token.buysAfterFirstSell;
+                return (value !== null && value !== undefined) ? value.toString() : '0';
+            }
             default: return '';
         }
     };
@@ -1993,7 +2157,8 @@ function renderDashboardTable() {
         });
         
         // Base columns - only visible ones
-        visibleColumns.forEach(col => {
+        let pnlColIndex = -1;
+        visibleColumns.forEach((col, index) => {
             const cellContent = getCellValue(token, col.key);
             const td = document.createElement('td');
             if (typeof cellContent === 'string' && cellContent.includes('<a')) {
@@ -2003,7 +2168,36 @@ function renderDashboardTable() {
             }
             td.style.cssText = 'padding: 10px; border: 1px solid #334155; color: #cbd5e1; text-align: center; white-space: nowrap;';
             row.appendChild(td);
+            if (col.key === 'pnlPercent') {
+                pnlColIndex = index;
+            }
         });
+        
+        // Add what-if cells after PNL columns if enabled
+        if (whatIfModeEnabled && whatIfData.length > 0 && pnlColIndex >= 0) {
+            const whatIfTokenData = getWhatIfDataForToken(token.tokenAddress);
+            if (whatIfTokenData) {
+                // What-If PNL SOL
+                const whatIfSolTd = document.createElement('td');
+                whatIfSolTd.textContent = formatNumber(whatIfTokenData.whatIfPnlSOL, 4);
+                whatIfSolTd.style.cssText = 'padding: 10px; border: 1px solid #3b82f6; color: #3b82f6; text-align: center; white-space: nowrap; font-weight: 600; background: rgba(59, 130, 246, 0.1);';
+                row.appendChild(whatIfSolTd);
+                
+                // What-If PNL %
+                const whatIfPercentTd = document.createElement('td');
+                whatIfPercentTd.textContent = formatPercent(whatIfTokenData.whatIfPnlPercent);
+                whatIfPercentTd.style.cssText = 'padding: 10px; border: 1px solid #3b82f6; color: #3b82f6; text-align: center; white-space: nowrap; font-weight: 600; background: rgba(59, 130, 246, 0.1);';
+                row.appendChild(whatIfPercentTd);
+            } else {
+                // Empty cells if no what-if data for this token
+                const emptyTd1 = document.createElement('td');
+                emptyTd1.style.cssText = 'padding: 10px; border: 1px solid #334155; color: #64748b; text-align: center;';
+                row.appendChild(emptyTd1);
+                const emptyTd2 = document.createElement('td');
+                emptyTd2.style.cssText = 'padding: 10px; border: 1px solid #334155; color: #64748b; text-align: center;';
+                row.appendChild(emptyTd2);
+            }
+        }
         
         // Add sell columns - only visible ones
         const visibleSellColumns = SELL_COLUMN_DEFINITIONS.filter(col => sellColumnVisibility[col.key] !== false);
@@ -2063,13 +2257,44 @@ function renderDashboardTable() {
                     }
                     td.style.cssText = 'padding: 10px; border: 1px solid #334155; color: #cbd5e1; text-align: center; white-space: nowrap;';
                     row.appendChild(td);
+                    
+                    // Add what-if sell cells if enabled
+                    if (whatIfModeEnabled && whatIfData.length > 0) {
+                        const whatIfTokenData = getWhatIfDataForToken(token.tokenAddress);
+                        if (whatIfTokenData && whatIfTokenData.sells && whatIfTokenData.sells[i]) {
+                            const whatIfSell = whatIfTokenData.sells[i];
+                            if (col.key === 'sellPNL') {
+                                const whatIfTd = document.createElement('td');
+                                whatIfTd.textContent = formatPercent(whatIfSell.firstSellPNL);
+                                whatIfTd.style.cssText = 'padding: 10px; border: 1px solid #3b82f6; color: #3b82f6; text-align: center; white-space: nowrap; font-weight: 600; background: rgba(59, 130, 246, 0.1);';
+                                row.appendChild(whatIfTd);
+                            } else if (col.key === 'sellMarketCap') {
+                                const whatIfTd = document.createElement('td');
+                                whatIfTd.textContent = formatNumber(whatIfSell.adjustedMarketCap, 2);
+                                whatIfTd.style.cssText = 'padding: 10px; border: 1px solid #3b82f6; color: #3b82f6; text-align: center; white-space: nowrap; font-weight: 600; background: rgba(59, 130, 246, 0.1);';
+                                row.appendChild(whatIfTd);
+                            }
+                        } else if (col.key === 'sellPNL' || col.key === 'sellMarketCap') {
+                            // Empty what-if cell
+                            const emptyTd = document.createElement('td');
+                            emptyTd.style.cssText = 'padding: 10px; border: 1px solid #334155; color: #64748b; text-align: center;';
+                            row.appendChild(emptyTd);
+                        }
+                    }
                 });
             } else {
                 // Empty cells for missing sells
-                visibleSellColumns.forEach(() => {
+                visibleSellColumns.forEach((col) => {
                     const td = document.createElement('td');
                     td.style.cssText = 'padding: 10px; border: 1px solid #334155; color: #64748b; text-align: center;';
                     row.appendChild(td);
+                    
+                    // Add empty what-if cells if enabled
+                    if (whatIfModeEnabled && whatIfData.length > 0 && (col.key === 'sellPNL' || col.key === 'sellMarketCap')) {
+                        const emptyTd = document.createElement('td');
+                        emptyTd.style.cssText = 'padding: 10px; border: 1px solid #334155; color: #64748b; text-align: center;';
+                        row.appendChild(emptyTd);
+                    }
                 });
             }
         }

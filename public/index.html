@@ -279,6 +279,61 @@
                         </div>
                     </div>
 
+                    <!-- What-If Data Manipulation Section -->
+                    <div class="card" style="margin-bottom: 20px; padding: 20px; border: 2px solid #3b82f6;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <div class="section-title" style="margin-bottom: 0; color: #3b82f6;">🔮 What-If Data Manipulation</div>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="whatIfModeToggle" onchange="window.toggleWhatIfMode()"
+                                    style="width: 20px; height: 20px; cursor: pointer;">
+                                <span style="color: #cbd5e1; font-weight: 600; font-size: 0.9rem;">Enable What-If Mode</span>
+                            </label>
+                        </div>
+                        <div id="whatIfControls" style="display: none; padding: 15px; background: #1a1f2e; border-radius: 8px; border: 1px solid #334155;">
+                            <div style="margin-bottom: 15px; color: #94a3b8; font-size: 0.85rem;">
+                                Adjust wallet's holding time to see how it changes PNL. Use negative values to test shorter holding times.
+                            </div>
+                            <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 15px;">
+                                <div style="flex: 1; min-width: 250px;">
+                                    <label for="firstSellTimeAdjustment" style="display: block; margin-bottom: 8px; font-weight: 600; color: #cbd5e1; font-size: 0.9rem;">
+                                        Adjust 1st Sell Time (seconds)
+                                    </label>
+                                    <input type="number" id="firstSellTimeAdjustment" placeholder="e.g., 10 or -5"
+                                        style="width: 100%; padding: 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.9rem;"
+                                        title="Adjust first sell time by N seconds. Negative values test shorter holding times.">
+                                    <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 4px;">
+                                        Adjusts first sell time by ±N seconds. Uses market cap at adjusted time.
+                                    </div>
+                                </div>
+                                <div style="flex: 1; min-width: 250px;">
+                                    <label for="setAllSellsTo" style="display: block; margin-bottom: 8px; font-weight: 600; color: #cbd5e1; font-size: 0.9rem;">
+                                        Set All Sells To (seconds after buy)
+                                    </label>
+                                    <input type="number" id="setAllSellsTo" placeholder="e.g., 30"
+                                        style="width: 100%; padding: 10px; border: 1px solid #334155; background: #0f1419; color: #e0e7ff; border-radius: 6px; font-size: 0.9rem;"
+                                        title="Set all sell events to N seconds after buy">
+                                    <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 4px;">
+                                        Sets all sell events to N seconds after buy time.
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 10px;">
+                                <button onclick="window.calculateWhatIf()"
+                                    style="padding: 10px 20px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: all 0.2s;"
+                                    onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'"
+                                    title="Calculate What-If PNL">
+                                    <span>🔮</span> Calculate What-If
+                                </button>
+                                <button onclick="window.resetWhatIf()"
+                                    style="padding: 10px 20px; background: #334155; color: #e0e7ff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: all 0.2s;"
+                                    onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'"
+                                    title="Reset What-If Mode">
+                                    <span>↺</span> Reset
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Filters Section -->
                     <div class="card" style="margin-bottom: 20px; padding: 20px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">

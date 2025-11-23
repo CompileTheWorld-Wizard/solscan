@@ -992,21 +992,14 @@ class LiquidityPoolMonitor {
       dp => dp.signature === session.firstBuyTxId
     );
     
-    if (!firstBuyDataPoint) {
+    let firstBuyTimestamp: number;
+    
+    if (!firstBuyDataPoint || !firstBuyDataPoint.timestamp) {
       // If first buy not found in timeseries, use session start time
-      const firstBuyTimestamp = session.startTime;
-      
-      // Filter out transactions before first buy
-      const filteredData = session.timeseriesData.filter(dp => {
-        if (!dp.timestamp) return false;
-        const dpTimestamp = new Date(dp.timestamp).getTime();
-        return dpTimestamp >= firstBuyTimestamp;
-      });
-
-      return this.calculatePeaksFromFilteredData(filteredData, session.firstSellTxId);
+      firstBuyTimestamp = session.startTime;
+    } else {
+      firstBuyTimestamp = new Date(firstBuyDataPoint.timestamp).getTime();
     }
-
-    const firstBuyTimestamp = new Date(firstBuyDataPoint.timestamp).getTime();
     
     // Filter out transactions before first buy based on timestamp
     const filteredData = session.timeseriesData.filter(dp => {
@@ -1015,7 +1008,7 @@ class LiquidityPoolMonitor {
       return dpTimestamp >= firstBuyTimestamp;
     });
 
-    return this.calculatePeaksFromFilteredData(filteredData, session.firstSellTxId);
+    return this.calculatePeaksFromFilteredData(filteredData, session.firstSellTxId, firstBuyTimestamp, session.firstBuyTxId);
   }
 
   /**
@@ -1023,11 +1016,35 @@ class LiquidityPoolMonitor {
    */
   private calculatePeaksFromFilteredData(
     filteredData: TimeseriesDataPoint[],
-    firstSellTxId: string | null
+    firstSellTxId: string | null,
+    firstBuyTimestamp: number,
+    firstBuyTxId: string | null
   ): { peakBuyToSell: PeakData | null; peakSellToEnd: PeakData | null; buyCount: number; buysBeforeFirstSell: number; buysAfterFirstSell: number } {
     if (filteredData.length === 0) {
       return { peakBuyToSell: null, peakSellToEnd: null, buyCount: 0, buysBeforeFirstSell: 0, buysAfterFirstSell: 0 };
     }
+
+    // Remove duplicates by signature (keep first occurrence)
+    const seenSignatures = new Set<string>();
+    const deduplicatedData = filteredData.filter(dp => {
+      // Filter out transactions before first buy timestamp
+      if (dp.timestamp) {
+        const dpTimestamp = new Date(dp.timestamp).getTime();
+        if (dpTimestamp < firstBuyTimestamp) {
+          return false; // Ignore data before buy transaction
+        }
+      }
+      
+      // Filter out duplicates by signature
+      if (dp.signature) {
+        if (seenSignatures.has(dp.signature)) {
+          return false; // Skip duplicate
+        }
+        seenSignatures.add(dp.signature);
+      }
+      
+      return true;
+    });
 
     let peakBuyToSell: PeakData | null = null;
     let peakSellToEnd: PeakData | null = null;
@@ -1039,23 +1056,30 @@ class LiquidityPoolMonitor {
 
     // Find sell timestamp if firstSellTxId is provided
     if (firstSellTxId) {
-      const sellDataPoint = filteredData.find(dp => dp.signature === firstSellTxId);
+      const sellDataPoint = deduplicatedData.find(dp => dp.signature === firstSellTxId);
       if (sellDataPoint && sellDataPoint.timestamp) {
         sellTimestamp = new Date(sellDataPoint.timestamp).getTime();
       }
     }
 
-    // Process each data point
-    for (const dp of filteredData) {
+    // Process each deduplicated data point
+    for (const dp of deduplicatedData) {
       if (!dp.timestamp || !dp.tokenPriceUsd) continue;
 
       const dpTimestamp = new Date(dp.timestamp).getTime();
+      
+      // Skip if timestamp is before first buy (additional safety check)
+      if (dpTimestamp < firstBuyTimestamp) {
+        continue;
+      }
+      
       const priceUsd = dp.tokenPriceUsd;
       const priceSol = dp.tokenPriceSol || 0;
       const marketCap = dp.marketcap || 0;
 
       // Count buy transactions (only BUY type transactions with signature)
-      if (dp.signature && dp.transactionType === 'BUY') {
+      // Exclude the first buy transaction itself from the count
+      if (dp.signature && dp.transactionType === 'BUY' && dp.signature !== firstBuyTxId) {
         buyCount++;
         
         // Count buys before first sell
@@ -1148,14 +1172,37 @@ class LiquidityPoolMonitor {
         return;
       }
 
-      // Save all timeseries data points at once to the database
+      // Deduplicate timeseries data by signature (keep first occurrence)
+      const seenSignatures = new Set<string>();
+      const deduplicatedData = session.timeseriesData.filter(dp => {
+        // If no signature, include it (might be initial data point)
+        if (!dp.signature) {
+          return true;
+        }
+        
+        // If signature already seen, skip it
+        if (seenSignatures.has(dp.signature)) {
+          return false;
+        }
+        
+        // Mark signature as seen and include this data point
+        seenSignatures.add(dp.signature);
+        return true;
+      });
+
+      const duplicatesRemoved = session.timeseriesData.length - deduplicatedData.length;
+      if (duplicatesRemoved > 0) {
+        console.log(`🔍 Removed ${duplicatesRemoved} duplicate timeseries data points (based on signature)`);
+      }
+
+      // Save deduplicated timeseries data points to the database
       await dbService.savePoolPriceTimeseriesBatch(
         session.walletAddress,
         session.tokenAddress,
-        session.timeseriesData
+        deduplicatedData
       );
 
-      console.log(`💾 Saved ${session.timeseriesData.length} timeseries data points for ${session.walletAddress.substring(0, 8)}... - ${session.tokenAddress.substring(0, 8)}...`);
+      console.log(`💾 Saved ${deduplicatedData.length} timeseries data points for ${session.walletAddress.substring(0, 8)}... - ${session.tokenAddress.substring(0, 8)}...`);
     } catch (error) {
       console.error('Failed to save timeseries data:', error);
     }

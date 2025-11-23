@@ -414,8 +414,8 @@ class DatabaseService {
     setImmediate(async () => {
       try {
         // Convert block timestamp from Unix timestamp (seconds) to PostgreSQL TIMESTAMP
-        const blockTimestamp = transactionData.blockTimestamp 
-          ? new Date(transactionData.blockTimestamp * 1000).toISOString() 
+        const blockTimestamp = transactionData.blockTimestamp
+          ? new Date(transactionData.blockTimestamp * 1000).toISOString()
           : null;
 
         const query = `
@@ -473,8 +473,8 @@ class DatabaseService {
    * Update market_cap, total_supply, token_price_sol, and token_price_usd for a transaction by signature
    */
   async updateTransactionMarketCap(
-    transactionId: string, 
-    marketCap: number | null, 
+    transactionId: string,
+    marketCap: number | null,
     totalSupply?: number | null,
     tokenPriceSol?: number | null,
     tokenPriceUsd?: number | null
@@ -489,8 +489,8 @@ class DatabaseService {
         WHERE transaction_id = $1
       `;
       await this.pool.query(query, [
-        transactionId, 
-        marketCap, 
+        transactionId,
+        marketCap,
         totalSupply ?? null,
         tokenPriceSol ?? null,
         tokenPriceUsd ?? null
@@ -568,7 +568,7 @@ class DatabaseService {
    * Get recent transactions with pagination and optional date/wallet filtering
    */
   async getTransactions(
-    limit: number = 50, 
+    limit: number = 50,
     offset: number = 0,
     fromDate?: string,
     toDate?: string,
@@ -600,7 +600,7 @@ class DatabaseService {
         LEFT JOIN tokens token_from ON t.mint_from = token_from.mint_address
         LEFT JOIN tokens token_to ON t.mint_to = token_to.mint_address
       `;
-      
+
       const params: any[] = [];
       const conditions: string[] = [];
       let paramCount = 0;
@@ -705,7 +705,7 @@ class DatabaseService {
    * @returns Array of aggregated data points
    */
   async getWalletTradingActivity(
-    walletAddress: string, 
+    walletAddress: string,
     interval: 'hour' | 'quarter_day' | 'day' | 'week' | 'month'
   ): Promise<Array<{ period: string; buys: number; sells: number; total: number; pnlPercent: number }>> {
     try {
@@ -713,7 +713,7 @@ class DatabaseService {
       const SOL_DECIMALS = 9;
       let dateFormat: string;
       let groupBy: string;
-      
+
       switch (interval) {
         case 'hour':
           dateFormat = 'YYYY-MM-DD HH24:00';
@@ -745,7 +745,7 @@ class DatabaseService {
           dateFormat = 'YYYY-MM-DD';
           groupBy = "DATE(created_at)";
       }
-      
+
       const query = `
         SELECT 
           ${groupBy} as period,
@@ -768,9 +768,9 @@ class DatabaseService {
         GROUP BY ${groupBy}
         ORDER BY period ASC
       `;
-      
+
       const result = await this.pool.query(query, [walletAddress, SOL_MINT, SOL_DECIMALS]);
-      
+
       return result.rows.map((row: any) => {
         // Handle period - convert Date objects to string format
         let periodStr = '';
@@ -805,14 +805,14 @@ class DatabaseService {
             periodStr = String(row.period);
           }
         }
-        
+
         // Calculate PNL %
         const totalBuyAmountSOL = parseFloat(row.total_buy_amount_sol) || 0;
         const totalSellAmountSOL = parseFloat(row.total_sell_amount_sol) || 0;
         const totalGasFees = parseFloat(row.total_gas_fees) || 0;
         const pnlSOL = totalSellAmountSOL - (totalBuyAmountSOL + totalGasFees);
         const pnlPercent = totalBuyAmountSOL > 0 ? (pnlSOL / totalBuyAmountSOL) * 100 : 0;
-        
+
         return {
           period: periodStr,
           buys: parseInt(row.buys) || 0,
@@ -842,10 +842,10 @@ class DatabaseService {
       `;
 
       const result = await this.pool.query(query, [walletAddress]);
-      
+
       let totalBuys = 0;
       let totalSells = 0;
-      
+
       result.rows.forEach((row: any) => {
         if (row.type?.toLowerCase() === 'buy') {
           totalBuys = parseInt(row.count);
@@ -853,7 +853,7 @@ class DatabaseService {
           totalSells = parseInt(row.count);
         }
       });
-      
+
       return { totalBuys, totalSells };
     } catch (error) {
       console.error('Failed to get buy/sell counts for wallet:', error);
@@ -879,11 +879,11 @@ class DatabaseService {
           AND open_position_count IS NOT NULL
       `;
       const result = await this.pool.query(query, [walletAddress]);
-      
+
       if (result.rows.length === 0 || !result.rows[0].avg_open_position) {
         return 0;
       }
-      
+
       return parseFloat(result.rows[0].avg_open_position) || 0;
     } catch (error) {
       console.error('Failed to get wallet average open position:', error);
@@ -984,8 +984,8 @@ class DatabaseService {
       ];
 
       // Convert timestamp from milliseconds to PostgreSQL TIMESTAMP
-      const devBuyTimestamp = tokenData.dev_buy_timestamp 
-        ? new Date(tokenData.dev_buy_timestamp).toISOString() 
+      const devBuyTimestamp = tokenData.dev_buy_timestamp
+        ? new Date(tokenData.dev_buy_timestamp).toISOString()
         : null;
 
       const values: any[] = [
@@ -1022,7 +1022,7 @@ class DatabaseService {
       }
 
       columns.push('updated_at');
-      
+
       // Build placeholders (exclude updated_at from parameter count)
       const paramCount = columns.length - 1; // Exclude updated_at
       const placeholders = columns.map((col, index) => {
@@ -1109,7 +1109,7 @@ class DatabaseService {
       `;
 
       const result = await this.pool.query(query, [mintAddress]);
-      
+
       if (result.rows.length === 0) {
         return null;
       }
@@ -1308,7 +1308,7 @@ class DatabaseService {
   } | null> {
     try {
       const solscanApiKey = process.env.SOLSCAN_API_KEY;
-      
+
       if (!solscanApiKey) {
         console.warn('⚠️ SOLSCAN_API_KEY not set, skipping mcap fetch');
         return null;
@@ -1342,7 +1342,7 @@ class DatabaseService {
       const dataKeys = Object.keys(data.data || {});
       if (dataKeys.length === 0) {
         // Return a special indicator for empty data (needs retry)
-        return { 
+        return {
           isEmpty: true,
           supply: null,
           price: null,
@@ -1353,7 +1353,7 @@ class DatabaseService {
 
       // Extract supply, price, decimals, and market_cap
       const tokenData = data.data;
-      
+
       return {
         supply: tokenData.supply || null,
         price: tokenData.price !== null && tokenData.price !== undefined ? parseFloat(tokenData.price.toString()) : null,
@@ -1411,9 +1411,9 @@ class DatabaseService {
               open_position_count = $8
           `;
           await this.pool.query(query, [
-            walletAddress, 
-            tokenAddress, 
-            amount, 
+            walletAddress,
+            tokenAddress,
+            amount,
             marketData?.market_cap || null,
             marketData?.supply || null,
             marketData?.price || null,
@@ -1445,9 +1445,9 @@ class DatabaseService {
               first_sell_decimals = COALESCE(wallets.first_sell_decimals, $7)
           `;
           await this.pool.query(query, [
-            walletAddress, 
-            tokenAddress, 
-            amount, 
+            walletAddress,
+            tokenAddress,
+            amount,
             marketData?.market_cap || null,
             marketData?.supply || null,
             marketData?.price || null,
@@ -1564,6 +1564,8 @@ class DatabaseService {
           peak_sell_to_end_price_usd,
           peak_sell_to_end_mcap,
           open_position_count,
+          buys_before_first_sell,
+          buys_after_first_sell,
           created_at
         FROM wallets
         WHERE wallet_address = $1
@@ -1571,7 +1573,7 @@ class DatabaseService {
       `;
 
       const params: any[] = [walletAddress];
-      
+
       if (limit !== undefined && offset !== undefined) {
         query += ` LIMIT $2 OFFSET $3`;
         params.push(limit, offset);
@@ -1592,7 +1594,7 @@ class DatabaseService {
     try {
       const SOL_MINT = 'So11111111111111111111111111111111111111112';
       const SOL_DECIMALS = 9; // SOL has 9 decimals
-      
+
       // Query for sell transactions: wallet sells token (mint_from) and receives SOL (mint_to)
       // Use UPPER() for case-insensitive comparison as type might be stored as 'Sell', 'SELL', or 'sell'
       // Cast NUMERIC to ensure proper aggregation
@@ -1607,10 +1609,10 @@ class DatabaseService {
 
       const result = await this.pool.query(query, [walletAddress, tokenAddress, SOL_MINT]);
       const totalAmountRaw = result.rows[0]?.total_amount || '0';
-      
+
       // Convert from raw amount (with decimals) to SOL
       const totalAmountSOL = parseFloat(totalAmountRaw) / Math.pow(10, SOL_DECIMALS);
-      
+
       return totalAmountSOL;
     } catch (error) {
       console.error(`Failed to get total sells amount for ${walletAddress} - ${tokenAddress}:`, error);
@@ -1625,7 +1627,7 @@ class DatabaseService {
     try {
       const SOL_MINT = 'So11111111111111111111111111111111111111112';
       const SOL_DECIMALS = 9; // SOL has 9 decimals
-      
+
       // Query for buy transactions: wallet buys token (mint_to) and spends SOL (mint_from)
       // Use UPPER() for case-insensitive comparison as type might be stored as 'Buy', 'BUY', or 'buy'
       // Cast NUMERIC to ensure proper aggregation
@@ -1640,10 +1642,10 @@ class DatabaseService {
 
       const result = await this.pool.query(query, [walletAddress, SOL_MINT, tokenAddress]);
       const totalAmountRaw = result.rows[0]?.total_amount || '0';
-      
+
       // Convert from raw amount (with decimals) to SOL
       const totalAmountSOL = parseFloat(totalAmountRaw) / Math.pow(10, SOL_DECIMALS);
-      
+
       return totalAmountSOL;
     } catch (error) {
       console.error(`Failed to get total buy amount for ${walletAddress} - ${tokenAddress}:`, error);
@@ -1657,7 +1659,7 @@ class DatabaseService {
   async getTotalBuyTokensForWalletToken(walletAddress: string, tokenAddress: string, tokenDecimals: number | null = null): Promise<number> {
     try {
       const SOL_MINT = 'So11111111111111111111111111111111111111112';
-      
+
       // Query for buy transactions: wallet buys token (mint_to) and receives tokens (out_amount)
       // Use UPPER() for case-insensitive comparison as type might be stored as 'Buy', 'BUY', or 'buy'
       // Cast NUMERIC to ensure proper aggregation
@@ -1672,7 +1674,7 @@ class DatabaseService {
 
       const result = await this.pool.query(query, [walletAddress, SOL_MINT, tokenAddress]);
       const totalAmountRaw = result.rows[0]?.total_amount || '0';
-      
+
       // Get token decimals if not provided or invalid
       // Priority: dev_buy_token_amount_decimal (from tokens table) > first_buy_decimals (from wallets table) > default 9
       let decimals = tokenDecimals;
@@ -1683,7 +1685,7 @@ class DatabaseService {
         `;
         const tokenResult = await this.pool.query(tokenQuery, [tokenAddress]);
         const devBuyTokenDecimals = tokenResult.rows[0]?.dev_buy_token_amount_decimal;
-        
+
         if (devBuyTokenDecimals !== null && devBuyTokenDecimals !== undefined && !isNaN(devBuyTokenDecimals)) {
           decimals = devBuyTokenDecimals;
         } else {
@@ -1693,7 +1695,7 @@ class DatabaseService {
           `;
           const walletResult = await this.pool.query(walletQuery, [walletAddress, tokenAddress]);
           const walletDecimals = walletResult.rows[0]?.first_buy_decimals;
-          
+
           if (walletDecimals !== null && walletDecimals !== undefined && !isNaN(walletDecimals)) {
             decimals = walletDecimals;
           } else {
@@ -1702,25 +1704,25 @@ class DatabaseService {
           }
         }
       }
-      
+
       // Ensure decimals is a valid number
       if (isNaN(decimals) || decimals < 0) {
         decimals = 9; // Fallback to 9
       }
-      
+
       // Convert from raw amount (with decimals) to token amount
       const totalAmountNum = parseFloat(totalAmountRaw);
       if (isNaN(totalAmountNum)) {
         return 0;
       }
-      
+
       // If totalAmountNum is 0, return 0 (no buy transactions or sum is 0)
       if (totalAmountNum === 0) {
         return 0;
       }
-      
+
       const totalTokens = totalAmountNum / Math.pow(10, decimals);
-      
+
       return totalTokens;
     } catch (error) {
       console.error(`Failed to get total buy tokens for ${walletAddress} - ${tokenAddress}:`, error);
@@ -1978,7 +1980,7 @@ class DatabaseService {
     try {
       // Build the complete preset object to store
       let presetData: any = {};
-      
+
       // Extract new format filters array if present
       if (filters.filters && Array.isArray(filters.filters)) {
         // New format: use filters array directly
@@ -1986,9 +1988,9 @@ class DatabaseService {
       } else {
         // Old format: convert to new format for backward compatibility
         const convertedFilters: any[] = [];
-        
-        if (filters.devBuySizeMin !== null && filters.devBuySizeMin !== undefined || 
-            filters.devBuySizeMax !== null && filters.devBuySizeMax !== undefined) {
+
+        if (filters.devBuySizeMin !== null && filters.devBuySizeMin !== undefined ||
+          filters.devBuySizeMax !== null && filters.devBuySizeMax !== undefined) {
           convertedFilters.push({
             key: 'devBuyAmountSOL',
             label: 'Dev Buy Amount in SOL',
@@ -1999,9 +2001,9 @@ class DatabaseService {
             maxEnabled: true
           });
         }
-        
-        if (filters.buySizeMin !== null && filters.buySizeMin !== undefined || 
-            filters.buySizeMax !== null && filters.buySizeMax !== undefined) {
+
+        if (filters.buySizeMin !== null && filters.buySizeMin !== undefined ||
+          filters.buySizeMax !== null && filters.buySizeMax !== undefined) {
           convertedFilters.push({
             key: 'walletBuyAmountSOL',
             label: 'Wallet Buy Amount in SOL',
@@ -2012,9 +2014,9 @@ class DatabaseService {
             maxEnabled: true
           });
         }
-        
-        if (filters.pnlMin !== null && filters.pnlMin !== undefined || 
-            filters.pnlMax !== null && filters.pnlMax !== undefined) {
+
+        if (filters.pnlMin !== null && filters.pnlMin !== undefined ||
+          filters.pnlMax !== null && filters.pnlMax !== undefined) {
           convertedFilters.push({
             key: 'pnlPercent',
             label: '% PNL per token',
@@ -2025,10 +2027,10 @@ class DatabaseService {
             maxEnabled: true
           });
         }
-        
+
         presetData.filters = convertedFilters;
       }
-      
+
       // Include column visibility if provided
       if (filters.columnVisibility) {
         presetData.columnVisibility = filters.columnVisibility;
@@ -2036,7 +2038,7 @@ class DatabaseService {
       if (filters.sellColumnVisibility) {
         presetData.sellColumnVisibility = filters.sellColumnVisibility;
       }
-      
+
       // Also include old format for backward compatibility
       if (filters.devBuySizeMin !== null && filters.devBuySizeMin !== undefined) {
         presetData.devBuySizeMin = filters.devBuySizeMin;
@@ -2050,9 +2052,9 @@ class DatabaseService {
         presetData.pnlMin = filters.pnlMin;
         presetData.pnlMax = filters.pnlMax;
       }
-      
+
       const filtersJson = JSON.stringify(presetData);
-      
+
       const query = `
         INSERT INTO dashboard_filter_presets (
           name,
@@ -2062,9 +2064,9 @@ class DatabaseService {
           filters_json = EXCLUDED.filters_json,
           updated_at = CURRENT_TIMESTAMP
       `;
-      
+
       await this.pool.query(query, [name, filtersJson]);
-      
+
       console.log(`💾 Dashboard filter preset saved: ${name}`);
     } catch (error: any) {
       console.error(`❌ Failed to save filter preset:`, error.message);
@@ -2087,16 +2089,16 @@ class DatabaseService {
         FROM dashboard_filter_presets
         ORDER BY updated_at DESC
       `;
-      
+
       const result = await this.pool.query(query);
       // Parse JSON - now contains full preset data
       return result.rows.map(row => {
         if (row.filtersJson) {
           try {
-            const parsed = typeof row.filtersJson === 'string' 
-              ? JSON.parse(row.filtersJson) 
+            const parsed = typeof row.filtersJson === 'string'
+              ? JSON.parse(row.filtersJson)
               : row.filtersJson;
-            
+
             // If it's an array (old format), wrap it
             if (Array.isArray(parsed)) {
               row.filters = parsed;
@@ -2144,20 +2146,20 @@ class DatabaseService {
         WHERE name = $1
         LIMIT 1
       `;
-      
+
       const result = await this.pool.query(query, [name]);
       if (result.rows.length === 0) {
         return null;
       }
-      
+
       const row = result.rows[0];
       // Parse JSON - now contains full preset data
       if (row.filtersJson) {
         try {
-          const parsed = typeof row.filtersJson === 'string' 
-            ? JSON.parse(row.filtersJson) 
+          const parsed = typeof row.filtersJson === 'string'
+            ? JSON.parse(row.filtersJson)
             : row.filtersJson;
-          
+
           // If it's an array (old format), wrap it
           if (Array.isArray(parsed)) {
             row.filters = parsed;
@@ -2181,7 +2183,7 @@ class DatabaseService {
       } else {
         row.filters = [];
       }
-      
+
       return row;
     } catch (error) {
       console.error('Failed to fetch filter preset:', error);
@@ -2280,7 +2282,7 @@ class DatabaseService {
           SET price_timeseries = COALESCE(price_timeseries, '[]'::jsonb) || $1::jsonb
           WHERE wallet_address = $2 AND token_address = $3
         `;
-        
+
         await this.pool.query(query, [
           JSON.stringify([dataPoint]),
           walletAddress,
@@ -2319,7 +2321,7 @@ class DatabaseService {
         SET price_timeseries = COALESCE(price_timeseries, '[]'::jsonb) || $1::jsonb
         WHERE wallet_address = $2 AND token_address = $3
       `;
-      
+
       await this.pool.query(query, [
         JSON.stringify(timeseriesData),
         walletAddress,
@@ -2342,12 +2344,74 @@ class DatabaseService {
         WHERE wallet_address = $1 AND token_address = $2
       `;
       const result = await this.pool.query(query, [walletAddress, tokenAddress]);
-      
+
       // If no record exists or first_buy_timestamp is null, it's the first buy
       return result.rows.length === 0 || result.rows[0].first_buy_timestamp === null;
     } catch (error: any) {
       console.error(`❌ Failed to check first buy:`, error.message);
       return false;
+    }
+  }
+
+  /**
+   * Get market cap from timeseries data at a specific timestamp
+   * Returns the market cap from the previous timestamp (the one before the target)
+   * If target is between A and B, it uses A (previous timestamp, not after)
+   */
+  async getMarketCapAtTimestamp(
+    walletAddress: string,
+    tokenAddress: string,
+    targetTimestamp: number
+  ): Promise<number | null> {
+    try {
+      const query = `
+        SELECT price_timeseries
+        FROM wallets
+        WHERE wallet_address = $1 AND token_address = $2
+      `;
+      const result = await this.pool.query(query, [walletAddress, tokenAddress]);
+      
+      if (result.rows.length === 0 || !result.rows[0].price_timeseries) {
+        return null;
+      }
+      
+      const timeseries = result.rows[0].price_timeseries;
+      if (!Array.isArray(timeseries) || timeseries.length === 0) {
+        return null;
+      }
+      
+      // Convert target timestamp to milliseconds
+      const targetTime = targetTimestamp;
+      
+      // Find the previous data point (the one with timestamp <= target)
+      // If target is between A and B, use A (previous timestamp)
+      let previousPoint: any = null;
+      
+      for (const point of timeseries) {
+        if (!point.timestamp || point.marketcap === null || point.marketcap === undefined) {
+          continue;
+        }
+        
+        const pointTime = new Date(point.timestamp).getTime();
+        
+        // If this point is before or equal to target, it's a candidate
+        if (pointTime <= targetTime) {
+          // If we don't have a previous point yet, or this one is closer to target (but still <= target)
+          if (!previousPoint || pointTime > new Date(previousPoint.timestamp).getTime()) {
+            previousPoint = point;
+          }
+        }
+      }
+      
+      // Return market cap from previous point
+      if (previousPoint) {
+        return parseFloat(previousPoint.marketcap);
+      }
+      
+      return null;
+    } catch (error: any) {
+      console.error(`❌ Failed to get market cap at timestamp:`, error.message);
+      return null;
     }
   }
 
@@ -2374,7 +2438,7 @@ class DatabaseService {
       const walletsDeleted = walletsResult.rowCount || 0;
 
       console.log(`🗑️ Deleted wallet ${walletAddress}: ${transactionsDeleted} transactions, ${walletsDeleted} wallet entries`);
-      
+
       return { transactionsDeleted, walletsDeleted };
     } catch (error: any) {
       console.error(`❌ Failed to delete wallet ${walletAddress}:`, error.message);
