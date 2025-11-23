@@ -1474,6 +1474,15 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
           ? (sellAmountTokens / walletBuyAmountTokens) * 100
           : null;
         
+        // Calculate SOL PNL for this sell
+        // PNL = sellAmountSOL - (proportional buy cost + proportional gas/fees)
+        let sellPNL = null;
+        if (sellPercentOfBuy !== null && sellPercentOfBuy > 0) {
+          const proportionalBuyCost = walletBuyAmountSOL * (sellPercentOfBuy / 100);
+          const proportionalGasFees = totalGasAndFees * (sellPercentOfBuy / 100);
+          sellPNL = sellAmountSOL - (proportionalBuyCost + proportionalGasFees);
+        }
+        
         let holdingTimeSeconds = null;
         if (buyTimestamp) {
           const sellTimestamp = sell.blockTimestamp || sell.created_at;
@@ -1490,7 +1499,8 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
           firstSellPNL,
           sellPercentOfBuy,
           holdingTimeSeconds,
-          sellAmountSOL
+          sellAmountSOL,
+          sellPNL
         };
       });
       
@@ -1499,6 +1509,7 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
         pnlPercent,
         walletBuyAmountSOL,
         devBuyAmountSOL,
+        totalGasAndFees,
         sells: formattedSells
       };
     }));
@@ -1535,6 +1546,7 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
       const holdingTimes = [];
       const sellPercentOfBuyValues = [];
       const sellAmountsSOL = [];
+      const sellPNLs = [];
       
       allTokensData.forEach(token => {
         if (token.sells && token.sells.length >= sellPosition) {
@@ -1552,6 +1564,10 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
           if (sell.sellAmountSOL !== null && sell.sellAmountSOL !== undefined) {
             sellAmountsSOL.push(sell.sellAmountSOL);
           }
+          // Add sell PNL to the array
+          if (sell.sellPNL !== null && sell.sellPNL !== undefined) {
+            sellPNLs.push(sell.sellPNL);
+          }
         }
       });
       
@@ -1567,13 +1583,17 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
       const totalSol = sellAmountsSOL.length > 0
         ? sellAmountsSOL.reduce((sum, amount) => sum + amount, 0)
         : 0;
+      const totalSolPNL = sellPNLs.length > 0
+        ? sellPNLs.reduce((sum, pnl) => sum + pnl, 0)
+        : 0;
       
       sellStatistics.push({
         sellNumber: sellPosition,
         avgProfit,
         avgSellPercentOfBuy,
         avgHoldingTime,
-        totalSol
+        totalSol,
+        totalSolPNL
       });
     }
     

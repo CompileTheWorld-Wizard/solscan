@@ -284,7 +284,6 @@ class TransactionTracker {
         dev_still_holding: null, // Will be updated asynchronously by checkAndSaveDevStillHolding
       });
 
-      console.log(result.creator, tokenAddress)
       // For BUY/SELL transactions, check if creator still holds the token and save result asynchronously (both BUY and SELL)
       if ((txType === 'BUY' || txType === 'SELL') && result.creator && tokenAddress) {
         this.checkAndSaveDevStillHolding(signature, result.creator, tokenAddress).catch(error => {
