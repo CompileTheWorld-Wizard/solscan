@@ -368,6 +368,13 @@ class LiquidityPoolMonitor {
           timestampISO = new Date(timestamp).toISOString();
         }
 
+        // Only store timeseries data if it's after the wallet's buy timestamp
+        // This excludes events before the self buy event
+        if (timestamp <= session.startTime) {
+          // Skip events before or at the wallet's buy timestamp
+          return;
+        }
+
         // Store timeseries data in memory (will be saved to database when monitoring finishes)
         // Get transaction type from parsed result
         const txType = result.type?.toUpperCase() || null;
@@ -1001,11 +1008,13 @@ class LiquidityPoolMonitor {
       firstBuyTimestamp = new Date(firstBuyDataPoint.timestamp).getTime();
     }
     
-    // Filter out transactions before first buy based on timestamp
+    // Filter out transactions before or at first buy based on timestamp
+    // Only include events AFTER the wallet's buy timestamp
     const filteredData = session.timeseriesData.filter(dp => {
       if (!dp.timestamp) return false;
       const dpTimestamp = new Date(dp.timestamp).getTime();
-      return dpTimestamp >= firstBuyTimestamp;
+      // Only include events strictly after the wallet's buy timestamp
+      return dpTimestamp > firstBuyTimestamp;
     });
 
     return this.calculatePeaksFromFilteredData(filteredData, session.firstSellTxId, firstBuyTimestamp, session.firstBuyTxId);
@@ -1027,11 +1036,12 @@ class LiquidityPoolMonitor {
     // Remove duplicates by signature (keep first occurrence)
     const seenSignatures = new Set<string>();
     const deduplicatedData = filteredData.filter(dp => {
-      // Filter out transactions before first buy timestamp
+      // Filter out transactions before or at first buy timestamp
+      // Only include events strictly after the wallet's buy timestamp
       if (dp.timestamp) {
         const dpTimestamp = new Date(dp.timestamp).getTime();
-        if (dpTimestamp < firstBuyTimestamp) {
-          return false; // Ignore data before buy transaction
+        if (dpTimestamp <= firstBuyTimestamp) {
+          return false; // Ignore data before or at buy transaction
         }
       }
       
@@ -1068,8 +1078,9 @@ class LiquidityPoolMonitor {
 
       const dpTimestamp = new Date(dp.timestamp).getTime();
       
-      // Skip if timestamp is before first buy (additional safety check)
-      if (dpTimestamp < firstBuyTimestamp) {
+      // Skip if timestamp is before or at first buy (additional safety check)
+      // Only process events strictly after the wallet's buy timestamp
+      if (dpTimestamp <= firstBuyTimestamp) {
         continue;
       }
       
@@ -1078,11 +1089,12 @@ class LiquidityPoolMonitor {
       const marketCap = dp.marketcap || 0;
 
       // Count buy transactions (only BUY type transactions with signature)
-      // Exclude the first buy transaction itself from the count
+      // Exclude the first buy transaction itself from the count (already filtered by timestamp, but double-check)
+      // All data here should already be after the wallet's buy, so we just need to check it's not the wallet's buy signature
       if (dp.signature && dp.transactionType === 'BUY' && dp.signature !== firstBuyTxId) {
         buyCount++;
         
-        // Count buys before first sell
+        // Count buys before first sell (strictly before sell timestamp)
         if (!sellTimestamp || dpTimestamp < sellTimestamp) {
           buysBeforeFirstSell++;
         } else if (sellTimestamp && dpTimestamp >= sellTimestamp && dpTimestamp <= sellTimestamp + TEN_SECONDS_MS) {
@@ -1092,6 +1104,7 @@ class LiquidityPoolMonitor {
       }
 
       // Calculate peakBuyToSell (before sell)
+      // Note: All data here is already after the wallet's buy timestamp (filtered above)
       if (!sellTimestamp || dpTimestamp < sellTimestamp) {
         if (!peakBuyToSell || priceUsd > peakBuyToSell.peakPriceUsd) {
           peakBuyToSell = {
@@ -1172,10 +1185,30 @@ class LiquidityPoolMonitor {
         return;
       }
 
+      // Get first buy timestamp to filter out events before wallet's buy
+      let firstBuyTimestamp: number = session.startTime;
+      if (session.firstBuyTxId) {
+        const firstBuyDataPoint = session.timeseriesData.find(
+          dp => dp.signature === session.firstBuyTxId
+        );
+        if (firstBuyDataPoint && firstBuyDataPoint.timestamp) {
+          firstBuyTimestamp = new Date(firstBuyDataPoint.timestamp).getTime();
+        }
+      }
+
       // Deduplicate timeseries data by signature (keep first occurrence)
+      // Also filter out events before or at the wallet's buy timestamp
       const seenSignatures = new Set<string>();
       const deduplicatedData = session.timeseriesData.filter(dp => {
-        // If no signature, include it (might be initial data point)
+        // Filter out events before or at the wallet's buy timestamp
+        if (dp.timestamp) {
+          const dpTimestamp = new Date(dp.timestamp).getTime();
+          if (dpTimestamp <= firstBuyTimestamp) {
+            return false; // Exclude events before or at wallet's buy
+          }
+        }
+        
+        // If no signature, include it (might be initial data point, but already filtered by timestamp above)
         if (!dp.signature) {
           return true;
         }

@@ -2089,6 +2089,7 @@ app.post("/api/what-if/:wallet", requireAuth, async (req, res) => {
       
       // Calculate what-if PNL for each sell
       let totalSellAmountSOL = 0;
+      let totalWhatIfSellAmountSOL = 0; // Total sell amount using adjusted market caps
       const whatIfSells = await Promise.all(sells.map(async (sell: any, index: number) => {
         const sellTimestamp = sell.blockTimestamp || sell.created_at;
         const sellTime = new Date(sellTimestamp).getTime();
@@ -2113,9 +2114,19 @@ app.post("/api/what-if/:wallet", requireAuth, async (req, res) => {
           adjustedSellTime
         );
         
-        // Calculate sell amounts
+        // Calculate original sell amounts
         const sellAmountSOL = (parseFloat(sell.out_amount) || 0) / Math.pow(10, SOL_DECIMALS);
         const sellAmountTokens = (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals);
+        const originalMarketCap = sell.marketCap ? parseFloat(sell.marketCap) : null;
+        
+        // Calculate adjusted sell amount based on market cap ratio
+        // If market cap changes, price changes proportionally (assuming supply constant)
+        // adjustedPrice = originalPrice * (adjustedMarketCap / originalMarketCap)
+        // adjustedSellAmountSOL = originalSellAmountSOL * (adjustedMarketCap / originalMarketCap)
+        let adjustedSellAmountSOL = sellAmountSOL;
+        if (originalMarketCap && adjustedMarketCap && originalMarketCap > 0 && adjustedMarketCap > 0) {
+          adjustedSellAmountSOL = sellAmountSOL * (adjustedMarketCap / originalMarketCap);
+        }
         
         // Calculate PNL using adjusted market cap
         let firstSellPNL = null;
@@ -2124,23 +2135,23 @@ app.post("/api/what-if/:wallet", requireAuth, async (req, res) => {
         }
         
         totalSellAmountSOL += sellAmountSOL;
+        totalWhatIfSellAmountSOL += adjustedSellAmountSOL;
         
         return {
           sellNumber: index + 1,
-          originalMarketCap: sell.marketCap ? parseFloat(sell.marketCap) : null,
+          originalMarketCap: originalMarketCap,
           adjustedMarketCap: adjustedMarketCap,
           firstSellPNL: firstSellPNL,
           sellAmountSOL: sellAmountSOL,
+          adjustedSellAmountSOL: adjustedSellAmountSOL,
           sellAmountTokens: sellAmountTokens,
           originalTimestamp: sellTimestamp,
           adjustedTimestamp: new Date(adjustedSellTime).toISOString()
         };
       }));
       
-      // Calculate what-if PNL (using original sell amounts but adjusted market caps for PNL calculation)
-      // Note: We're not changing the actual sell amounts, just the market cap used for PNL calculation
-      // The total sell amount remains the same, but we can show what the PNL would be if they sold at adjusted times
-      const whatIfPnlSOL = totalSellAmountSOL - (walletBuyAmountSOL + totalGasAndFees);
+      // Calculate what-if PNL using adjusted sell amounts (based on adjusted market caps)
+      const whatIfPnlSOL = totalWhatIfSellAmountSOL - (walletBuyAmountSOL + totalGasAndFees);
       const whatIfPnlPercent = walletBuyAmountSOL > 0 ? (whatIfPnlSOL / walletBuyAmountSOL) * 100 : 0;
       
       return {
