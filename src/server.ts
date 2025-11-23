@@ -1447,6 +1447,17 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
         return sum + ((parseFloat(sell.out_amount) || 0) / Math.pow(10, SOL_DECIMALS));
       }, 0);
       
+      // Calculate total gas/fees for all sell transactions
+      let totalSellGasAndFees = 0;
+      sells.forEach((sell: any) => {
+        const sellTipAmount = (sell.tipAmount != null ? parseFloat(sell.tipAmount) : 0) || 0;
+        const sellFeeAmount = (sell.feeAmount != null ? parseFloat(sell.feeAmount) : 0) || 0;
+        totalSellGasAndFees += (sellTipAmount + sellFeeAmount);
+      });
+      
+      // Calculate non-sell gas/fees (buy transactions and any other transactions)
+      const nonSellGasAndFees = totalGasAndFees - totalSellGasAndFees;
+      
       // Calculate PNL
       const pnlSOL = totalSellAmountSOL - (walletBuyAmountSOL + totalGasAndFees);
       const pnlPercent = walletBuyAmountSOL > 0 ? (pnlSOL / walletBuyAmountSOL) * 100 : 0;
@@ -1473,15 +1484,18 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
           : null;
         
         // Calculate SOL PNL for this sell
-        // PNL = sellAmountSOL - (proportional buy cost + actual gas/fees for this sell)
+        // PNL = sellAmountSOL - (proportional buy cost + proportional non-sell gas/fees + actual gas/fees for this sell)
+        // This ensures: sum of all sellPNL = totalSellAmountSOL - (walletBuyAmountSOL + totalGasAndFees) = pnlSOL
         let sellPNL = null;
         if (sellPercentOfBuy !== null && sellPercentOfBuy > 0) {
           const proportionalBuyCost = walletBuyAmountSOL * (sellPercentOfBuy / 100);
+          // Proportional share of non-sell gas/fees (buy and other transactions)
+          const proportionalNonSellGasAndFees = nonSellGasAndFees * (sellPercentOfBuy / 100);
           // Get actual gas/fees for this specific sell transaction
           const sellTipAmount = (sell.tipAmount != null ? parseFloat(sell.tipAmount) : 0) || 0;
           const sellFeeAmount = (sell.feeAmount != null ? parseFloat(sell.feeAmount) : 0) || 0;
           const sellGasAndFees = sellTipAmount + sellFeeAmount;
-          sellPNL = sellAmountSOL - (proportionalBuyCost + sellGasAndFees);
+          sellPNL = sellAmountSOL - (proportionalBuyCost + proportionalNonSellGasAndFees + sellGasAndFees);
         }
         
         let holdingTimeSeconds = null;
