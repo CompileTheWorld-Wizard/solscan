@@ -1194,15 +1194,9 @@ function updateSellStatisticsFromBackend(sellStatistics) {
     const container = document.getElementById('sellStatisticsContainer');
     if (!container) return;
     
-    // Calculate total sells PNL from all sells
-    let totalSellsPNL = 0;
-    if (sellStatistics && sellStatistics.length > 0) {
-        sellStatistics.forEach(stat => {
-            if (stat.totalSolPNL !== null && stat.totalSolPNL !== undefined) {
-                totalSellsPNL += stat.totalSolPNL;
-            }
-        });
-    }
+    // Get total sells PNL from backend (includes unsold tokens)
+    // This should match totalWalletPNL
+    const totalSellsPNL = stats.totalSellsPNL !== undefined ? stats.totalSellsPNL : 0;
     
     // Update total sells PNL display
     const totalSolSoldEl = document.getElementById('totalSolSoldValue');

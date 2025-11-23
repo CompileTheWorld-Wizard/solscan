@@ -1535,6 +1535,40 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
       ? pnlPercents.reduce((sum, pnl) => sum + pnl, 0) / pnlPercents.length 
       : 0;
     
+    // Calculate total sells PNL (sum of all sell PNLs + unsold tokens negative PNL)
+    // This should match totalWalletPNL
+    let totalSellsPNL = 0;
+    
+    // Calculate total sells PNL by summing all token PNLs
+    // For each token: sum all sell PNLs + negative PNL for unsold portion
+    allTokensData.forEach(token => {
+      if (!token.sells || token.sells.length === 0) {
+        // Token was bought but never sold - add negative PNL
+        const unsoldPNL = 0 - (token.walletBuyAmountSOL || 0) - (token.totalGasAndFees || 0);
+        totalSellsPNL += unsoldPNL;
+      } else {
+        // Sum all sell PNLs for this token
+        const tokenSellPNL = token.sells.reduce((sum: number, sell: any) => {
+          return sum + (sell.sellPNL || 0);
+        }, 0);
+        totalSellsPNL += tokenSellPNL;
+        
+        // Calculate total percent sold
+        const totalPercentSold = token.sells.reduce((sum: number, sell: any) => {
+          return sum + (sell.sellPercentOfBuy || 0);
+        }, 0);
+        
+        // If not 100% sold, add negative PNL for unsold portion
+        if (totalPercentSold < 100) {
+          const unsoldPercent = 100 - totalPercentSold;
+          const unsoldBuyCost = (token.walletBuyAmountSOL || 0) * (unsoldPercent / 100);
+          const unsoldGasFees = (token.totalGasAndFees || 0) * (unsoldPercent / 100);
+          const unsoldPNL = 0 - unsoldBuyCost - unsoldGasFees;
+          totalSellsPNL += unsoldPNL;
+        }
+      }
+    });
+    
     // Calculate sell statistics
     const maxSells = Math.max(...allTokensData.map(token => (token.sells || []).length), 0);
     const sellStatistics = [];
@@ -1600,6 +1634,7 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
       statistics: {
         solBalance,
         totalWalletPNL,
+        totalSellsPNL, // Add total sells PNL to match totalWalletPNL
         cumulativePNL,
         riskRewardProfit,
         netInvested,
