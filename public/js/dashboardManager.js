@@ -1236,14 +1236,6 @@ function updateSellStatisticsFromBackend(sellStatistics, stats) {
         title.textContent = `${sellNumber} Sell`;
         card.appendChild(title);
         
-        // Total SOL - prominently displayed
-        if (stat.totalSol !== null && stat.totalSol !== undefined && stat.totalSol > 0) {
-            const totalSolEl = document.createElement('div');
-            totalSolEl.style.cssText = 'font-size: 1rem; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;';
-            totalSolEl.innerHTML = `<img src="/img/wsol.svg" alt="SOL" style="width: 18px; height: 18px;"> <span style="color: #10b981;">Total SOL: ${stat.totalSol.toFixed(4)} SOL</span>`;
-            card.appendChild(totalSolEl);
-        }
-        
         // Total SOL PNL - prominently displayed
         if (stat.totalSolPNL !== null && stat.totalSolPNL !== undefined) {
             const totalSolPNLEl = document.createElement('div');
