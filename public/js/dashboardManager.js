@@ -1230,12 +1230,8 @@ function updateSellStatisticsFromBackend(sellStatistics) {
         return n + (s[(v - 20) % 10] || s[v] || s[0]);
     };
     
-    // Separate sells into individual (1-4) and others (5th and beyond)
-    const individualSells = sellStatistics.filter(stat => stat.sellNumber >= 1 && stat.sellNumber <= 4);
-    const otherSells = sellStatistics.filter(stat => stat.sellNumber >= 5);
-    
-    // Display individual sells (1st, 2nd, 3rd, 4th)
-    individualSells.forEach(stat => {
+    // Display all sells individually
+    sellStatistics.forEach(stat => {
         const card = document.createElement('div');
         card.style.cssText = 'padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;';
         
@@ -1287,95 +1283,6 @@ function updateSellStatisticsFromBackend(sellStatistics) {
         
         container.appendChild(card);
     });
-    
-    // Display "Others" card for sells 5-12
-    if (otherSells.length > 0) {
-        // Aggregate data for sells 5-12
-        const othersTotalSol = otherSells.reduce((sum, stat) => {
-            return sum + (stat.totalSol !== null && stat.totalSol !== undefined ? stat.totalSol : 0);
-        }, 0);
-        const othersTotalSolPNL = otherSells.reduce((sum, stat) => {
-            return sum + (stat.totalSolPNL !== null && stat.totalSolPNL !== undefined ? stat.totalSolPNL : 0);
-        }, 0);
-        
-        // Calculate averages for others
-        const othersProfits = otherSells
-            .map(stat => stat.avgProfit)
-            .filter(p => p !== null && p !== undefined);
-        const othersAvgProfit = othersProfits.length > 0
-            ? othersProfits.reduce((sum, p) => sum + p, 0) / othersProfits.length
-            : null;
-        
-        const othersPercentOfBuy = otherSells
-            .map(stat => stat.avgSellPercentOfBuy)
-            .filter(p => p !== null && p !== undefined);
-        const othersAvgSellPercentOfBuy = othersPercentOfBuy.length > 0
-            ? othersPercentOfBuy.reduce((sum, p) => sum + p, 0) / othersPercentOfBuy.length
-            : null;
-        
-        const othersHoldingTimes = otherSells
-            .map(stat => stat.avgHoldingTime)
-            .filter(t => t !== null && t !== undefined);
-        const othersAvgHoldingTime = othersHoldingTimes.length > 0
-            ? Math.floor(othersHoldingTimes.reduce((sum, t) => sum + t, 0) / othersHoldingTimes.length)
-            : null;
-        
-        const card = document.createElement('div');
-        card.style.cssText = 'padding: 15px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;';
-        
-        const title = document.createElement('div');
-        title.style.cssText = 'font-size: 0.85rem; color: #94a3b8; margin-bottom: 10px; font-weight: 600;';
-        const minSell = Math.min(...otherSells.map(s => s.sellNumber));
-        const maxSell = Math.max(...otherSells.map(s => s.sellNumber));
-        if (minSell === maxSell) {
-            title.textContent = `Others (${getOrdinal(minSell)} Sell)`;
-        } else {
-            title.textContent = `Others (${getOrdinal(minSell)} - ${getOrdinal(maxSell)} Sell)`;
-        }
-        card.appendChild(title);
-        
-        // Total SOL - prominently displayed
-        if (othersTotalSol > 0) {
-            const totalSolEl = document.createElement('div');
-            totalSolEl.style.cssText = 'font-size: 1rem; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;';
-            totalSolEl.innerHTML = `<img src="/img/wsol.svg" alt="SOL" style="width: 18px; height: 18px;"> <span style="color: #10b981;">Total SOL: ${othersTotalSol.toFixed(4)} SOL</span>`;
-            card.appendChild(totalSolEl);
-        }
-        
-        // Total SOL PNL - prominently displayed
-        if (othersTotalSolPNL !== null && othersTotalSolPNL !== undefined) {
-            const totalSolPNLEl = document.createElement('div');
-            totalSolPNLEl.style.cssText = 'font-size: 1rem; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;';
-            const pnlColor = othersTotalSolPNL >= 0 ? '#10b981' : '#ef4444';
-            const pnlSign = othersTotalSolPNL >= 0 ? '+' : '';
-            totalSolPNLEl.innerHTML = `<img src="/img/wsol.svg" alt="SOL" style="width: 18px; height: 18px;"> <span style="color: ${pnlColor};">Total SOL PNL: ${pnlSign}${othersTotalSolPNL.toFixed(4)} SOL</span>`;
-            card.appendChild(totalSolPNLEl);
-        }
-        
-        if (othersAvgProfit !== null && othersAvgProfit !== undefined) {
-            const profitEl = document.createElement('div');
-            profitEl.style.cssText = 'font-size: 0.75rem; color: #94a3b8; margin-bottom: 5px;';
-            profitEl.textContent = `Avg Profit: ${othersAvgProfit >= 0 ? '+' : ''}${othersAvgProfit.toFixed(2)}%`;
-            profitEl.style.color = othersAvgProfit >= 0 ? '#10b981' : '#ef4444';
-            card.appendChild(profitEl);
-        }
-        
-        if (othersAvgSellPercentOfBuy !== null && othersAvgSellPercentOfBuy !== undefined) {
-            const percentEl = document.createElement('div');
-            percentEl.style.cssText = 'font-size: 0.75rem; color: #94a3b8; margin-bottom: 5px;';
-            percentEl.textContent = `Avg Sell % of Buy: ${othersAvgSellPercentOfBuy.toFixed(2)}%`;
-            card.appendChild(percentEl);
-        }
-        
-        if (othersAvgHoldingTime !== null && othersAvgHoldingTime !== undefined) {
-            const timeEl = document.createElement('div');
-            timeEl.style.cssText = 'font-size: 0.75rem; color: #94a3b8;';
-            timeEl.textContent = `Avg Holding Time: ${formatDuration(othersAvgHoldingTime)}`;
-            card.appendChild(timeEl);
-        }
-        
-        container.appendChild(card);
-    }
 }
 
 /**
