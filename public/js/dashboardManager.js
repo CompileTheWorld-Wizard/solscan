@@ -1194,22 +1194,23 @@ function updateSellStatisticsFromBackend(sellStatistics) {
     const container = document.getElementById('sellStatisticsContainer');
     if (!container) return;
     
-    // Calculate total SOL sold from all sells
-    let totalSolSold = 0;
+    // Calculate total sells PNL from all sells
+    let totalSellsPNL = 0;
     if (sellStatistics && sellStatistics.length > 0) {
         sellStatistics.forEach(stat => {
-            if (stat.totalSol !== null && stat.totalSol !== undefined) {
-                totalSolSold += stat.totalSol;
+            if (stat.totalSolPNL !== null && stat.totalSolPNL !== undefined) {
+                totalSellsPNL += stat.totalSolPNL;
             }
         });
     }
     
-    // Update total SOL sold display
+    // Update total sells PNL display
     const totalSolSoldEl = document.getElementById('totalSolSoldValue');
     if (totalSolSoldEl) {
-        if (totalSolSold > 0) {
-            totalSolSoldEl.textContent = `${totalSolSold.toFixed(4)} SOL`;
-            totalSolSoldEl.style.color = '#10b981';
+        if (totalSellsPNL !== 0) {
+            const sign = totalSellsPNL >= 0 ? '+' : '';
+            totalSolSoldEl.textContent = `${sign}${totalSellsPNL.toFixed(4)} SOL`;
+            totalSolSoldEl.style.color = totalSellsPNL >= 0 ? '#10b981' : '#ef4444';
         } else {
             totalSolSoldEl.textContent = '-';
             totalSolSoldEl.style.color = '#94a3b8';

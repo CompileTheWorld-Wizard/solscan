@@ -1106,11 +1106,11 @@ app.get("/api/analyze/:wallet", requireAuth, async (req, res) => {
       const totalBuyAmount = await dbService.getTotalBuyAmountForWalletToken(wallet, trade.token_address);
       
       // Get total token amount received in buy transactions
-      // Use dev_buy_token_amount_decimal from tokens table if available, otherwise use first_buy_decimals
+      // Use dev_buy_token_amount_decimal from tokens table
       const devBuyTokenDecimals = tokenInfo[trade.token_address]?.dev_buy_token_amount_decimal || null;
       const tokenDecimalsToUse = devBuyTokenDecimals !== null && devBuyTokenDecimals !== undefined && !isNaN(devBuyTokenDecimals)
         ? devBuyTokenDecimals
-        : trade.first_buy_decimals;
+        : 9; // Default to 9 if not found
       const totalBuyTokens = await dbService.getTotalBuyTokensForWalletToken(wallet, trade.token_address, tokenDecimalsToUse);
       
       return {
@@ -1120,13 +1120,11 @@ app.get("/api/analyze/:wallet", requireAuth, async (req, res) => {
         first_buy_mcap: trade.first_buy_mcap,
         first_buy_supply: trade.first_buy_supply,
         first_buy_price: trade.first_buy_price,
-        first_buy_decimals: trade.first_buy_decimals,
         first_sell_timestamp: trade.first_sell_timestamp,
         first_sell_amount: trade.first_sell_amount,
         first_sell_mcap: trade.first_sell_mcap,
         first_sell_supply: trade.first_sell_supply,
         first_sell_price: trade.first_sell_price,
-        first_sell_decimals: trade.first_sell_decimals,
         total_sells: totalSellsAmount,
         total_buy_amount: totalBuyAmount, // Total SOL spent in buy transactions
         total_buy_tokens: totalBuyTokens, // Total token amount received in buy transactions

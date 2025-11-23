@@ -169,13 +169,11 @@ class DatabaseService {
           first_buy_mcap NUMERIC(20, 2),
           first_buy_supply VARCHAR(100),
           first_buy_price NUMERIC(20, 8),
-          first_buy_decimals INTEGER,
           first_sell_timestamp TIMESTAMP,
           first_sell_amount VARCHAR(100),
           first_sell_mcap NUMERIC(20, 2),
           first_sell_supply VARCHAR(100),
           first_sell_price NUMERIC(20, 8),
-          first_sell_decimals INTEGER,
           price_timeseries JSONB,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(wallet_address, token_address)
@@ -1397,9 +1395,8 @@ class DatabaseService {
               first_buy_mcap,
               first_buy_supply,
               first_buy_price,
-              first_buy_decimals,
               open_position_count
-            ) VALUES ($1, $2, CURRENT_TIMESTAMP, $3, $4, $5, $6, $7, $8)
+            ) VALUES ($1, $2, CURRENT_TIMESTAMP, $3, $4, $5, $6, $7)
             ON CONFLICT (wallet_address, token_address) 
             DO UPDATE SET
               first_buy_timestamp = COALESCE(wallets.first_buy_timestamp, CURRENT_TIMESTAMP),
@@ -1407,8 +1404,7 @@ class DatabaseService {
               first_buy_mcap = COALESCE(wallets.first_buy_mcap, $4),
               first_buy_supply = COALESCE(wallets.first_buy_supply, $5),
               first_buy_price = COALESCE(wallets.first_buy_price, $6),
-              first_buy_decimals = COALESCE(wallets.first_buy_decimals, $7),
-              open_position_count = $8
+              open_position_count = $7
           `;
           await this.pool.query(query, [
             walletAddress,
@@ -1417,7 +1413,6 @@ class DatabaseService {
             marketData?.market_cap || null,
             marketData?.supply || null,
             marketData?.price || null,
-            marketData?.decimals || null,
             openPositionCount !== undefined ? openPositionCount : null
           ]);
           const mcapStr = marketData?.market_cap ? marketData.market_cap.toString() : (marketData?.supply ? `${marketData.supply} (MCap N/A)` : 'N/A');
@@ -1432,17 +1427,15 @@ class DatabaseService {
               first_sell_amount,
               first_sell_mcap,
               first_sell_supply,
-              first_sell_price,
-              first_sell_decimals
-            ) VALUES ($1, $2, CURRENT_TIMESTAMP, $3, $4, $5, $6, $7)
+              first_sell_price
+            ) VALUES ($1, $2, CURRENT_TIMESTAMP, $3, $4, $5, $6)
             ON CONFLICT (wallet_address, token_address) 
             DO UPDATE SET
               first_sell_timestamp = COALESCE(wallets.first_sell_timestamp, CURRENT_TIMESTAMP),
               first_sell_amount = COALESCE(wallets.first_sell_amount, $3),
               first_sell_mcap = COALESCE(wallets.first_sell_mcap, $4),
               first_sell_supply = COALESCE(wallets.first_sell_supply, $5),
-              first_sell_price = COALESCE(wallets.first_sell_price, $6),
-              first_sell_decimals = COALESCE(wallets.first_sell_decimals, $7)
+              first_sell_price = COALESCE(wallets.first_sell_price, $6)
           `;
           await this.pool.query(query, [
             walletAddress,
@@ -1450,8 +1443,7 @@ class DatabaseService {
             amount,
             marketData?.market_cap || null,
             marketData?.supply || null,
-            marketData?.price || null,
-            marketData?.decimals || null
+            marketData?.price || null
           ]);
           const mcapStr = marketData?.market_cap ? marketData.market_cap.toString() : (marketData?.supply ? `${marketData.supply} (MCap N/A)` : 'N/A');
           console.log(`💾 Wallet SELL tracked: ${walletAddress.substring(0, 8)}... - ${tokenAddress.substring(0, 8)}... (Amount: ${amount}, MCap: ${mcapStr})`);
@@ -1488,15 +1480,13 @@ class DatabaseService {
           SET 
             first_buy_mcap = COALESCE(wallets.first_buy_mcap, $1),
             first_buy_supply = COALESCE(wallets.first_buy_supply, $2),
-            first_buy_price = COALESCE(wallets.first_buy_price, $3),
-            first_buy_decimals = COALESCE(wallets.first_buy_decimals, $4)
-          WHERE wallet_address = $5 AND token_address = $6
+            first_buy_price = COALESCE(wallets.first_buy_price, $3)
+          WHERE wallet_address = $4 AND token_address = $5
         `;
         await this.pool.query(query, [
           marketData.market_cap || null,
           marketData.supply || null,
           marketData.price || null,
-          marketData.decimals || null,
           walletAddress,
           tokenAddress
         ]);
@@ -1507,15 +1497,13 @@ class DatabaseService {
           SET 
             first_sell_mcap = COALESCE(wallets.first_sell_mcap, $1),
             first_sell_supply = COALESCE(wallets.first_sell_supply, $2),
-            first_sell_price = COALESCE(wallets.first_sell_price, $3),
-            first_sell_decimals = COALESCE(wallets.first_sell_decimals, $4)
-          WHERE wallet_address = $5 AND token_address = $6
+            first_sell_price = COALESCE(wallets.first_sell_price, $3)
+          WHERE wallet_address = $4 AND token_address = $5
         `;
         await this.pool.query(query, [
           marketData.market_cap || null,
           marketData.supply || null,
           marketData.price || null,
-          marketData.decimals || null,
           walletAddress,
           tokenAddress
         ]);
@@ -1550,13 +1538,11 @@ class DatabaseService {
           first_buy_mcap,
           first_buy_supply,
           first_buy_price,
-          first_buy_decimals,
           first_sell_timestamp,
           first_sell_amount,
           first_sell_mcap,
           first_sell_supply,
           first_sell_price,
-          first_sell_decimals,
           peak_buy_to_sell_price_sol,
           peak_buy_to_sell_price_usd,
           peak_buy_to_sell_mcap,
@@ -1676,10 +1662,10 @@ class DatabaseService {
       const totalAmountRaw = result.rows[0]?.total_amount || '0';
 
       // Get token decimals if not provided or invalid
-      // Priority: dev_buy_token_amount_decimal (from tokens table) > first_buy_decimals (from wallets table) > default 9
+      // Priority: dev_buy_token_amount_decimal (from tokens table) > default 9
       let decimals = tokenDecimals;
       if (decimals === null || decimals === undefined || isNaN(decimals)) {
-        // First try to get dev_buy_token_amount_decimal from tokens table (most accurate for token decimals)
+        // Try to get dev_buy_token_amount_decimal from tokens table (most accurate for token decimals)
         const tokenQuery = `
           SELECT dev_buy_token_amount_decimal FROM tokens WHERE mint_address = $1
         `;
@@ -1689,19 +1675,8 @@ class DatabaseService {
         if (devBuyTokenDecimals !== null && devBuyTokenDecimals !== undefined && !isNaN(devBuyTokenDecimals)) {
           decimals = devBuyTokenDecimals;
         } else {
-          // If not found, try to get from first_buy_decimals in wallets table
-          const walletQuery = `
-            SELECT first_buy_decimals FROM wallets WHERE wallet_address = $1 AND token_address = $2
-          `;
-          const walletResult = await this.pool.query(walletQuery, [walletAddress, tokenAddress]);
-          const walletDecimals = walletResult.rows[0]?.first_buy_decimals;
-
-          if (walletDecimals !== null && walletDecimals !== undefined && !isNaN(walletDecimals)) {
-            decimals = walletDecimals;
-          } else {
-            // Default to 9 if not found
-            decimals = 9;
-          }
+          // Default to 9 if not found
+          decimals = 9;
         }
       }
 
@@ -1788,13 +1763,11 @@ class DatabaseService {
           first_buy_mcap,
           first_buy_supply,
           first_buy_price,
-          first_buy_decimals,
           first_sell_timestamp,
           first_sell_amount,
           first_sell_mcap,
           first_sell_supply,
           first_sell_price,
-          first_sell_decimals,
           created_at
         FROM wallets
         WHERE token_address = $1
@@ -1843,13 +1816,11 @@ class DatabaseService {
           first_buy_mcap,
           first_buy_supply,
           first_buy_price,
-          first_buy_decimals,
           first_sell_timestamp,
           first_sell_amount,
           first_sell_mcap,
           first_sell_supply,
           first_sell_price,
-          first_sell_decimals,
           created_at
         FROM wallets
         ORDER BY created_at DESC
