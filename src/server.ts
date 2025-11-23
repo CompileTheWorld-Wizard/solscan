@@ -1471,6 +1471,37 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
       const buyTimestamp = firstBuy ? (firstBuy.blockTimestamp || firstBuy.created_at) : null;
       
       // Format sells for statistics
+      // First, calculate total sell tokens to normalize percentages
+      const totalSellTokens = sells.reduce((sum: number, sell: any) => {
+        return sum + ((parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals));
+      }, 0);
+      
+      // Calculate sell percentages and normalize to sum to 100%
+      // This ensures proportional costs sum correctly: sum(proportionalBuyCost) = walletBuyAmountSOL
+      // and sum(proportionalNonSellGasAndFees) = nonSellGasAndFees
+      // This guarantees: sum(sellPNL) = totalSellAmountSOL - (walletBuyAmountSOL + totalGasAndFees) = pnlSOL
+      const sellPercentages: number[] = [];
+      if (walletBuyAmountTokens > 0 && totalSellTokens > 0) {
+        // Calculate raw percentages based on buy tokens
+        const rawPercentages = sells.map((sell: any) => {
+          const sellAmountTokens = (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals);
+          return (sellAmountTokens / walletBuyAmountTokens) * 100;
+        });
+        const sumRawPercentages = rawPercentages.reduce((sum, p) => sum + p, 0);
+        if (sumRawPercentages > 0) {
+          // Always normalize to 100% to ensure proportional costs sum correctly
+          sellPercentages.push(...rawPercentages.map(p => (p / sumRawPercentages) * 100));
+        } else {
+          sellPercentages.push(...rawPercentages);
+        }
+      } else if (totalSellTokens > 0) {
+        // If no buy tokens, use sell tokens as basis (will sum to 100%)
+        sells.forEach((sell: any) => {
+          const sellAmountTokens = (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals);
+          sellPercentages.push((sellAmountTokens / totalSellTokens) * 100);
+        });
+      }
+      
       const formattedSells = sells.map((sell: any, index: number) => {
         const sellAmountSOL = (parseFloat(sell.out_amount) || 0) / Math.pow(10, SOL_DECIMALS);
         const sellAmountTokens = (parseFloat(sell.in_amount) || 0) / Math.pow(10, tokenDecimals);
@@ -1479,23 +1510,36 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
         const firstSellPNL = firstBuyMarketCap && sellMarketCap && sellMarketCap > 0
           ? (sellMarketCap / firstBuyMarketCap - 1) * 100
           : null;
-        const sellPercentOfBuy = walletBuyAmountTokens > 0
-          ? (sellAmountTokens / walletBuyAmountTokens) * 100
-          : null;
+        
+        // Use normalized percentage
+        const sellPercentOfBuy = sellPercentages[index] !== undefined ? sellPercentages[index] : null;
         
         // Calculate SOL PNL for this sell
         // PNL = sellAmountSOL - (proportional buy cost + proportional non-sell gas/fees + actual gas/fees for this sell)
         // This ensures: sum of all sellPNL = totalSellAmountSOL - (walletBuyAmountSOL + totalGasAndFees) = pnlSOL
         let sellPNL = null;
-        if (sellPercentOfBuy !== null && sellPercentOfBuy > 0) {
+        
+        // Get actual gas/fees for this specific sell transaction
+        const sellTipAmount = (sell.tipAmount != null ? parseFloat(sell.tipAmount) : 0) || 0;
+        const sellFeeAmount = (sell.feeAmount != null ? parseFloat(sell.feeAmount) : 0) || 0;
+        const sellGasAndFees = sellTipAmount + sellFeeAmount;
+        
+        if (sellPercentOfBuy !== null && sellPercentOfBuy > 0 && walletBuyAmountSOL > 0) {
+          // Normal case: calculate proportional costs using normalized percentage
           const proportionalBuyCost = walletBuyAmountSOL * (sellPercentOfBuy / 100);
           // Proportional share of non-sell gas/fees (buy and other transactions)
           const proportionalNonSellGasAndFees = nonSellGasAndFees * (sellPercentOfBuy / 100);
-          // Get actual gas/fees for this specific sell transaction
-          const sellTipAmount = (sell.tipAmount != null ? parseFloat(sell.tipAmount) : 0) || 0;
-          const sellFeeAmount = (sell.feeAmount != null ? parseFloat(sell.feeAmount) : 0) || 0;
-          const sellGasAndFees = sellTipAmount + sellFeeAmount;
           sellPNL = sellAmountSOL - (proportionalBuyCost + proportionalNonSellGasAndFees + sellGasAndFees);
+        } else if (sells.length > 0) {
+          // Edge case: no buy data or invalid percentage, allocate costs equally across all sells
+          // This ensures we still account for gas/fees even if we can't calculate proportional costs
+          const equalShareOfBuyCost = walletBuyAmountSOL / sells.length;
+          const equalShareOfNonSellGasAndFees = nonSellGasAndFees / sells.length;
+          sellPNL = sellAmountSOL - (equalShareOfBuyCost + equalShareOfNonSellGasAndFees + sellGasAndFees);
+        } else {
+          // Final fallback: if no sells or other edge case, just subtract gas/fees from sell amount
+          // This should rarely happen, but ensures sellPNL is always calculated
+          sellPNL = sellAmountSOL - sellGasAndFees;
         }
         
         let holdingTimeSeconds = null;
