@@ -32,6 +32,7 @@ export function parseSwapTransactionOutput(parsedInstruction) {
   const tokenEventAmount = tradeEvent?.data?.token_amount;
   const feeAmount = tradeEvent?.data?.fee;
   const creatorFeeAmount = tradeEvent?.data?.creator_fee;
+  const creatorAddress = tradeEvent?.data?.creator;
 
   const isBuy = type === 'buy';
   let inAmount = isBuy ? solEventAmount : tokenEventAmount;
@@ -66,6 +67,7 @@ export function parseSwapTransactionOutput(parsedInstruction) {
     in_amount: inAmount,
     out_amount: finalOutAmount,
     price: formattedPrice,
-    pool: bondingCurve
+    pool: bondingCurve,
+    creator: creatorAddress
   };
 }

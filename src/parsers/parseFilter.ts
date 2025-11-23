@@ -126,6 +126,7 @@ function extractFees(tx) {
 export function parseTransaction(transactionData: any) {
   try {
     // Get the transaction from the data
+    // const tx = transactionData?.transaction;
     const tx = transactionData?.transaction?.transaction;
 
     if (!tx) {
@@ -133,7 +134,8 @@ export function parseTransaction(transactionData: any) {
     }
 
     // Detect which platform this transaction is for
-    const platform = detectSwapPlatform(tx);
+    // console.log(JSON.stringify(transactionData))
+    const platform = detectSwapPlatform(transactionData.transaction);
 
     if (!platform) {
       console.log("❌ No supported platform detected");

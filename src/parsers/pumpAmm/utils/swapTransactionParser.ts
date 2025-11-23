@@ -11,7 +11,6 @@ function calculatePumpAmmPrice(
 
 export function parseSwapTransactionOutput(parsedInstruction, transaction) {
     const SOL_MINT = 'So11111111111111111111111111111111111111112';
-    const { inner_ixs, instructions } = parsedInstruction;
 
     if (!parsedInstruction || !transaction?.meta) {
         return;
@@ -45,7 +44,7 @@ export function parseSwapTransactionOutput(parsedInstruction, transaction) {
         coin_creator,
     } = evt;
 
-    const signerPubkey = swapInstruction?.accounts.find((account) => account.name === 'user')?.pubkey ?? coin_creator;
+    const signerPubkey = swapInstruction?.accounts.find((account) => account.name === 'user')?.pubkey;
 
     const swapAmount = isSell
         ? swapInstruction.args?.base_amount_in
@@ -139,7 +138,8 @@ export function parseSwapTransactionOutput(parsedInstruction, transaction) {
     const transactionEvent = {
         price: formattedPrice,
         type: swapInstruction.name,
-        user: signerPubkey,
+        feePayer: signerPubkey,
+        creator: coin_creator,
         mint: buySellEvent.mint ?? alternativeMint,
         out_amount: amountOut ?? quote_amount_out,
         in_amount: amountIn ?? base_amount_in,

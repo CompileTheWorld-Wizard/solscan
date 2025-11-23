@@ -21,6 +21,7 @@ let totalPages = 1; // Total pages from backend
 // Sorting state
 let sortColumn = null;
 let sortDirection = 'asc'; // 'asc' or 'desc'
+let sortSellIndex = null; // For sell columns: which sell index (0-based) to sort by
 
 // Selected row state
 let selectedRowElement = null;
@@ -65,6 +66,10 @@ const COLUMN_DEFINITIONS = [
     { key: 'tokenPeakPrice10sAfterFirstSell', label: 'Token Peak Price 10s After 1st Sell', order: 17, group: 'Price & Market Cap' },
     { key: 'walletBuyMarketCap', label: 'Wallet Buy Market Cap', order: 22, group: 'Price & Market Cap' },
     
+    // Buy Counts Group
+    { key: 'buysBeforeFirstSell', label: 'Buys Before First Sell', order: 25, group: 'Buy Counts' },
+    { key: 'buysAfterFirstSell', label: 'Buys After First Sell (10s)', order: 26, group: 'Buy Counts' },
+    
     // Position & Timing Group
     { key: 'walletBuyPositionAfterDev', label: 'Wallet Buy Position After Dev', order: 18, group: 'Position & Timing' },
     { key: 'walletBuyBlockNumber', label: 'Wallet Buy Block #', order: 19, group: 'Position & Timing' },
@@ -85,7 +90,8 @@ const SELL_COLUMN_DEFINITIONS = [
     { key: 'sellAmountSOL', label: 'Sell Amount in SOL', group: 'Sell Columns' },
     { key: 'sellAmountTokens', label: 'Sell Amount in Tokens', group: 'Sell Columns' },
     { key: 'sellTransactionSignature', label: 'Sell Transaction Signature', group: 'Sell Columns' },
-    { key: 'sellTimestamp', label: 'Sell Timestamp', group: 'Sell Columns' }
+    { key: 'sellTimestamp', label: 'Sell Timestamp', group: 'Sell Columns' },
+    { key: 'devStillHolding', label: 'Dev Still Holding', group: 'Sell Columns' }
 ];
 
 // Initialize column visibility from localStorage or default to all visible
@@ -1276,6 +1282,7 @@ function sortFilteredData() {
     if (!sortColumn) {
         // Restore filteredData to original order from dashboardData
         filteredData = [...dashboardData];
+        sortSellIndex = null; // Clear sell index when no sort
         return;
     }
     
@@ -1295,19 +1302,30 @@ function sortFilteredData() {
             aValue = getRawValue(a, sortColumn);
             bValue = getRawValue(b, sortColumn);
         } else {
-            // For sell columns, use first sell's value
-            const aSell = a.sells && a.sells[0];
-            const bSell = b.sells && b.sells[0];
+            // For sell columns, use the specific sell index that was clicked
+            const sellIndex = sortSellIndex !== null ? sortSellIndex : 0; // Default to first sell if not set
+            const aSell = a.sells && a.sells[sellIndex];
+            const bSell = b.sells && b.sells[sellIndex];
             aValue = aSell ? getRawSellValue(aSell, sortColumn) : null;
             bValue = bSell ? getRawSellValue(bSell, sortColumn) : null;
         }
         
-        // Handle null/undefined values
-        if (aValue === null || aValue === undefined) {
-            return sortDirection === 'asc' ? 1 : -1;
-        }
-        if (bValue === null || bValue === undefined) {
-            return sortDirection === 'asc' ? -1 : 1;
+        // Handle null/undefined values - bring them to bottom (asc) or top (desc)
+        // Special handling for sellNumber: group all non-null values together
+        if (sortColumn === 'sellNumber') {
+            // If both are null, keep order
+            if (aValue === null && bValue === null) return 0;
+            // If one is null, it goes to bottom (asc) or top (desc)
+            if (aValue === null) return sortDirection === 'asc' ? 1 : -1;
+            if (bValue === null) return sortDirection === 'asc' ? -1 : 1;
+        } else {
+            // For other columns, handle nulls normally
+            if (aValue === null || aValue === undefined) {
+                return sortDirection === 'asc' ? 1 : -1;
+            }
+            if (bValue === null || bValue === undefined) {
+                return sortDirection === 'asc' ? -1 : 1;
+            }
         }
         
         // Compare values
@@ -1357,6 +1375,8 @@ function getRawValue(token, key) {
         case 'walletBuyMarketCap': return token.walletBuyMarketCap;
         case 'walletGasAndFeesAmount': return token.walletGasAndFeesAmount;
         case 'transactionSignature': return token.transactionSignature || '';
+        case 'buysBeforeFirstSell': return token.buysBeforeFirstSell;
+        case 'buysAfterFirstSell': return token.buysAfterFirstSell;
         default: return null;
     }
 }
@@ -1374,6 +1394,9 @@ function getRawSellValue(sell, key) {
         case 'sellAmountTokens': return sell.sellAmountTokens;
         case 'sellTransactionSignature': return sell.transactionSignature || '';
         case 'sellTimestamp': return sell.timestamp || '';
+        case 'devStillHolding': 
+            if (sell.devStillHolding === null || sell.devStillHolding === undefined) return null;
+            return sell.devStillHolding;
         default: return null;
     }
 }
@@ -1399,7 +1422,10 @@ function createSortableHeader(label, columnKey, isSellColumn, sellIndex = null) 
     sortIndicator.style.cssText = 'font-size: 0.75rem; color: #94a3b8;';
     
     // Check if this column is currently sorted
-    const isCurrentSort = sortColumn === columnKey;
+    // For sell columns, also check if the sell index matches
+    const isCurrentSort = isSellColumn 
+        ? (sortColumn === columnKey && sortSellIndex === sellIndex)
+        : (sortColumn === columnKey);
     if (isCurrentSort) {
         sortIndicator.textContent = sortDirection === 'asc' ? '▲' : '▼';
         sortIndicator.style.color = '#3b82f6';
@@ -1429,8 +1455,11 @@ function createSortableHeader(label, columnKey, isSellColumn, sellIndex = null) 
     
     // Add click handler
     th.addEventListener('click', () => {
+        // For sell columns, check if this is the same column and sell index
+        const isSameSellColumn = isSellColumn && sortColumn === columnKey && sortSellIndex === sellIndex;
+        
         // Cycle through: asc -> desc -> no sort -> asc...
-        if (sortColumn === columnKey) {
+        if (isSameSellColumn || (!isSellColumn && sortColumn === columnKey)) {
             // Same column: cycle through states
             if (sortDirection === 'asc') {
                 sortDirection = 'desc';
@@ -1438,11 +1467,18 @@ function createSortableHeader(label, columnKey, isSellColumn, sellIndex = null) 
                 // Reset to no sort
                 sortColumn = null;
                 sortDirection = 'asc';
+                sortSellIndex = null;
             }
         } else {
             // Different column: set to ascending
             sortColumn = columnKey;
             sortDirection = 'asc';
+            // For sell columns, store the sell index
+            if (isSellColumn && sellIndex !== null) {
+                sortSellIndex = sellIndex;
+            } else {
+                sortSellIndex = null;
+            }
         }
         
         // Reset to first page when sorting changes
@@ -1788,6 +1824,9 @@ function renderDashboardTable() {
                 case 'sellTimestamp':
                     headerLabel = `Wallet Sell Timestamp ${i}`;
                     break;
+                case 'devStillHolding':
+                    headerLabel = `Dev Still Holding at ${i === 1 ? '1st' : i === 2 ? '2nd' : i === 3 ? '3rd' : `${i}th`} Sell`;
+                    break;
             }
             if (headerLabel) {
                 sellHeaders.push(headerLabel);
@@ -1839,6 +1878,9 @@ function renderDashboardTable() {
                 case 'sellTimestamp':
                     headerLabel = `Wallet Sell Timestamp ${i}`;
                     break;
+                case 'devStillHolding':
+                    headerLabel = `Dev Still Holding at ${i === 1 ? '1st' : i === 2 ? '2nd' : i === 3 ? '3rd' : `${i}th`} Sell`;
+                    break;
             }
             if (headerLabel) {
                 // For sell columns, we'll sort by the first sell's value
@@ -1887,6 +1929,8 @@ function renderDashboardTable() {
             case 'walletBuyMarketCap': return formatNumber(token.walletBuyMarketCap, 2);
             case 'walletGasAndFeesAmount': return formatNumber(token.walletGasAndFeesAmount, 4);
             case 'transactionSignature': return createLink(token.transactionSignature, `https://solscan.io/tx/${token.transactionSignature}`, token.transactionSignature ? token.transactionSignature.substring(0, 8) + '...' : '');
+            case 'buysBeforeFirstSell': return token.buysBeforeFirstSell !== null && token.buysBeforeFirstSell !== undefined ? token.buysBeforeFirstSell.toString() : '';
+            case 'buysAfterFirstSell': return token.buysAfterFirstSell !== null && token.buysAfterFirstSell !== undefined ? token.buysAfterFirstSell.toString() : '';
             default: return '';
         }
     };
@@ -1994,9 +2038,24 @@ function renderDashboardTable() {
                         case 'sellTimestamp':
                             cellContent = sell.timestamp || '';
                             break;
+                        case 'devStillHolding':
+                            if (sell.devStillHolding === null || sell.devStillHolding === undefined) {
+                                cellContent = 'N/A';
+                            } else {
+                                cellContent = sell.devStillHolding ? 'Yes' : 'No';
+                            }
+                            break;
                     }
                     
                     const td = document.createElement('td');
+                    // Add styling for devStillHolding
+                    if (col.key === 'devStillHolding' && sell && sell.devStillHolding !== null && sell.devStillHolding !== undefined) {
+                        if (sell.devStillHolding) {
+                            td.style.color = '#10b981'; // Green for Yes
+                        } else {
+                            td.style.color = '#ef4444'; // Red for No
+                        }
+                    }
                     if (typeof cellContent === 'string' && cellContent.includes('<a')) {
                         td.innerHTML = cellContent;
                     } else {
@@ -2651,6 +2710,8 @@ function getCellValueForExport(token, key) {
         case 'walletBuyMarketCap': return token.walletBuyMarketCap !== null && token.walletBuyMarketCap !== undefined ? token.walletBuyMarketCap : '';
         case 'walletGasAndFeesAmount': return token.walletGasAndFeesAmount !== null && token.walletGasAndFeesAmount !== undefined ? token.walletGasAndFeesAmount : '';
         case 'transactionSignature': return token.transactionSignature || '';
+        case 'buysBeforeFirstSell': return token.buysBeforeFirstSell !== null && token.buysBeforeFirstSell !== undefined ? token.buysBeforeFirstSell : '';
+        case 'buysAfterFirstSell': return token.buysAfterFirstSell !== null && token.buysAfterFirstSell !== undefined ? token.buysAfterFirstSell : '';
         default: return '';
     }
 }
@@ -2933,6 +2994,9 @@ window.exportDashboardToExcel = async function() {
                 case 'sellTimestamp':
                     headerLabel = `Wallet Sell Timestamp ${i}`;
                     break;
+                case 'devStillHolding':
+                    headerLabel = `Dev Still Holding at ${i === 1 ? '1st' : i === 2 ? '2nd' : i === 3 ? '3rd' : `${i}th`} Sell`;
+                    break;
             }
             if (headerLabel) {
                 sellHeaders.push(headerLabel);
@@ -2953,6 +3017,9 @@ window.exportDashboardToExcel = async function() {
             case 'sellAmountTokens': return sell.sellAmountTokens !== null && sell.sellAmountTokens !== undefined ? sell.sellAmountTokens : '';
             case 'sellTransactionSignature': return sell.transactionSignature || '';
             case 'sellTimestamp': return sell.timestamp || '';
+            case 'devStillHolding': 
+                if (sell.devStillHolding === null || sell.devStillHolding === undefined) return 'N/A';
+                return sell.devStillHolding ? 'Yes' : 'No';
             default: return '';
         }
     };
@@ -3093,20 +3160,23 @@ window.exportAllWalletsToExcel = async function() {
                     case 'sellAmountTokens':
                         headerLabel = `Wallet Sell Amount in Tokens ${i}`;
                         break;
-                    case 'sellTransactionSignature':
-                        headerLabel = `Transaction Signature ${i}`;
-                        break;
-                    case 'sellTimestamp':
-                        headerLabel = `Wallet Sell Timestamp ${i}`;
-                        break;
-                }
-                if (headerLabel) {
-                    sellHeaders.push(headerLabel);
-                }
-            });
-        }
-        
-        const headers = [...baseHeaders, ...sellHeaders];
+                case 'sellTransactionSignature':
+                    headerLabel = `Transaction Signature ${i}`;
+                    break;
+                case 'sellTimestamp':
+                    headerLabel = `Wallet Sell Timestamp ${i}`;
+                    break;
+                case 'devStillHolding':
+                    headerLabel = `Dev Still Holding at ${i === 1 ? '1st' : i === 2 ? '2nd' : i === 3 ? '3rd' : `${i}th`} Sell`;
+                    break;
+            }
+            if (headerLabel) {
+                sellHeaders.push(headerLabel);
+            }
+        });
+    }
+    
+    const headers = [...baseHeaders, ...sellHeaders];
         
         // Helper function to get cell value for export (same as in exportDashboardToExcel)
         const getCellValueForExport = (token, key) => {
@@ -3119,15 +3189,17 @@ window.exportAllWalletsToExcel = async function() {
                 case 'devBuyAmountSOL': return token.devBuyAmountSOL !== null && token.devBuyAmountSOL !== undefined ? token.devBuyAmountSOL : '';
                 case 'walletBuyPercentOfTotalSupply': return token.walletBuyPercentOfTotalSupply !== null && token.walletBuyPercentOfTotalSupply !== undefined ? token.walletBuyPercentOfTotalSupply : '';
                 case 'walletBuyPercentOfRemainingSupply': return token.walletBuyPercentOfRemainingSupply !== null && token.walletBuyPercentOfRemainingSupply !== undefined ? token.walletBuyPercentOfRemainingSupply : '';
-                case 'walletBuyMarketCap': return token.walletBuyMarketCap !== null && token.walletBuyMarketCap !== undefined ? token.walletBuyMarketCap : '';
-                case 'walletBuyTimestamp': return token.walletBuyTimestamp || '';
-                case 'pnlSOL': return token.pnlSOL !== null && token.pnlSOL !== undefined ? token.pnlSOL : '';
-                case 'pnlPercent': return token.pnlPercent !== null && token.pnlPercent !== undefined ? token.pnlPercent : '';
-                case 'openPositionCount': return token.openPositionCount !== null && token.openPositionCount !== undefined ? token.openPositionCount : '';
-                case 'walletGasAndFeesAmount': return token.walletGasAndFeesAmount !== null && token.walletGasAndFeesAmount !== undefined ? token.walletGasAndFeesAmount : '';
-                default: return token[key] !== null && token[key] !== undefined ? token[key] : '';
-            }
-        };
+        case 'walletBuyMarketCap': return token.walletBuyMarketCap !== null && token.walletBuyMarketCap !== undefined ? token.walletBuyMarketCap : '';
+        case 'walletBuyTimestamp': return token.walletBuyTimestamp || '';
+        case 'pnlSOL': return token.pnlSOL !== null && token.pnlSOL !== undefined ? token.pnlSOL : '';
+        case 'pnlPercent': return token.pnlPercent !== null && token.pnlPercent !== undefined ? token.pnlPercent : '';
+        case 'openPositionCount': return token.openPositionCount !== null && token.openPositionCount !== undefined ? token.openPositionCount : '';
+        case 'walletGasAndFeesAmount': return token.walletGasAndFeesAmount !== null && token.walletGasAndFeesAmount !== undefined ? token.walletGasAndFeesAmount : '';
+        case 'buysBeforeFirstSell': return token.buysBeforeFirstSell !== null && token.buysBeforeFirstSell !== undefined ? token.buysBeforeFirstSell : '';
+        case 'buysAfterFirstSell': return token.buysAfterFirstSell !== null && token.buysAfterFirstSell !== undefined ? token.buysAfterFirstSell : '';
+        default: return token[key] !== null && token[key] !== undefined ? token[key] : '';
+    }
+};
         
         // Helper function to get sell cell value for export (same as in exportDashboardToExcel)
         const getSellCellValueForExport = (sell, key) => {
@@ -3138,11 +3210,14 @@ window.exportAllWalletsToExcel = async function() {
                 case 'sellPercentOfBuy': return sell.sellPercentOfBuy !== null && sell.sellPercentOfBuy !== undefined ? sell.sellPercentOfBuy : '';
                 case 'sellAmountSOL': return sell.sellAmountSOL !== null && sell.sellAmountSOL !== undefined ? sell.sellAmountSOL : '';
                 case 'sellAmountTokens': return sell.sellAmountTokens !== null && sell.sellAmountTokens !== undefined ? sell.sellAmountTokens : '';
-                case 'sellTransactionSignature': return sell.transactionSignature || '';
-                case 'sellTimestamp': return sell.timestamp || '';
-                default: return '';
-            }
-        };
+            case 'sellTransactionSignature': return sell.transactionSignature || '';
+            case 'sellTimestamp': return sell.timestamp || '';
+            case 'devStillHolding':
+                if (sell.devStillHolding === null || sell.devStillHolding === undefined) return 'N/A';
+                return sell.devStillHolding ? 'Yes' : 'No';
+            default: return '';
+        }
+    };
         
         // Build data rows
         const rows = allData.map(token => {

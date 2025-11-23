@@ -11,7 +11,6 @@ import { setupFileLogging } from "./utils/logger";
 import { dbService } from "./database";
 import { tracker } from "./tracker";
 import { tokenService } from "./services/tokenService";
-import { walletTrackingService } from "./services/walletTrackingService";
 
 // Extend session type to include authenticated property
 declare module "express-session" {
@@ -375,7 +374,7 @@ app.get("/api/export-token/:wallet/:token", requireAuth, async (req, res) => {
     const tokenInfo = tokens.length > 0 ? tokens[0] : null;
     
     // Get wallet token info
-    const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
+    const walletTradesResult = await dbService.getWalletTokens(wallet);
     const walletTrades = walletTradesResult.data;
     const walletTokenInfo = walletTrades.find((t: any) => t.token_address === token) || null;
     
@@ -412,7 +411,7 @@ app.get("/api/export-token-excel/:wallet/:token", requireAuth, async (req, res) 
     const tokenInfo = tokens.length > 0 ? tokens[0] : null;
     
     // Get wallet token info
-    const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
+    const walletTradesResult = await dbService.getWalletTokens(wallet);
     const walletTrades = walletTradesResult.data;
     const walletTokenInfo = walletTrades.find((t: any) => t.token_address === token) || null;
     
@@ -682,7 +681,7 @@ app.get("/api/export-all-tokens-excel/:wallet", requireAuth, async (req, res) =>
     const { wallet } = req.params;
     
     // Get all wallet trades
-    const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
+    const walletTradesResult = await dbService.getWalletTokens(wallet);
     const walletTrades = walletTradesResult.data;
     
     if (!walletTrades || walletTrades.length === 0) {
@@ -1000,7 +999,7 @@ app.get("/api/analyze/:wallet", requireAuth, async (req, res) => {
     const offset = (page - 1) * pageSize;
     
     // Get wallet trading history from wallets table with pagination
-    const walletTradesResult = await walletTrackingService.getWalletTokens(wallet, limit, offset);
+    const walletTradesResult = await dbService.getWalletTokens(wallet, limit, offset);
     const walletTrades = walletTradesResult.data;
     const totalTrades = walletTradesResult.total;
     
@@ -1375,7 +1374,7 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
     }
     
     // Get all wallet trades (ALL data, no pagination/filtering)
-    const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
+    const walletTradesResult = await dbService.getWalletTokens(wallet);
     const walletTrades = walletTradesResult.data;
     
     if (!walletTrades || walletTrades.length === 0) {
@@ -1622,7 +1621,7 @@ app.post("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
     const averageOpenPosition = await dbService.getWalletAverageOpenPosition(wallet);
     
     // Get all wallet trades (we need all for analytics, but will paginate the processing)
-    const walletTradesResult = await walletTrackingService.getWalletTokens(wallet);
+    const walletTradesResult = await dbService.getWalletTokens(wallet);
     const walletTrades = walletTradesResult.data;
     
     if (!walletTrades || walletTrades.length === 0) {
@@ -1782,6 +1781,14 @@ app.post("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
       const tokenPeakMarketCapBeforeFirstSell = trade.peak_buy_to_sell_mcap ? parseFloat(trade.peak_buy_to_sell_mcap.toString()) : null;
       const tokenPeakMarketCap10sAfterFirstSell = trade.peak_sell_to_end_mcap ? parseFloat(trade.peak_sell_to_end_mcap.toString()) : null;
       
+      // Get buy counts from database (pool monitoring data)
+      const buysBeforeFirstSell = trade.buys_before_first_sell !== null && trade.buys_before_first_sell !== undefined 
+        ? parseInt(trade.buys_before_first_sell.toString(), 10) 
+        : null;
+      const buysAfterFirstSell = trade.buys_after_first_sell !== null && trade.buys_after_first_sell !== undefined 
+        ? parseInt(trade.buys_after_first_sell.toString(), 10) 
+        : null;
+      
       // Get first sell price from database
       const firstSellPrice = trade.first_sell_price ? parseFloat(trade.first_sell_price.toString()) : null;
       
@@ -1835,7 +1842,8 @@ app.post("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
           transactionSignature: sell.transaction_id,
           timestamp: formatTimestamp(sell.blockTimestamp || sell.created_at),
           profitAtSell: profitAtSell,
-          holdingTimeSeconds: holdingTimeSeconds
+          holdingTimeSeconds: holdingTimeSeconds,
+          devStillHolding: sell.devStillHolding !== null && sell.devStillHolding !== undefined ? sell.devStillHolding : null
         };
       });
       
@@ -1868,6 +1876,10 @@ app.post("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         tokenPeakMarketCapBeforeFirstSell: tokenPeakMarketCapBeforeFirstSell,
         tokenPeakMarketCap10sAfterFirstSell: tokenPeakMarketCap10sAfterFirstSell,
         firstSellPrice: firstSellPrice,
+        
+        // Buy counts
+        buysBeforeFirstSell: buysBeforeFirstSell,
+        buysAfterFirstSell: buysAfterFirstSell,
         
         // Position data
         walletBuyPositionAfterDev: walletBuyPositionAfterDev,

@@ -99,6 +99,9 @@ CREATE TABLE IF NOT EXISTS wallets (
     peak_sell_to_end_price_sol NUMERIC(20, 9),
     peak_sell_to_end_price_usd NUMERIC(20, 9),
     peak_sell_to_end_mcap NUMERIC(20, 2),
+    buys_before_first_sell INTEGER DEFAULT 0,
+    buys_after_first_sell INTEGER DEFAULT 0,
+    price_timeseries JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(wallet_address, token_address)
 );

@@ -15,6 +15,7 @@ interface TransactionData {
   blockTimestamp?: number | null;
   token_price_sol?: number | null;
   token_price_usd?: number | null;
+  dev_still_holding?: boolean | null;
   mint_from_name?: string | null;
   mint_from_image?: string | null;
   mint_from_symbol?: string | null;
@@ -99,8 +100,20 @@ class DatabaseService {
           total_supply NUMERIC(40, 0),
           block_number BIGINT,
           block_timestamp TIMESTAMP,
+          dev_still_holding BOOLEAN,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        
+        -- Add dev_still_holding column if it doesn't exist (for existing databases)
+        DO $$ 
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'transactions' AND column_name = 'dev_still_holding'
+          ) THEN
+            ALTER TABLE transactions ADD COLUMN dev_still_holding BOOLEAN;
+          END IF;
+        END $$;
 
         CREATE INDEX IF NOT EXISTS idx_transaction_id ON transactions(transaction_id);
         CREATE INDEX IF NOT EXISTS idx_platform ON transactions(platform);
@@ -163,6 +176,7 @@ class DatabaseService {
           first_sell_supply VARCHAR(100),
           first_sell_price NUMERIC(20, 8),
           first_sell_decimals INTEGER,
+          price_timeseries JSONB,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(wallet_address, token_address)
         );
@@ -172,6 +186,9 @@ class DatabaseService {
         CREATE INDEX IF NOT EXISTS idx_wallet_token ON wallets(wallet_address, token_address);
         CREATE INDEX IF NOT EXISTS idx_wallets_first_buy ON wallets(first_buy_timestamp);
         CREATE INDEX IF NOT EXISTS idx_wallets_first_sell ON wallets(first_sell_timestamp);
+
+        -- Drop wallet_stats table if it exists (no longer used)
+        DROP TABLE IF EXISTS wallet_stats;
 
         CREATE TABLE IF NOT EXISTS credentials (
           id SERIAL PRIMARY KEY,
@@ -348,6 +365,35 @@ class DatabaseService {
         console.warn('⚠️ Failed to add open_position_count column (may already exist):', error);
       }
 
+      // Migration: Add price_timeseries JSONB column to wallets table if it doesn't exist
+      try {
+        const hasPriceTimeseries = await this.columnExists('wallets', 'price_timeseries');
+        if (!hasPriceTimeseries) {
+          await this.pool.query(`
+            ALTER TABLE wallets 
+            ADD COLUMN price_timeseries JSONB DEFAULT '[]'::jsonb
+          `);
+          console.log('✅ Added price_timeseries JSONB column to wallets table');
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to add price_timeseries column (may already exist):', error);
+      }
+
+      // Migration: Add buy count columns to wallets table if they don't exist
+      try {
+        const hasBuysBeforeFirstSell = await this.columnExists('wallets', 'buys_before_first_sell');
+        if (!hasBuysBeforeFirstSell) {
+          await this.pool.query(`
+            ALTER TABLE wallets 
+            ADD COLUMN buys_before_first_sell INTEGER DEFAULT 0,
+            ADD COLUMN buys_after_first_sell INTEGER DEFAULT 0
+          `);
+          console.log('✅ Added buy count columns (buys_before_first_sell, buys_after_first_sell) to wallets table');
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to add buy count columns (may already exist):', error);
+      }
+
       this.isInitialized = true;
       console.log('✅ Database initialized successfully');
     } catch (error) {
@@ -387,9 +433,11 @@ class DatabaseService {
             block_number,
             block_timestamp,
             token_price_sol,
-            token_price_usd
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-          ON CONFLICT (transaction_id) DO NOTHING
+            token_price_usd,
+            dev_still_holding
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          ON CONFLICT (transaction_id) DO UPDATE SET
+            dev_still_holding = EXCLUDED.dev_still_holding
         `;
 
         const values = [
@@ -407,6 +455,7 @@ class DatabaseService {
           blockTimestamp,
           transactionData.token_price_sol ?? null,
           transactionData.token_price_usd ?? null,
+          transactionData.dev_still_holding ?? null,
         ];
 
         await this.pool.query(query, values);
@@ -449,6 +498,26 @@ class DatabaseService {
       console.log(`💾 Market cap, total supply, and token prices updated for tx: ${transactionId}`);
     } catch (error: any) {
       console.error(`❌ Failed to update market cap for ${transactionId}:`, error.message);
+    }
+  }
+
+  /**
+   * Update dev_still_holding for a transaction by signature
+   */
+  async updateTransactionDevHolding(
+    transactionId: string,
+    devStillHolding: boolean
+  ): Promise<void> {
+    try {
+      const query = `
+        UPDATE transactions
+        SET dev_still_holding = $2
+        WHERE transaction_id = $1
+      `;
+      await this.pool.query(query, [transactionId, devStillHolding]);
+      console.log(`💾 Dev still holding updated for tx: ${transactionId} = ${devStillHolding}`);
+    } catch (error: any) {
+      console.error(`❌ Failed to update dev_still_holding for ${transactionId}:`, error.message);
     }
   }
 
@@ -868,6 +937,7 @@ class DatabaseService {
           t.total_supply as "totalSupply",
           t.block_number as "blockNumber",
           t.block_timestamp as "blockTimestamp",
+          t.dev_still_holding as "devStillHolding",
           t.created_at
         FROM transactions t
         WHERE t.fee_payer = $1
@@ -2144,7 +2214,9 @@ class DatabaseService {
     peakBuyToSellMcap: number,
     peakSellToEndPriceSol: number,
     peakSellToEndPriceUsd: number,
-    peakSellToEndMcap: number
+    peakSellToEndMcap: number,
+    buysBeforeFirstSell: number = 0,
+    buysAfterFirstSell: number = 0
   ): Promise<void> {
     try {
       const query = `
@@ -2154,7 +2226,9 @@ class DatabaseService {
             peak_buy_to_sell_mcap = $5,
             peak_sell_to_end_price_sol = $6,
             peak_sell_to_end_price_usd = $7,
-            peak_sell_to_end_mcap = $8
+            peak_sell_to_end_mcap = $8,
+            buys_before_first_sell = $9,
+            buys_after_first_sell = $10
         WHERE wallet_address = $1 AND token_address = $2
       `;
       await this.pool.query(query, [
@@ -2165,11 +2239,95 @@ class DatabaseService {
         peakBuyToSellMcap || null,
         peakSellToEndPriceSol || null,
         peakSellToEndPriceUsd || null,
-        peakSellToEndMcap || null
+        peakSellToEndMcap || null,
+        buysBeforeFirstSell || 0,
+        buysAfterFirstSell || 0
       ]);
       console.log(`💾 Peak prices updated for wallet ${walletAddress.substring(0, 8)}... - token ${tokenAddress.substring(0, 8)}...`);
     } catch (error: any) {
       console.error(`❌ Failed to update peak prices:`, error.message);
+    }
+  }
+
+  /**
+   * Save timeseries data for pool monitoring (marketcap, tokenPriceSOL, tokenPriceUSD)
+   * Appends data point to JSONB array in wallets table
+   */
+  async savePoolPriceTimeseries(
+    walletAddress: string,
+    tokenAddress: string,
+    marketcap: number,
+    tokenPriceSol: number,
+    tokenPriceUsd: number,
+    poolAddress?: string,
+    sessionKey?: string,
+    timestamp?: Date
+  ): Promise<void> {
+    // Use setImmediate to ensure this is truly async and non-blocking
+    setImmediate(async () => {
+      try {
+        const dataPoint = {
+          timestamp: (timestamp || new Date()).toISOString(),
+          marketcap: marketcap || null,
+          tokenPriceSol: tokenPriceSol || null,
+          tokenPriceUsd: tokenPriceUsd || null,
+          poolAddress: poolAddress || null,
+          sessionKey: sessionKey || null
+        };
+
+        const query = `
+          UPDATE wallets
+          SET price_timeseries = COALESCE(price_timeseries, '[]'::jsonb) || $1::jsonb
+          WHERE wallet_address = $2 AND token_address = $3
+        `;
+        
+        await this.pool.query(query, [
+          JSON.stringify([dataPoint]),
+          walletAddress,
+          tokenAddress
+        ]);
+      } catch (error: any) {
+        console.error(`❌ Failed to save pool price timeseries data:`, error.message);
+      }
+    });
+  }
+
+  /**
+   * Save batch of timeseries data points for pool monitoring
+   * Appends all data points to JSONB array in wallets table at once
+   */
+  async savePoolPriceTimeseriesBatch(
+    walletAddress: string,
+    tokenAddress: string,
+    timeseriesData: Array<{
+      timestamp: string;
+      marketcap: number | null;
+      tokenPriceSol: number | null;
+      tokenPriceUsd: number | null;
+      poolAddress: string | null;
+      sessionKey: string | null;
+      signature?: string | null;
+    }>
+  ): Promise<void> {
+    if (!timeseriesData || timeseriesData.length === 0) {
+      return;
+    }
+
+    try {
+      const query = `
+        UPDATE wallets
+        SET price_timeseries = COALESCE(price_timeseries, '[]'::jsonb) || $1::jsonb
+        WHERE wallet_address = $2 AND token_address = $3
+      `;
+      
+      await this.pool.query(query, [
+        JSON.stringify(timeseriesData),
+        walletAddress,
+        tokenAddress
+      ]);
+    } catch (error: any) {
+      console.error(`❌ Failed to save pool price timeseries batch data:`, error.message);
+      throw error;
     }
   }
 

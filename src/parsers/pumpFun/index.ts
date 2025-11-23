@@ -25,6 +25,7 @@ export function parsePumpFunTransaction(tx: any) {
   const result = {
     platform : "PumpFun",
     type : parsedPumpfunTxn.type,
+    creator: parsedPumpfunTxn.creator,
     feePayer : parsedPumpfunTxn.user,
     mintFrom : parsedPumpfunTxn.type == 'sell' ? parsedPumpfunTxn.mint : SOL_MINT,
     mintTo : parsedPumpfunTxn.type == 'sell' ? SOL_MINT : parsedPumpfunTxn.mint,

@@ -6,7 +6,7 @@ import { parseTransaction } from "../parsers/parseFilter";
 import { dbService } from "../database";
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { tokenQueueService } from "../services/tokenQueueService";
-import { walletTrackingService } from "../services/walletTrackingService";
+import { PoolMonitoringService } from "../services/poolMonitoringService";
 
 const RETRY_DELAY_MS = 1000
 const MAX_RETRY_WITH_LAST_SLOT = 5
@@ -23,6 +23,7 @@ class TransactionTracker {
   private addresses: string[] = [];
   private currentStream: any = null;
   private solanaConnection: Connection | null = null;
+  private poolMonitoringService: PoolMonitoringService | null = null;
 
   constructor() {
     // Initialize with empty addresses
@@ -54,9 +55,11 @@ class TransactionTracker {
     const rpcUrl = `https://dillwifit.shyft.to/${shyftApiKey}`;
     this.solanaConnection = new Connection(rpcUrl, "confirmed");
 
-    // Initialize wallet tracking service with Solana connection for pool monitoring
-    walletTrackingService.initialize(this.solanaConnection).catch(error => {
-      console.error('Failed to initialize wallet tracking service:', error);
+    // Initialize pool monitoring service
+    PoolMonitoringService.getInstance(this.solanaConnection).then(service => {
+      this.poolMonitoringService = service;
+    }).catch(error => {
+      console.error('Failed to initialize pool monitoring service:', error);
     });
 
     console.log("✅ Tracker initialized");
@@ -119,6 +122,9 @@ class TransactionTracker {
           currentSlot = data.transaction.slot.toString();
         }
 
+        // Extract createdAt timestamp from stream data (slot timestamp)
+        const createdAt = data.createdAt || null;
+
         const tx = data.transaction?.transaction?.transaction;
         if (tx?.signatures?.[0]) {
           hasRcvdMSg = true;
@@ -127,145 +133,25 @@ class TransactionTracker {
 
           const result = parseTransaction(data.transaction);
 
-          // Save to database asynchronously (non-blocking)
+          // Process transaction asynchronously (non-blocking)
           if (result) {
-            // Convert slot to number for block_number
-            const blockNumber = currentSlot ? parseInt(currentSlot, 10) : null;
-            const blockNumberValue = (blockNumber !== null && !isNaN(blockNumber)) ? blockNumber : null;
-
-            // Record current time when transaction is received (Unix epoch in seconds, UTC)
-            const blockTimestamp = Math.floor(Date.now() / 1000);
-
-            console.log(`${result.type} Transaction triggered. Swap ${result.mint_from}(${result.in_amount}) -> ${result.mint_to}(${result.out_amount})`)
-
-            dbService.saveTransaction(sig, {
-              platform: result.platform,
-              type: result.type,
-              mint_from: result.mintFrom,
-              mint_to: result.mintTo,
-              in_amount: result.in_amount,
-              out_amount: result.out_amount,
-              feePayer: result.feePayer,
-              tipAmount: result.tipAmount,
-              feeAmount: result.feeAmount,
-              blockNumber: blockNumberValue,
-              blockTimestamp: blockTimestamp,
-            });
-
-            // Extract token from buy/sell events
+            // Run transaction processing and pool monitoring in parallel
             const txType = result.type?.toUpperCase();
-            console.log(`📝 Transaction type: ${result.type} (normalized: ${txType})`);
+            const tokenAddress = (txType === 'BUY' || txType === 'SELL') 
+              ? this.extractTokenAddress(result) 
+              : null;
 
-            if (txType === 'BUY' || txType === 'SELL') {
-              // Wrap in async IIFE to allow await
-              (async () => {
-                console.log(`✅ Processing ${result.type} transaction...`);
-
-                // Extract token address once (used by both wallet tracking and token queue)
-                const tokenAddress = this.extractTokenAddress(result);
-
-                if (!tokenAddress) {
-                  console.log(`⚠️ No valid token found in ${result.type} transaction (mintFrom: ${result.mintFrom?.substring(0, 8)}, mintTo: ${result.mintTo?.substring(0, 8)})`);
-                  return;
-                }
-
-                console.log(`🔎 Token extracted: ${tokenAddress.substring(0, 8)}...`);
-
-                // Handle buy/sell event flow:
-                // 1. Get token price in SOL from parseTransaction result
-                const tokenPriceSol = result.price ? parseFloat(result.price.toString()) : null;
-
-                if (tokenPriceSol === null || isNaN(tokenPriceSol)) {
-                  console.log(`⚠️ No valid price found in transaction result for ${sig}`);
-                } else {
-                  // 2. Fetch SOL price from database
-                  const solPriceUsd = await dbService.getLatestSolPrice();
-                  
-                  if (!solPriceUsd) {
-                    console.log(`⚠️ Failed to fetch SOL price from database for ${sig}`);
-                  } else {
-                    const tokenPriceUsd = tokenPriceSol * solPriceUsd;
-                    const supplyData = await this.getTokenTotalSupply(tokenAddress);
-                    
-                    if (supplyData) {
-                      const { supply: totalSupply, decimals } = supplyData;
-                      console.log(`📊 Total supply: ${totalSupply} (decimals: ${decimals})`);
-
-                      // Calculate market cap = total supply * token price in USD
-                      const marketCap = totalSupply * tokenPriceUsd;
-
-                      // 6. Update database with market cap, total supply, and token prices
-                      dbService.updateTransactionMarketCap(
-                        sig, 
-                        marketCap, 
-                        totalSupply,
-                        tokenPriceSol,
-                        tokenPriceUsd
-                      ).catch((e) => {
-                        console.error(`Failed to persist market cap for ${sig}:`, e?.message || e);
-                      });
-
-                      // 7. Track wallet-token pair with market cap info
-                      walletTrackingService.trackWalletToken(
-                        result.feePayer,
-                        tokenAddress,
-                        result.in_amount?.toString() || '0',
-                        result.out_amount?.toString() || '0',
-                        result.type,
-                        {
-                          success: true,
-                          marketCap,
-                          tokenSupply: totalSupply,
-                          tokenAddress,
-                          price: tokenPriceUsd,
-                          decimals: decimals
-                        },
-                        result.pool // Pass pool address for monitoring
-                      ).catch(error => {
-                        console.error(`Failed to track wallet-token pair: ${error.message}`);
-                      });
-                    } else {
-                      console.log(`⚠️ Failed to fetch total supply for ${tokenAddress.substring(0, 8)}...`);
-                      
-                      // Still update token prices even if we can't get supply
-                      dbService.updateTransactionMarketCap(
-                        sig, 
-                        null, 
-                        null,
-                        tokenPriceSol,
-                        tokenPriceUsd
-                      ).catch((e) => {
-                        console.error(`Failed to persist token prices for ${sig}:`, e?.message || e);
-                      });
-
-                      // Track wallet without market cap (but with price)
-                      walletTrackingService.trackWalletToken(
-                        result.feePayer,
-                        tokenAddress,
-                        result.in_amount?.toString() || '0',
-                        result.out_amount?.toString() || '0',
-                        result.type,
-                        {
-                          success: false,
-                          price: tokenPriceUsd,
-                          // No marketCap, tokenSupply, or decimals available
-                        },
-                        result.pool // Pass pool address for monitoring
-                      ).catch(error => {
-                        console.error(`Failed to track wallet-token pair: ${error.message}`);
-                      });
-                    }
-                  }
-                }
-
-                // 8. Add token to queue for info extraction
-                this.extractAndQueueToken(tokenAddress);
-              })().catch(error => {
-                console.error(`Error processing buy/sell event:`, error?.message || error);
+            // Module 2: Pool monitoring (runs in parallel, only for BUY/SELL with pool address)
+            if ((txType === 'BUY' || txType === 'SELL') && tokenAddress && result.pool && this.poolMonitoringService) {
+              this.processPoolMonitoring(result, tokenAddress, sig, txType, createdAt, currentSlot).catch(error => {
+                console.error(`Error processing pool monitoring:`, error?.message || error);
               });
-            } else {
-              console.log(`⏭️ Skipping - type is ${result.type}`);
             }
+
+            // Module 1: Transaction data processing (save transaction, check dev still holding, calculate market cap, check/register first_buy or first_sell)
+            this.processTransaction(result, sig, currentSlot, createdAt).catch(error => {
+              console.error(`Error processing transaction:`, error?.message || error);
+            });
           }
         }
       });
@@ -343,6 +229,429 @@ class TransactionTracker {
   }
 
   /**
+   * Process transaction asynchronously - Module 1: Transaction data processing
+   * Handles: save transaction, check dev still holding, calculate market cap/token price, check/register first_buy or first_sell
+   * Note: Pool monitoring (Module 2) runs in parallel separately in handleStream
+   */
+  private async processTransaction(
+    result: any,
+    signature: string,
+    currentSlot: string | undefined,
+    createdAt: string | null
+  ): Promise<void> {
+    try {
+      // Convert slot to number for block_number
+      const blockNumber = currentSlot ? parseInt(currentSlot, 10) : null;
+      const blockNumberValue = (blockNumber !== null && !isNaN(blockNumber)) ? blockNumber : null;
+
+      // Use createdAt timestamp from stream (slot timestamp) if available, otherwise fallback to current time
+      // createdAt is in ISO format: "2025-11-23T06:44:25.792Z"
+      let blockTimestamp: number;
+      if (createdAt) {
+        // Convert ISO timestamp to Unix epoch (seconds)
+        blockTimestamp = Math.floor(new Date(createdAt).getTime() / 1000);
+      } else {
+        // Fallback to current time if createdAt is not available
+        blockTimestamp = Math.floor(Date.now() / 1000);
+      }
+
+      const txType = result.type?.toUpperCase();
+      console.log(`📝 Transaction type: ${result.type} (normalized: ${txType})`);
+
+      // Extract token address for buy/sell events
+      const tokenAddress = (txType === 'BUY' || txType === 'SELL') 
+        ? this.extractTokenAddress(result) 
+        : null;
+
+      // Queue token for info extraction (right after extraction, for BUY/SELL transactions)
+      if ((txType === 'BUY' || txType === 'SELL') && tokenAddress) {
+        this.extractAndQueueToken(tokenAddress);
+      }
+
+      // Save transaction to database (dev_still_holding will be updated asynchronously)
+      dbService.saveTransaction(signature, {
+        platform: result.platform,
+        type: result.type,
+        mint_from: result.mintFrom,
+        mint_to: result.mintTo,
+        in_amount: result.in_amount,
+        out_amount: result.out_amount,
+        feePayer: result.feePayer,
+        tipAmount: result.tipAmount,
+        feeAmount: result.feeAmount,
+        blockNumber: blockNumberValue,
+        blockTimestamp: blockTimestamp,
+        dev_still_holding: null, // Will be updated asynchronously by checkAndSaveDevStillHolding
+      });
+
+      console.log(result.creator, tokenAddress)
+      // For BUY/SELL transactions, check if creator still holds the token and save result asynchronously (both BUY and SELL)
+      if ((txType === 'BUY' || txType === 'SELL') && result.creator && tokenAddress) {
+        this.checkAndSaveDevStillHolding(signature, result.creator, tokenAddress).catch(error => {
+          console.error(`Failed to check and save dev still holding:`, error?.message || error);
+        });
+      }
+
+      // Process buy/sell events
+      if (txType === 'BUY' || txType === 'SELL') {
+        if (!tokenAddress) {
+          console.log(`⚠️ No valid token found in ${result.type} transaction (mintFrom: ${result.mintFrom?.substring(0, 8)}, mintTo: ${result.mintTo?.substring(0, 8)})`);
+          return;
+        }
+
+        console.log(`✅ Processing ${result.type} transaction...`);
+
+        // Get token price in SOL from parseTransaction result
+        const tokenPriceSol = result.price ? parseFloat(result.price.toString()) : null;
+
+        if (tokenPriceSol === null || isNaN(tokenPriceSol)) {
+          console.log(`⚠️ No valid price found in transaction result for ${signature}`);
+          // Still process wallet tracking even without price
+          await this.processWalletTracking(result, tokenAddress, signature, txType, null, null);
+          return;
+        }
+
+        // Calculate market cap, total supply, and token prices
+        const marketCapData = await this.calculateMarketCapData(signature, tokenPriceSol, tokenAddress);
+
+        // Update transaction with market cap data
+        if (marketCapData) {
+          await dbService.updateTransactionMarketCap(
+            signature,
+            marketCapData.marketCap,
+            marketCapData.totalSupply,
+            tokenPriceSol,
+            marketCapData.tokenPriceUsd
+          );
+        }
+
+        // Process wallet tracking (check/register first_buy or first_sell)
+        await this.processWalletTracking(
+          result,
+          tokenAddress,
+          signature,
+          txType,
+          marketCapData,
+          tokenPriceSol
+        );
+      } else {
+        console.log(`⏭️ Skipping - type is ${result.type}`);
+      }
+    } catch (error: any) {
+      console.error(`❌ Error in processTransaction:`, error?.message || error);
+    }
+  }
+
+  /**
+   * Calculate market cap data from token price in SOL
+   */
+  private async calculateMarketCapData(
+    transactionId: string,
+    tokenPriceSol: number,
+    tokenAddress: string
+  ): Promise<{ marketCap: number | null; totalSupply: number | null; tokenPriceUsd: number | null } | null> {
+    try {
+      // Get SOL price from database
+      const solPriceUsd = await dbService.getLatestSolPrice();
+      if (!solPriceUsd) {
+        console.error(`Failed to fetch SOL price from database`);
+        return null;
+      }
+
+      // Calculate token price in USD
+      const tokenPriceUsd = tokenPriceSol * solPriceUsd;
+
+      // Get token total supply
+      const supplyData = await this.getTokenTotalSupply(tokenAddress);
+
+      let marketCap: number | null = null;
+      let totalSupply: number | null = null;
+
+      if (supplyData) {
+        totalSupply = supplyData.supply;
+        // Calculate market cap = total supply * token price in USD
+        marketCap = totalSupply * tokenPriceUsd;
+      }
+
+      return { marketCap, totalSupply, tokenPriceUsd };
+    } catch (error: any) {
+      console.error(`Failed to calculate market cap data for ${transactionId}:`, error?.message || error);
+      return null;
+    }
+  }
+
+  /**
+   * Process wallet tracking - check/register first_buy or first_sell
+   */
+  private async processWalletTracking(
+    result: any,
+    tokenAddress: string,
+    signature: string,
+    txType: string,
+    marketCapData: { marketCap: number | null; totalSupply: number | null; tokenPriceUsd: number | null } | null,
+    tokenPriceSol: number | null
+  ): Promise<void> {
+    try {
+      const walletAddress = result.feePayer;
+      const inAmount = result.in_amount?.toString() || '0';
+      const outAmount = result.out_amount?.toString() || '0';
+
+      // Determine amount based on transaction type
+      const amount = txType === 'BUY' ? inAmount : outAmount;
+
+      // Check if this is first_buy (for BUY) or first_sell (for SELL)
+      // Note: saveWalletTokenPair will handle the first_buy/first_sell registration automatically
+      // We just need to check for logging purposes
+      let isFirst = false;
+      if (txType === 'BUY') {
+        isFirst = await dbService.isFirstBuy(walletAddress, tokenAddress);
+      } else if (txType === 'SELL') {
+        // For SELL, we can check by trying to get wallet tokens and checking first_sell_timestamp
+        // But since saveWalletTokenPair handles it, we'll just assume it might be first
+        // The actual check happens in saveWalletTokenPair via COALESCE
+        isFirst = true; // Will be determined by saveWalletTokenPair
+      }
+
+      // Build market data
+      let marketData: {
+        supply: string | null;
+        price: number | null;
+        decimals: number | null;
+        market_cap: number | null;
+      } | null = null;
+
+      if (marketCapData) {
+        marketData = {
+          market_cap: marketCapData.marketCap,
+          supply: marketCapData.totalSupply ? marketCapData.totalSupply.toString() : null,
+          price: marketCapData.tokenPriceUsd,
+          decimals: null // Will be set from token supply data if available
+        };
+
+        // Get decimals from token supply if available
+        if (tokenAddress) {
+          const supplyData = await this.getTokenTotalSupply(tokenAddress);
+          if (supplyData) {
+            marketData.decimals = supplyData.decimals;
+          }
+        }
+      }
+
+      // Calculate open position count for BUY events
+      let openPositionCount: number | null = null;
+      if (txType === 'BUY' && this.solanaConnection) {
+        try {
+          openPositionCount = await this.calculateOpenPositionCount(walletAddress);
+        } catch (error: any) {
+          console.error(`Failed to calculate open position count:`, error?.message || error);
+        }
+      }
+
+      // Save wallet-token pair (this will register first_buy or first_sell if it's the first)
+      await dbService.saveWalletTokenPair(
+        walletAddress,
+        tokenAddress,
+        txType as 'BUY' | 'SELL',
+        amount,
+        marketData,
+        openPositionCount
+      );
+
+      console.log(`💾 Wallet ${txType} tracked: ${walletAddress.substring(0, 8)}... - ${tokenAddress.substring(0, 8)}... (First: ${isFirst})`);
+    } catch (error: any) {
+      console.error(`❌ Error in processWalletTracking:`, error?.message || error);
+    }
+  }
+
+  /**
+   * Calculate open position count for a wallet
+   */
+  private async calculateOpenPositionCount(walletAddress: string): Promise<number> {
+    if (!this.solanaConnection) {
+      return 0;
+    }
+
+    try {
+      const publicKey = new PublicKey(walletAddress);
+
+      // Get parsed token accounts (SPL Token Program)
+      const parsedTokenAccounts = await this.solanaConnection.getParsedTokenAccountsByOwner(publicKey, {
+        programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+      });
+
+      // Get parsed token accounts (SPL Token-2022 Program)
+      const parsed2022TokenAccounts = await this.solanaConnection.getParsedTokenAccountsByOwner(publicKey, {
+        programId: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
+      });
+
+      // Get all token mints that have non-zero balance
+      const holdingTokenMints = new Set<string>();
+
+      // Process SPL Token accounts
+      for (const account of parsedTokenAccounts.value) {
+        const parsedInfo = account.account.data.parsed?.info;
+        if (parsedInfo && parsedInfo.tokenAmount) {
+          const balance = parseFloat(parsedInfo.tokenAmount.uiAmountString || '0');
+          if (balance > 0) {
+            const mint = parsedInfo.mint;
+            if (mint) {
+              holdingTokenMints.add(mint);
+            }
+          }
+        }
+      }
+
+      // Process Token-2022 accounts
+      for (const account of parsed2022TokenAccounts.value) {
+        const parsedInfo = account.account.data.parsed?.info;
+        if (parsedInfo && parsedInfo.tokenAmount) {
+          const balance = parseFloat(parsedInfo.tokenAmount.uiAmountString || '0');
+          if (balance > 0) {
+            const mint = parsedInfo.mint;
+            if (mint) {
+              holdingTokenMints.add(mint);
+            }
+          }
+        }
+      }
+
+      // Calculate open positions count
+      const SOL_MINT = 'So11111111111111111111111111111111111111112';
+      let openTradeCount = 0;
+
+      for (const tokenMint of holdingTokenMints) {
+        // Skip SOL mint
+        if (tokenMint === SOL_MINT) {
+          continue;
+        }
+
+        // Calculate buy count for this specific token
+        const buyCount = await dbService.getBuyCountForToken(walletAddress, tokenMint);
+
+        // Calculate sell count for this specific token
+        const sellCount = await dbService.getSellCountForToken(walletAddress, tokenMint);
+
+        // Only count if buyCount > sellCount
+        if (buyCount > sellCount) {
+          openTradeCount += 1;
+        }
+      }
+
+      return openTradeCount;
+    } catch (error: any) {
+      console.error(`Failed to calculate open position count:`, error?.message || error);
+      return 0;
+    }
+  }
+
+  /**
+   * Process pool monitoring (Module 2) - runs in parallel with processTransaction
+   * Handles: start pool monitoring for first buys, signal sell events
+   */
+  private async processPoolMonitoring(
+    result: any,
+    tokenAddress: string,
+    signature: string,
+    txType: string,
+    createdAt: string | null,
+    currentSlot: string | undefined
+  ): Promise<void> {
+    if (!this.poolMonitoringService || !result.pool) {
+      return;
+    }
+
+    try {
+      const walletAddress = result.feePayer;
+      const poolAddress = result.pool;
+
+      // Get token price in SOL from parseTransaction result
+      const tokenPriceSol = result.price ? parseFloat(result.price.toString()) : null;
+
+      // Calculate market cap data for pool monitoring (independent calculation)
+      let marketCapData: { marketCap: number | null; totalSupply: number | null; tokenPriceUsd: number | null } | null = null;
+      if (tokenPriceSol !== null && !isNaN(tokenPriceSol)) {
+        marketCapData = await this.calculateMarketCapData(signature, tokenPriceSol, tokenAddress);
+      }
+
+      if (txType === 'BUY') {
+        // Check if this is the first buy
+        const isFirstBuy = await dbService.isFirstBuy(walletAddress, tokenAddress);
+
+        if (isFirstBuy) {
+          const maxDuration = parseInt(process.env.POOL_MONITORING_MAX_DURATION || '60', 10);
+
+          // Prepare initial price data
+          let initialPriceData: { priceUsd: number; priceSol: number; marketCap: number } | undefined;
+          if (marketCapData && marketCapData.tokenPriceUsd && tokenPriceSol && marketCapData.marketCap) {
+            initialPriceData = {
+              priceUsd: marketCapData.tokenPriceUsd,
+              priceSol: tokenPriceSol,
+              marketCap: marketCapData.marketCap
+            };
+          } else if (marketCapData && marketCapData.tokenPriceUsd && marketCapData.marketCap) {
+            // Try to get SOL price if we have USD price
+            try {
+              const solPriceUsd = await dbService.getLatestSolPrice();
+              if (solPriceUsd && solPriceUsd > 0) {
+                const priceSol = marketCapData.tokenPriceUsd / solPriceUsd;
+                initialPriceData = {
+                  priceUsd: marketCapData.tokenPriceUsd,
+                  priceSol: priceSol,
+                  marketCap: marketCapData.marketCap
+                };
+              }
+            } catch (error) {
+              // Continue without SOL price
+            }
+          }
+
+          await this.poolMonitoringService.startMonitoring(
+            walletAddress,
+            tokenAddress,
+            poolAddress,
+            maxDuration,
+            initialPriceData,
+            createdAt,
+            currentSlot || null,
+            signature // Pass first buy transaction ID
+          );
+          console.log(`🔍 Started pool monitoring for first buy: ${walletAddress.substring(0, 8)}... - ${tokenAddress.substring(0, 8)}...${currentSlot ? ` (from slot ${currentSlot})` : ''}`);
+        }
+      } else if (txType === 'SELL') {
+        // Signal sell event
+        let sellPriceData: { priceUsd: number; priceSol: number; marketCap: number } | undefined;
+        if (marketCapData && marketCapData.tokenPriceUsd && tokenPriceSol && marketCapData.marketCap) {
+          sellPriceData = {
+            priceUsd: marketCapData.tokenPriceUsd,
+            priceSol: tokenPriceSol,
+            marketCap: marketCapData.marketCap
+          };
+        } else if (marketCapData && marketCapData.tokenPriceUsd && marketCapData.marketCap) {
+          // Try to get SOL price
+          try {
+            const solPriceUsd = await dbService.getLatestSolPrice();
+            if (solPriceUsd && solPriceUsd > 0) {
+              const priceSol = marketCapData.tokenPriceUsd / solPriceUsd;
+              sellPriceData = {
+                priceUsd: marketCapData.tokenPriceUsd,
+                priceSol: priceSol,
+                marketCap: marketCapData.marketCap
+              };
+            }
+          } catch (error) {
+            // Continue without SOL price
+          }
+        }
+
+        this.poolMonitoringService.signalSell(walletAddress, tokenAddress, sellPriceData, createdAt, signature); // Pass first sell transaction ID
+        console.log(`🛑 Signaled sell event for pool monitoring: ${walletAddress.substring(0, 8)}... - ${tokenAddress.substring(0, 8)}...`);
+      }
+    } catch (error: any) {
+      console.error(`Failed to process pool monitoring:`, error?.message || error);
+    }
+  }
+
+  /**
    * Extract the non-SOL token address from buy/sell transaction
    * @returns Token address or null if not found
    */
@@ -379,7 +688,7 @@ class TransactionTracker {
     try {
       const mintPublicKey = new PublicKey(tokenAddress);
       const tokenSupply = await this.solanaConnection.getTokenSupply(mintPublicKey);
-      
+
       if (!tokenSupply || !tokenSupply.value) {
         return null;
       }
@@ -396,6 +705,93 @@ class TransactionTracker {
   }
 
   /**
+   * Check if creator still holds the token
+   */
+  private async checkCreatorStillHolding(creatorAddress: string, tokenAddress: string): Promise<boolean> {
+    if (!this.solanaConnection || !creatorAddress || !tokenAddress) {
+      return false;
+    }
+
+    try {
+      const creatorPublicKey = new PublicKey(creatorAddress);
+      const tokenMint = new PublicKey(tokenAddress);
+
+      // Get parsed token accounts (SPL Token Program)
+      const parsedTokenAccounts = await this.solanaConnection.getParsedTokenAccountsByOwner(creatorPublicKey, {
+        programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+      });
+
+      // Get parsed token accounts (SPL Token-2022 Program)
+      const parsed2022TokenAccounts = await this.solanaConnection.getParsedTokenAccountsByOwner(creatorPublicKey, {
+        programId: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
+      });
+
+      // Check SPL Token accounts
+      for (const account of parsedTokenAccounts.value) {
+        const parsedInfo = account.account.data.parsed?.info;
+        if (parsedInfo && parsedInfo.mint === tokenAddress) {
+          const balance = parseFloat(parsedInfo.tokenAmount.uiAmountString || '0');
+          return balance > 0;
+        }
+      }
+
+      // Check Token-2022 accounts
+      for (const account of parsed2022TokenAccounts.value) {
+        const parsedInfo = account.account.data.parsed?.info;
+        if (parsedInfo && parsedInfo.mint === tokenAddress) {
+          const balance = parseFloat(parsedInfo.tokenAmount.uiAmountString || '0');
+          return balance > 0;
+        }
+      }
+
+      return false;
+    } catch (error: any) {
+      console.error(`❌ Failed to check creator token balance:`, error?.message || error);
+      return false;
+    }
+  }
+
+  /**
+   * Utility function to check if dev still holding and save result in database asynchronously
+   * Can be called with or without await - errors are handled gracefully
+   * @param transactionSignature - Transaction signature (transaction_id)
+   * @param creatorAddress - Creator wallet address
+   * @param tokenAddress - Token mint address
+   * @returns Promise that resolves when the check and save operation is complete
+   */
+  async checkAndSaveDevStillHolding(
+    transactionSignature: string,
+    creatorAddress: string,
+    tokenAddress: string
+  ): Promise<void> {
+    try {
+      if (!transactionSignature || !creatorAddress || !tokenAddress) {
+        console.error(`⚠️ Missing required parameters for checkAndSaveDevStillHolding:`, {
+          transactionSignature: !!transactionSignature,
+          creatorAddress: !!creatorAddress,
+          tokenAddress: !!tokenAddress
+        });
+        return;
+      }
+
+      console.log(`🔍 Checking dev still holding for tx: ${transactionSignature.substring(0, 8)}...`);
+
+      // Check if creator still holds the token
+      const devStillHolding = await this.checkCreatorStillHolding(creatorAddress, tokenAddress);
+
+      console.log(`💾 Dev (${creatorAddress.substring(0, 8)}...) still holding: ${devStillHolding}`);
+
+      // Save result to database asynchronously
+      await dbService.updateTransactionDevHolding(transactionSignature, devStillHolding);
+
+      console.log(`✅ Successfully updated dev_still_holding for tx: ${transactionSignature.substring(0, 8)}... = ${devStillHolding}`);
+    } catch (error: any) {
+      console.error(`❌ Failed to check and save dev_still_holding for ${transactionSignature}:`, error?.message || error);
+      // Don't throw - this is a utility function that should fail gracefully
+    }
+  }
+
+  /**
    * Add token to queue for info extraction
    */
   private extractAndQueueToken(tokenMint: string): void {
@@ -406,6 +802,7 @@ class TransactionTracker {
       console.error(`Failed to add token to queue: ${error.message}`);
     });
   }
+
 
   /**
    * Start tracking transactions
@@ -487,7 +884,6 @@ class TransactionTracker {
       }
     });
     const data = await response.json();
-    console.log(data);
     return data;
   }
 
@@ -505,9 +901,11 @@ class TransactionTracker {
     tokenQueueService.stop();
 
     // Cleanup pool monitoring service
-    await walletTrackingService.cleanup().catch(error => {
-      console.error('Failed to cleanup pool monitoring service:', error);
-    });
+    if (this.poolMonitoringService) {
+      await this.poolMonitoringService.cleanup().catch(error => {
+        console.error('Failed to cleanup pool monitoring service:', error);
+      });
+    }
 
     // Clear old subscription by sending empty subscription request before ending stream
     if (this.currentStream) {
@@ -523,7 +921,7 @@ class TransactionTracker {
           transactionsStatus: {},
           entry: {}
         };
-        
+
         // Send empty subscription to clear old subscription
         await new Promise<void>((resolve) => {
           try {
@@ -557,10 +955,10 @@ class TransactionTracker {
     // Clear stream reference
     this.currentStream = null;
     this.isRunning = false;
-    
+
     // Clear addresses to ensure fresh start next time
     this.addresses = [];
-    
+
     return { success: true, message: "Tracker stopped successfully" };
   }
 

@@ -31,8 +31,8 @@ class ParseFilterTester {
       // "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", // RaydiumCpmm
       // "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo", // MeteoraDLMM
       // "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK", // RaydiumClmm
-      "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", // PumpAmm
-      // "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", // PumpFun
+      // "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", // PumpAmm
+      "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", // PumpFun
     ];
   }
 
@@ -116,6 +116,8 @@ class ParseFilterTester {
           console.log(`📦 Transaction #${this.transactionCount}: ${sig}`);
           console.log(`📍 Slot: ${currentSlot}`);
           console.log('='.repeat(80));
+
+          console.log(JSON.stringify(data))
 
           // Call parseTransaction - this is what we're testing!
           const result = parseTransaction(data.transaction);

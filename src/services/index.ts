@@ -5,5 +5,5 @@
 
 export { tokenService } from './tokenService';
 export { tokenQueueService } from './tokenQueueService';
-export { walletTrackingService } from './walletTrackingService';
+// walletTrackingService removed - functionality moved to tracker.ts
 

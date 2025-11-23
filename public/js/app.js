@@ -60,8 +60,8 @@ export function init() {
     // Increased interval to 10 seconds to reduce unnecessary checks
     setInterval(fetchStatus, 10000);
     
-    // Update SOL price every 30 seconds
-    setInterval(updateSolPrice, 30000);
+    // Update SOL price every 7 seconds (5-10 second range)
+    setInterval(updateSolPrice, 7000);
 }
 
 /**

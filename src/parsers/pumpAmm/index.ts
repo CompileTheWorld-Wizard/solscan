@@ -31,7 +31,8 @@ export function parsePumpAmmTransaction(tx: any) {
   const result = {
     platform : "PumpAmm",
     type : formattedSwapTxn.type,
-    feePayer : formattedSwapTxn.user,
+    feePayer : formattedSwapTxn.feePayer,
+    creator : formattedSwapTxn.creator,
     mintFrom : formattedSwapTxn.type == 'sell' ? formattedSwapTxn.mint : SOL_MINT,
     mintTo : formattedSwapTxn.type == 'sell' ? SOL_MINT : formattedSwapTxn.mint,
     in_amount : formattedSwapTxn.in_amount,

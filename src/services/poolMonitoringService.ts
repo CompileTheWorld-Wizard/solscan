@@ -1,6 +1,6 @@
 /**
  * Pool Monitoring Service
- * Monitors pool accounts using Yellowstone gRPC for pump.fun and pump AMM
+ * Monitors pool transactions using Yellowstone gRPC for pump.fun and pump AMM
  * Tracks price and market cap changes and calculates peak values
  */
 
@@ -13,6 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { isObject } from "lodash";
 import * as bs58 from "bs58";
+import { parseTransaction } from '../parsers/parseFilter';
 
 const RETRY_DELAY_MS = 1000;
 const MAX_RETRY_WITH_LAST_SLOT = 5;
@@ -26,6 +27,17 @@ interface PeakData {
   timestamp: number;
 }
 
+interface TimeseriesDataPoint {
+  timestamp: string;
+  marketcap: number | null;
+  tokenPriceSol: number | null;
+  tokenPriceUsd: number | null;
+  poolAddress: string | null;
+  sessionKey: string | null;
+  signature: string | null;
+  transactionType?: string | null; // 'BUY' or 'SELL' for counting buy transactions
+}
+
 interface MonitoringSession {
   walletAddress: string;
   tokenAddress: string;
@@ -33,13 +45,13 @@ interface MonitoringSession {
   startTime: number;
   maxDuration: number; // in seconds
   stopSignal: boolean;
-  peakBuyToSell: PeakData | null;
-  peakSellToEnd: PeakData | null;
-  currentPriceSol: number;
-  currentPriceUsd: number;
-  currentMarketCap: number;
+  timeseriesData: TimeseriesDataPoint[]; // Store timeseries data in memory
   timeoutId: NodeJS.Timeout | null;
   stopAfterSellTimeout: NodeJS.Timeout | null;
+  fromSlot: string | null; // Slot number to start subscription from (for first buy recovery)
+  processedSignatures: Set<string>; // Track processed transaction signatures to avoid duplicates
+  firstBuyTxId: string | null; // First buy transaction ID
+  firstSellTxId: string | null; // First sell transaction ID
 }
 
 function bnLayoutFormatter(obj: any) {
@@ -65,25 +77,27 @@ class LiquidityPoolMonitor {
   accountCoder: BorshAccountsCoder;
   solanaConnection: Connection;
   sessions: Map<string, MonitoringSession>; // Key: walletAddress-tokenAddress-timestamp
-  poolToSessions: Map<string, Set<string>>; // Key: poolAddress, Value: Set of sessionKeys
+  tokenToSessions: Map<string, Set<string>>; // Key: tokenAddress, Value: Set of sessionKeys
   currentStream: any;
   isStreaming: boolean;
   shouldStop: boolean;
   isRunning: boolean;
   grpcUrl: string;
   xToken: string;
-  monitoredPools: Set<string>; // Track which pools we're subscribed to
+  monitoredTokens: Set<string>; // Track which tokens we're subscribed to
+  fromSlot: string | null; // Slot to start subscription from (for first buy recovery)
 
   constructor(solanaConnection: Connection) {
     this.grpcClient = null;
     this.solanaConnection = solanaConnection;
     this.sessions = new Map();
-    this.poolToSessions = new Map();
+    this.tokenToSessions = new Map();
     this.currentStream = null;
     this.isStreaming = false;
     this.shouldStop = false;
     this.isRunning = false;
-    this.monitoredPools = new Set();
+    this.monitoredTokens = new Set();
+    this.fromSlot = null;
     
     // Get gRPC credentials from environment
     if (!process.env.GRPC_URL || !process.env.X_TOKEN) {
@@ -218,116 +232,159 @@ class LiquidityPoolMonitor {
     }
   }
 
-  handlePoolUpdate(poolAddress: string, accountData: string): void {
-    // First check if this pool is still being monitored
-    if (!this.monitoredPools.has(poolAddress)) {
-      // Pool was removed from monitoring, ignore this update
-      return;
-    }
-
-    // Find all sessions monitoring this pool
-    const sessionKeys = this.poolToSessions.get(poolAddress);
-    if (!sessionKeys || sessionKeys.size === 0) {
-      // No sessions for this pool - remove it from monitoring
-      this.monitoredPools.delete(poolAddress);
-      this.poolToSessions.delete(poolAddress);
-      console.log(`🧹 Cleaned up orphaned pool ${poolAddress.substring(0, 8)}... (no sessions)`);
-      return;
-    }
-    
-    // Clean up stale session references
-    const validSessionKeys = Array.from(sessionKeys).filter(key => this.sessions.has(key));
-    if (validSessionKeys.length !== sessionKeys.size) {
-      // Remove stale references
-      sessionKeys.forEach(key => {
-        if (!this.sessions.has(key)) {
-          sessionKeys.delete(key);
-        }
-      });
-      // If no valid sessions remain, remove pool
-      if (sessionKeys.size === 0) {
-        this.monitoredPools.delete(poolAddress);
-        this.poolToSessions.delete(poolAddress);
-        console.log(`🧹 Cleaned up pool ${poolAddress.substring(0, 8)}... (all sessions were stale)`);
-        return;
-      }
-    }
-
+  async handleTokenUpdate(transactionData: any, createdAt: string | null = null, signature: string | null = null): Promise<void> {
     try {
-      // Decode account data (accountData is base64 encoded string)
-      const accountName = this.getAccountName(accountData);
-      if (accountName !== 'BondingCurve' && accountName !== 'Pool') {
-        return; // Only process BondingCurve or Pool accounts
-      }
-
-      const decodedData = this.accountCoder.decodeAny(Buffer.from(accountData, 'base64'));
-      if (!decodedData) {
-        console.log(`⚠️ Failed to decode account data for pool ${poolAddress.substring(0, 8)}...`);
+      // Parse transaction using parseFilter
+      const result = parseTransaction(transactionData);
+      if (!result || !result.price) {
+        console.log(`⚠️ Failed to parse transaction or no price found`);
         return;
       }
-      bnLayoutFormatter(decodedData);
 
-      // Process update for each session monitoring this pool
-      sessionKeys.forEach(sessionKey => {
-        const session = this.sessions.get(sessionKey);
-        if (!session) {
+      // Extract token address from transaction result
+      const SOL_MINT = 'So11111111111111111111111111111111111111112';
+      const txType = result.type?.toUpperCase();
+      let tokenAddress: string | null = null;
+      
+      if (txType === 'BUY') {
+        // For BUY: mintTo is the token we're buying (should not be SOL)
+        if (result.mintTo && result.mintTo !== SOL_MINT) {
+          tokenAddress = result.mintTo;
+        }
+      } else if (txType === 'SELL') {
+        // For SELL: mintFrom is the token we're selling (should not be SOL)
+        if (result.mintFrom && result.mintFrom !== SOL_MINT) {
+          tokenAddress = result.mintFrom;
+        }
+      }
+
+      if (!tokenAddress) {
+        console.log(`⚠️ No valid token address found in transaction result`);
+        return;
+      }
+
+      // First check if this token is still being monitored
+      if (!this.monitoredTokens.has(tokenAddress)) {
+        // Token was removed from monitoring, ignore this update
+        return;
+      }
+
+      // Find all sessions monitoring this token
+      const sessionKeys = this.tokenToSessions.get(tokenAddress);
+      if (!sessionKeys || sessionKeys.size === 0) {
+        // No sessions for this token - remove it from monitoring
+        this.monitoredTokens.delete(tokenAddress);
+        this.tokenToSessions.delete(tokenAddress);
+        console.log(`🧹 Cleaned up orphaned token ${tokenAddress.substring(0, 8)}... (no sessions)`);
+        return;
+      }
+      
+      // Clean up stale session references
+      const validSessionKeys = Array.from(sessionKeys).filter(key => this.sessions.has(key));
+      if (validSessionKeys.length !== sessionKeys.size) {
+        // Remove stale references
+        sessionKeys.forEach(key => {
+          if (!this.sessions.has(key)) {
+            sessionKeys.delete(key);
+          }
+        });
+        // If no valid sessions remain, remove token
+        if (sessionKeys.size === 0) {
+          this.monitoredTokens.delete(tokenAddress);
+          this.tokenToSessions.delete(tokenAddress);
+          console.log(`🧹 Cleaned up token ${tokenAddress.substring(0, 8)}... (all sessions were stale)`);
           return;
         }
+      }
 
-        // Calculate price and market cap
-        this.calculatePriceAndMarketCap(poolAddress, session.tokenAddress, decodedData)
-          .then(result => {
-            if (!result) return;
+      // Get token price in SOL from parseTransaction result
+      const tokenPriceSol = result.price ? parseFloat(result.price.toString()) : null;
+      if (tokenPriceSol === null || isNaN(tokenPriceSol)) {
+        console.log(`⚠️ No valid price found in transaction result for token ${tokenAddress.substring(0, 8)}...`);
+        return;
+      }
 
-            const { priceSol, priceUsd, marketCap } = result;
-            const timestamp = Date.now();
+      // Get pool address from result if available
+      const poolAddress = result.pool || null;
 
-            // Update current values
-            session.currentPriceSol = priceSol;
-            session.currentPriceUsd = priceUsd;
-            session.currentMarketCap = marketCap;
+      // Get SOL price from database to calculate USD price and market cap
+      const solPriceUsd = await dbService.getLatestSolPrice();
+      if (!solPriceUsd) {
+        console.log('⚠️ Failed to fetch SOL price for pool monitoring');
+        return;
+      }
 
-            // Update peak from buy to sell (ONLY before sell signal is received)
-            if (!session.stopSignal) {
-              if (!session.peakBuyToSell || priceUsd > session.peakBuyToSell.peakPriceUsd) {
-                session.peakBuyToSell = {
-                  peakPriceSol: priceSol,
-                  peakPriceUsd: priceUsd,
-                  peakMarketCap: marketCap,
-                  timestamp
-                };
-                console.log(`📈 Updated peak_buy_to_sell: $${priceUsd.toFixed(6)} (MCap: $${marketCap.toFixed(2)}) for ${sessionKey.substring(0, 20)}...`);
-              }
-            }
+      const priceUsd = tokenPriceSol * solPriceUsd;
 
-            // Update peak from sell to end (ONLY after sell signal is received)
-            if (session.stopSignal) {
-              // Ensure peakSellToEnd is initialized (should have been set in handleSellSignal, but double-check)
-              if (!session.peakSellToEnd) {
-                session.peakSellToEnd = {
-                  peakPriceSol: priceSol,
-                  peakPriceUsd: priceUsd,
-                  peakMarketCap: marketCap,
-                  timestamp
-                };
-                console.log(`📈 Initialized peak_sell_to_end from update: $${priceUsd.toFixed(6)} (MCap: $${marketCap.toFixed(2)}) for ${sessionKey.substring(0, 20)}...`);
-              } else if (priceUsd > session.peakSellToEnd.peakPriceUsd) {
-                session.peakSellToEnd = {
-                  peakPriceSol: priceSol,
-                  peakPriceUsd: priceUsd,
-                  peakMarketCap: marketCap,
-                  timestamp
-                };
-                console.log(`📈 Updated peak_sell_to_end: $${priceUsd.toFixed(6)} (MCap: $${marketCap.toFixed(2)}) for ${sessionKey.substring(0, 20)}...`);
-              }
-            }
+      // Get token address from result or session
+      // Process update for each session monitoring this pool
+      for (const sessionKey of sessionKeys) {
+        const session = this.sessions.get(sessionKey);
+        if (!session) {
+          continue;
+        }
 
-            console.log(`📊 Pool ${poolAddress.substring(0, 8)}... | Price: ${priceSol.toFixed(10)} SOL ($${priceUsd.toFixed(6)}) | MCap: $${marketCap.toFixed(2)}`);
-          })
-          .catch(error => {
-            console.error('Error processing pool update:', error);
-          });
-      });
+        // Deduplicate: Check if we've already processed this transaction signature
+        if (signature && session.processedSignatures.has(signature)) {
+          console.log(`⏭️ Skipping duplicate transaction ${signature.substring(0, 8)}... for session ${sessionKey.substring(0, 20)}...`);
+          continue;
+        }
+
+        // Mark this signature as processed
+        if (signature) {
+          session.processedSignatures.add(signature);
+        }
+
+        // Get token address from session
+        const tokenAddress = session.tokenAddress;
+
+        // Calculate market cap
+        let marketCap = 0;
+        try {
+          const mintPublicKey = new PublicKey(tokenAddress);
+          const tokenSupply = await this.solanaConnection.getTokenSupply(mintPublicKey);
+          
+          if (tokenSupply && tokenSupply.value) {
+            const rawSupply = parseFloat(tokenSupply.value.amount);
+            const decimals = tokenSupply.value.decimals;
+            const totalSupply = rawSupply / Math.pow(10, decimals);
+            marketCap = totalSupply * priceUsd;
+          }
+        } catch (error) {
+          console.error('Failed to fetch token supply:', error);
+        }
+
+        // Use createdAt timestamp from stream (slot timestamp) if available, otherwise fallback to current time
+        // createdAt is in ISO format: "2025-11-23T06:44:25.792Z"
+        let timestamp: number;
+        let timestampISO: string;
+        if (createdAt) {
+          // Convert ISO timestamp to Unix epoch milliseconds
+          timestamp = new Date(createdAt).getTime();
+          timestampISO = createdAt;
+        } else {
+          // Fallback to current time if createdAt is not available
+          timestamp = Date.now();
+          timestampISO = new Date(timestamp).toISOString();
+        }
+
+        // Store timeseries data in memory (will be saved to database when monitoring finishes)
+        // Get transaction type from parsed result
+        const txType = result.type?.toUpperCase() || null;
+        
+        session.timeseriesData.push({
+          timestamp: timestampISO,
+          marketcap: marketCap || null,
+          tokenPriceSol: tokenPriceSol || null,
+          tokenPriceUsd: priceUsd || null,
+          poolAddress: poolAddress || null,
+          sessionKey: sessionKey || null,
+          signature: signature || null,
+          transactionType: txType
+        });
+
+        console.log(`📊 Token ${tokenAddress.substring(0, 8)}... | Price: ${tokenPriceSol.toFixed(10)} SOL ($${priceUsd.toFixed(6)}) | MCap: $${marketCap.toFixed(2)}, txid: ${signature ? signature.substring(0, 8) : 'N/A'}`);
+      }
     } catch (error) {
       console.error('Error handling pool update:', error);
     }
@@ -442,7 +499,7 @@ class LiquidityPoolMonitor {
         resolve();
       });
 
-      // Handle account updates
+      // Handle transaction updates
       stream.on("data", async (data) => {
         try {
           if (this.shouldStop) {
@@ -450,14 +507,55 @@ class LiquidityPoolMonitor {
             return;
           }
 
-          if (data?.account) {
+          if (data?.transaction) {
             hasRcvdMSg = true;
-            const poolAddress = bs58.encode(data.account.account.pubkey);
-            // Account data is already base64 encoded string
-            const accountData = data.account.account.data;
             
-            console.log(`📥 Received account update for pool ${poolAddress.substring(0, 8)}...`);
-            this.handlePoolUpdate(poolAddress, accountData);
+            // Extract createdAt timestamp from stream data (slot timestamp)
+            const createdAt = data.createdAt || null;
+            
+            // Extract transaction signature
+            const tx = data.transaction?.transaction?.transaction;
+            let signature: string | null = null;
+            if (tx?.signatures?.[0]) {
+              signature = bs58.encode(tx.signatures[0]);
+            }
+            
+            // Parse transaction to get token address and price
+            const result = parseTransaction(data.transaction);
+            if (!result || !result.price) {
+              // Not a relevant transaction, skip
+              return;
+            }
+
+            // Extract token address from transaction result
+            const SOL_MINT = 'So11111111111111111111111111111111111111112';
+            const txType = result.type?.toUpperCase();
+            let tokenAddress: string | null = null;
+            
+            if (txType === 'BUY') {
+              // For BUY: mintTo is the token we're buying (should not be SOL)
+              if (result.mintTo && result.mintTo !== SOL_MINT) {
+                tokenAddress = result.mintTo;
+              }
+            } else if (txType === 'SELL') {
+              // For SELL: mintFrom is the token we're selling (should not be SOL)
+              if (result.mintFrom && result.mintFrom !== SOL_MINT) {
+                tokenAddress = result.mintFrom;
+              }
+            }
+
+            if (!tokenAddress) {
+              // Not a relevant transaction (no token address), skip
+              return;
+            }
+            
+            // Check if this token is being monitored
+            if (!this.monitoredTokens.has(tokenAddress)) {
+              return;
+            }
+
+            console.log(`📥 Received transaction update for token ${tokenAddress.substring(0, 8)}...${signature ? ` (tx: ${signature.substring(0, 8)}...)` : ''}`);
+            await this.handleTokenUpdate(data.transaction, createdAt, signature);
           }
         } catch (error) {
           console.error('Error processing gRPC data:', error);
@@ -465,12 +563,12 @@ class LiquidityPoolMonitor {
       });
 
       // Build subscription request
-      // If pools are empty, send empty subscription request
-      // Otherwise, send request with monitored pools
+      // If tokens are empty, send empty subscription request
+      // Otherwise, send request with monitored tokens
       let req: SubscribeRequest;
       
-      if (this.monitoredPools.size === 0) {
-        // Send empty subscription when pool is empty
+      if (this.monitoredTokens.size === 0) {
+        // Send empty subscription when no tokens to monitor
         req = {
           slots: {},
           accounts: {},
@@ -481,35 +579,44 @@ class LiquidityPoolMonitor {
           transactionsStatus: {},
           entry: {}
         };
-        console.log('📤 Sending empty subscription request (no pools to monitor)');
+        console.log('📤 Sending empty subscription request (no tokens to monitor)');
       } else {
         req = {
+          accounts: {},
           slots: {},
-          accounts: {
-            pumpfun: {
-              account: Array.from(this.monitoredPools),
-              filters: [],
-              owner: []
-            }
+          transactions: {
+            targetWallet: {
+              vote: false,
+              failed: false,
+              accountInclude: Array.from(this.monitoredTokens), // Token Addresses
+              accountExclude: [],
+              accountRequired: [],
+            },
           },
-          transactions: {},
+          transactionsStatus: {},
           blocks: {},
           blocksMeta: {},
-          accountsDataSlice: [],
-          commitment: CommitmentLevel.PROCESSED,
           entry: {},
-          transactionsStatus: {}
+          accountsDataSlice: [],
+          commitment: CommitmentLevel.CONFIRMED,
         };
-        console.log(`📤 Subscribing to ${this.monitoredPools.size} pool(s) via gRPC`);
+        
+        // Add fromSlot if available (for first buy recovery)
+        if (this.fromSlot) {
+          req.fromSlot = this.fromSlot;
+          console.log(`📤 Subscribing to ${this.monitoredTokens.size} token(s) via transaction subscription from slot ${this.fromSlot}`);
+        } else {
+          console.log(`📤 Subscribing to ${this.monitoredTokens.size} token(s) via transaction subscription`);
+        }
       }
 
       // Send initial subscribe request
       stream.write(req, (err: any) => {
         if (err === null || err === undefined) {
-          if (this.monitoredPools.size === 0) {
+          if (this.monitoredTokens.size === 0) {
             console.log(`✅ Sent empty subscription request`);
           } else {
-            console.log(`✅ Subscribed to ${this.monitoredPools.size} pool(s) via gRPC`);
+            console.log(`✅ Subscribed to ${this.monitoredTokens.size} token(s) via gRPC`);
           }
         } else {
           reject({ error: err, hasRcvdMSg });
@@ -535,8 +642,8 @@ class LiquidityPoolMonitor {
     try {
       let req: SubscribeRequest;
       
-      if (this.monitoredPools.size === 0) {
-        // Send empty subscription when pool is empty
+      if (this.monitoredTokens.size === 0) {
+        // Send empty subscription when no tokens to monitor
         req = {
           slots: {},
           accounts: {},
@@ -547,26 +654,35 @@ class LiquidityPoolMonitor {
           transactionsStatus: {},
           entry: {}
         };
-        console.log('🔄 Updating gRPC subscription: sending empty subscription (no pools to monitor)');
+        console.log('🔄 Updating gRPC subscription: sending empty subscription (no tokens to monitor)');
       } else {
         req = {
+          accounts: {},
           slots: {},
-          accounts: {
-            pumpfun: {
-              account: Array.from(this.monitoredPools),
-              filters: [],
-              owner: []
-            }
+          transactions: {
+            targetWallet: {
+              vote: false,
+              failed: false,
+              accountInclude: Array.from(this.monitoredTokens), // Token Addresses
+              accountExclude: [],
+              accountRequired: [],
+            },
           },
-          transactions: {},
+          transactionsStatus: {},
           blocks: {},
           blocksMeta: {},
-          accountsDataSlice: [],
-          commitment: CommitmentLevel.PROCESSED,
           entry: {},
-          transactionsStatus: {}
+          accountsDataSlice: [],
+          commitment: CommitmentLevel.CONFIRMED,
         };
-        console.log(`🔄 Updating gRPC subscription: ${this.monitoredPools.size} pool(s) - ${Array.from(this.monitoredPools).map(p => p.substring(0, 8)).join(', ')}`);
+        
+        // Add fromSlot if available (for first buy recovery)
+        if (this.fromSlot) {
+          req.fromSlot = this.fromSlot;
+          console.log(`🔄 Updating gRPC subscription: ${this.monitoredTokens.size} token(s) - ${Array.from(this.monitoredTokens).map(t => t.substring(0, 8)).join(', ')} from slot ${this.fromSlot}`);
+        } else {
+          console.log(`🔄 Updating gRPC subscription: ${this.monitoredTokens.size} token(s) - ${Array.from(this.monitoredTokens).map(t => t.substring(0, 8)).join(', ')}`);
+        }
       }
       
       // Wait for the subscription update to be sent
@@ -579,10 +695,10 @@ class LiquidityPoolMonitor {
         
         streamRef.write(req, (err: any) => {
           if (err === null || err === undefined) {
-            if (this.monitoredPools.size === 0) {
+            if (this.monitoredTokens.size === 0) {
               console.log(`✅ Updated gRPC subscription: empty subscription sent`);
             } else {
-              console.log(`✅ Updated gRPC subscription: ${this.monitoredPools.size} pool(s)`);
+              console.log(`✅ Updated gRPC subscription: ${this.monitoredTokens.size} token(s)`);
             }
             resolve();
           } else {
@@ -601,11 +717,18 @@ class LiquidityPoolMonitor {
     tokenAddress: string,
     poolAddress: string,
     maxDuration: number,
-    initialPriceData?: { priceUsd: number; priceSol: number; marketCap: number }
+    initialPriceData?: { priceUsd: number; priceSol: number; marketCap: number },
+    createdAt?: string | null,
+    fromSlot?: string | null,
+    firstBuyTxId?: string | null
   ): Promise<string> {
+    // Use createdAt timestamp if available, otherwise use current time
+    // createdAt is in ISO format: "2025-11-23T06:44:25.792Z"
+    const startTimestamp = createdAt ? new Date(createdAt).getTime() : Date.now();
+    const startTimestampISO = createdAt || new Date(startTimestamp).toISOString();
+    
     // Use a unique session key that includes timestamp
-    const timestamp = Date.now();
-    const sessionKey = `${walletAddress}-${tokenAddress}-${timestamp}`;
+    const sessionKey = `${walletAddress}-${tokenAddress}-${startTimestamp}`;
 
     // Check if already monitoring this exact session
     if (this.sessions.has(sessionKey)) {
@@ -613,51 +736,59 @@ class LiquidityPoolMonitor {
       return sessionKey;
     }
 
-    // Initialize peakBuyToSell with buy transaction price if available
-    let initialPeakBuyToSell: PeakData | null = null;
-    if (initialPriceData) {
-      initialPeakBuyToSell = {
-        peakPriceSol: initialPriceData.priceSol,
-        peakPriceUsd: initialPriceData.priceUsd,
-        peakMarketCap: initialPriceData.marketCap,
-        timestamp: Date.now()
-      };
-      console.log(`📈 Initialized peak_buy_to_sell with buy price: $${initialPriceData.priceUsd.toFixed(6)} (MCap: $${initialPriceData.marketCap.toFixed(2)})`);
-    }
-
     const session: MonitoringSession = {
       walletAddress,
       tokenAddress,
       poolAddress,
-      startTime: Date.now(),
+      startTime: startTimestamp,
       maxDuration,
       stopSignal: false,
-      peakBuyToSell: initialPeakBuyToSell,
-      peakSellToEnd: null,
-      currentPriceSol: initialPriceData?.priceSol || 0,
-      currentPriceUsd: initialPriceData?.priceUsd || 0,
-      currentMarketCap: initialPriceData?.marketCap || 0,
+      timeseriesData: [], // Initialize empty array for timeseries data
       timeoutId: null,
-      stopAfterSellTimeout: null
+      stopAfterSellTimeout: null,
+      fromSlot: fromSlot || null,
+      processedSignatures: new Set<string>(),
+      firstBuyTxId: firstBuyTxId || null,
+      firstSellTxId: null
     };
+
+    // Add initial price data to timeseries if available
+    if (initialPriceData) {
+      session.timeseriesData.push({
+        timestamp: startTimestampISO,
+        marketcap: initialPriceData.marketCap || null,
+        tokenPriceSol: initialPriceData.priceSol || null,
+        tokenPriceUsd: initialPriceData.priceUsd || null,
+        poolAddress: poolAddress || null,
+        sessionKey: sessionKey || null,
+        signature: firstBuyTxId || null, // Use first buy transaction ID if available
+        transactionType: 'BUY' // Initial data is from first buy transaction
+      });
+    }
 
     this.sessions.set(sessionKey, session);
 
-    // Add pool to monitored pools if not already there
-    const isNewPool = !this.monitoredPools.has(poolAddress);
-    if (isNewPool) {
-      this.monitoredPools.add(poolAddress);
-      console.log(`➕ Added pool ${poolAddress.substring(0, 8)}... to monitoring (total: ${this.monitoredPools.size})`);
+    // Add token to monitored tokens if not already there
+    const isNewToken = !this.monitoredTokens.has(tokenAddress);
+    if (isNewToken) {
+      this.monitoredTokens.add(tokenAddress);
+      console.log(`➕ Added token ${tokenAddress.substring(0, 8)}... to monitoring (total: ${this.monitoredTokens.size})`);
     }
 
-    // Track which sessions are monitoring this pool
-    if (!this.poolToSessions.has(poolAddress)) {
-      this.poolToSessions.set(poolAddress, new Set());
+    // Set fromSlot for first buy recovery (only if this is the first session with fromSlot)
+    if (fromSlot && !this.fromSlot) {
+      this.fromSlot = fromSlot;
+      console.log(`📍 Set fromSlot to ${fromSlot} for first buy recovery`);
     }
-    this.poolToSessions.get(poolAddress)!.add(sessionKey);
 
-    // Update gRPC subscription if this is a new pool
-    if (isNewPool) {
+    // Track which sessions are monitoring this token
+    if (!this.tokenToSessions.has(tokenAddress)) {
+      this.tokenToSessions.set(tokenAddress, new Set());
+    }
+    this.tokenToSessions.get(tokenAddress)!.add(sessionKey);
+
+    // Update gRPC subscription if this is a new token
+    if (isNewToken) {
       await this.updateSubscription();
     }
 
@@ -667,15 +798,15 @@ class LiquidityPoolMonitor {
     }, maxDuration * 1000);
 
     const activeSessionsCount = Array.from(this.sessions.values()).filter(s => !s.stopSignal).length;
-    console.log(`🔍 Started monitoring pool ${poolAddress.substring(0, 8)}... for wallet ${walletAddress.substring(0, 8)}... (max ${maxDuration}s) [Active sessions: ${activeSessionsCount}]`);
+    console.log(`🔍 Started monitoring token ${tokenAddress.substring(0, 8)}... for wallet ${walletAddress.substring(0, 8)}... (max ${maxDuration}s) [Active sessions: ${activeSessionsCount}]`);
 
     return sessionKey;
   }
 
-  signalSell(sessionKey: string, sellPriceData?: { priceUsd: number; priceSol: number; marketCap: number }): void {
+  signalSell(sessionKey: string, sellPriceData?: { priceUsd: number; priceSol: number; marketCap: number }, createdAt?: string | null, firstSellTxId?: string | null): void {
     const session = this.sessions.get(sessionKey);
     if (session) {
-      this.handleSellSignal(sessionKey, session, sellPriceData);
+      this.handleSellSignal(sessionKey, session, sellPriceData, createdAt);
       return;
     }
 
@@ -693,14 +824,14 @@ class LiquidityPoolMonitor {
     }
     
     if (mostRecentSession) {
-      this.handleSellSignal(mostRecentSession.sessionKey, mostRecentSession.session, sellPriceData);
+      this.handleSellSignal(mostRecentSession.sessionKey, mostRecentSession.session, sellPriceData, createdAt, firstSellTxId);
       return;
     }
     
     console.log(`⚠️ No active monitoring session found for ${sessionKey}`);
   }
 
-  private handleSellSignal(sessionKey: string, session: MonitoringSession, sellPriceData?: { priceUsd: number; priceSol: number; marketCap: number }): void {
+  private handleSellSignal(sessionKey: string, session: MonitoringSession, sellPriceData?: { priceUsd: number; priceSol: number; marketCap: number }, createdAt?: string | null, firstSellTxId?: string | null): void {
     console.log(`🛑 Sell signal received for ${session.walletAddress.substring(0, 8)}...-${session.tokenAddress.substring(0, 8)}..., stopping in 10 seconds...`);
     
     // Clear the maxDuration timeout so it doesn't interfere
@@ -712,29 +843,50 @@ class LiquidityPoolMonitor {
     // Set stop signal
     session.stopSignal = true;
     
-    // Initialize peakSellToEnd with sell transaction price (preferred) or current price
+    // Store first sell transaction ID if provided
+    if (firstSellTxId && !session.firstSellTxId) {
+      session.firstSellTxId = firstSellTxId;
+      console.log(`📝 Stored first sell transaction ID: ${firstSellTxId.substring(0, 8)}...`);
+    }
+    
+    // Use createdAt timestamp if available, otherwise fallback to current time
+    // createdAt is in ISO format: "2025-11-23T06:44:25.792Z"
+    const sellTimestamp = createdAt ? new Date(createdAt).getTime() : Date.now();
+    
+    // Add sell transaction to timeseries data if sellPriceData is provided
     if (sellPriceData) {
-      // Use sell transaction price
-      session.peakSellToEnd = {
-        peakPriceSol: sellPriceData.priceSol,
-        peakPriceUsd: sellPriceData.priceUsd,
-        peakMarketCap: sellPriceData.marketCap,
-        timestamp: Date.now()
-      };
-      console.log(`📈 Initialized peak_sell_to_end with sell price: $${sellPriceData.priceUsd.toFixed(6)} (MCap: $${sellPriceData.marketCap.toFixed(2)})`);
-      // Also update current values
-      session.currentPriceSol = sellPriceData.priceSol;
-      session.currentPriceUsd = sellPriceData.priceUsd;
-      session.currentMarketCap = sellPriceData.marketCap;
-    } else if (session.currentPriceUsd > 0) {
-      // Fallback to current price if available
-      session.peakSellToEnd = {
-        peakPriceSol: session.currentPriceSol,
-        peakPriceUsd: session.currentPriceUsd,
-        peakMarketCap: session.currentMarketCap,
-        timestamp: Date.now()
-      };
-      console.log(`📈 Initialized peak_sell_to_end with current price: $${session.currentPriceUsd.toFixed(6)} (MCap: $${session.currentMarketCap.toFixed(2)})`);
+      const sellTimestampISO = createdAt || new Date(sellTimestamp).toISOString();
+      session.timeseriesData.push({
+        timestamp: sellTimestampISO,
+        marketcap: sellPriceData.marketCap || null,
+        tokenPriceSol: sellPriceData.priceSol || null,
+        tokenPriceUsd: sellPriceData.priceUsd || null,
+        poolAddress: session.poolAddress || null,
+        sessionKey: sessionKey || null,
+        signature: firstSellTxId || null,
+        transactionType: 'SELL'
+      });
+      console.log(`📈 Added sell transaction to timeseries: $${sellPriceData.priceUsd.toFixed(6)} (MCap: $${sellPriceData.marketCap.toFixed(2)})`);
+    } else {
+      // If no sellPriceData, try to get latest price from timeseries
+      const latestDataPoint = session.timeseriesData.length > 0 
+        ? session.timeseriesData[session.timeseriesData.length - 1]
+        : null;
+      
+      if (latestDataPoint && latestDataPoint.tokenPriceUsd) {
+        const sellTimestampISO = createdAt || new Date(sellTimestamp).toISOString();
+        session.timeseriesData.push({
+          timestamp: sellTimestampISO,
+          marketcap: latestDataPoint.marketcap,
+          tokenPriceSol: latestDataPoint.tokenPriceSol,
+          tokenPriceUsd: latestDataPoint.tokenPriceUsd,
+          poolAddress: session.poolAddress || null,
+          sessionKey: sessionKey || null,
+          signature: firstSellTxId || null,
+          transactionType: 'SELL'
+        });
+        console.log(`📈 Added sell transaction to timeseries (using latest price): $${latestDataPoint.tokenPriceUsd.toFixed(6)}`);
+      }
     }
     
     // Set timeout to stop monitoring after 10 seconds
@@ -749,7 +901,7 @@ class LiquidityPoolMonitor {
       return;
     }
 
-    const poolAddress = session.poolAddress;
+    const tokenAddress = session.tokenAddress;
 
     // Clear timeouts
     if (session.timeoutId) {
@@ -759,21 +911,21 @@ class LiquidityPoolMonitor {
       clearTimeout(session.stopAfterSellTimeout);
     }
 
-    // Remove session from pool tracking
-    const poolSessions = this.poolToSessions.get(poolAddress);
-    if (poolSessions) {
-      poolSessions.delete(sessionKey);
+    // Remove session from token tracking
+    const tokenSessions = this.tokenToSessions.get(tokenAddress);
+    if (tokenSessions) {
+      tokenSessions.delete(sessionKey);
       
-      // Check if there are any remaining active sessions for this pool
+      // Check if there are any remaining active sessions for this token
       // First, clean up any stale session references
-      Array.from(poolSessions).forEach(key => {
+      Array.from(tokenSessions).forEach(key => {
         if (!this.sessions.has(key)) {
-          poolSessions.delete(key);
+          tokenSessions.delete(key);
         }
       });
       
       let hasActiveSessions = false;
-      for (const remainingSessionKey of poolSessions) {
+      for (const remainingSessionKey of tokenSessions) {
         const remainingSession = this.sessions.get(remainingSessionKey);
         if (remainingSession && !remainingSession.stopSignal) {
           hasActiveSessions = true;
@@ -781,50 +933,195 @@ class LiquidityPoolMonitor {
         }
       }
       
-      // If no active sessions remain for this pool, remove it from monitoring
-      if (poolSessions.size === 0 || !hasActiveSessions) {
-        this.poolToSessions.delete(poolAddress);
-        // Remove pool from monitored set BEFORE updating subscription
-        const wasRemoved = this.monitoredPools.delete(poolAddress);
+      // If no active sessions remain for this token, remove it from monitoring
+      if (tokenSessions.size === 0 || !hasActiveSessions) {
+        this.tokenToSessions.delete(tokenAddress);
+        // Remove token from monitored set BEFORE updating subscription
+        const wasRemoved = this.monitoredTokens.delete(tokenAddress);
         if (wasRemoved) {
-          console.log(`➖ Removed pool ${poolAddress.substring(0, 8)}... from monitoring (no active sessions, remaining pools: ${this.monitoredPools.size})`);
-          // Update subscription to remove this pool (this will stop stream if no pools left)
+          console.log(`➖ Removed token ${tokenAddress.substring(0, 8)}... from monitoring (no active sessions, remaining tokens: ${this.monitoredTokens.size})`);
+          
+          // Clear fromSlot if no tokens left
+          if (this.monitoredTokens.size === 0) {
+            this.fromSlot = null;
+            console.log(`📍 Cleared fromSlot (no tokens remaining)`);
+          }
+          
+          // Update subscription to remove this token (this will stop stream if no tokens left)
           await this.updateSubscription();
         }
       } else {
-        console.log(`ℹ️ Pool ${poolAddress.substring(0, 8)}... still has ${poolSessions.size} active session(s)`);
+        console.log(`ℹ️ Token ${tokenAddress.substring(0, 8)}... still has ${tokenSessions.size} active session(s)`);
       }
     }
 
     // Save peak prices to database (always save, whether after sell or timeout)
-    console.log(`💾 Preparing to save peak prices for ${sessionKey}:`);
-    console.log(`   peakBuyToSell: ${session.peakBuyToSell ? `$${session.peakBuyToSell.peakPriceUsd.toFixed(6)}` : 'null'}`);
-    console.log(`   peakSellToEnd: ${session.peakSellToEnd ? `$${session.peakSellToEnd.peakPriceUsd.toFixed(6)}` : 'null'}`);
+    // Peak prices are calculated from timeseries data in savePeakPrices
     await this.savePeakPrices(session);
+
+    // Save all accumulated timeseries data to database
+    if (session.timeseriesData.length > 0) {
+      console.log(`💾 Saving ${session.timeseriesData.length} timeseries data points to database...`);
+      await this.saveTimeseriesData(session);
+    } else {
+      console.log(`ℹ️ No timeseries data to save for ${sessionKey}`);
+    }
 
     this.sessions.delete(sessionKey);
     console.log(`✅ Stopped monitoring ${sessionKey}`);
   }
 
+  /**
+   * Calculate peak prices and buy counts from timeseries data
+   */
+  private calculatePeakPricesFromTimeseries(
+    session: MonitoringSession
+  ): { peakBuyToSell: PeakData | null; peakSellToEnd: PeakData | null; buyCount: number; buysBeforeFirstSell: number; buysAfterFirstSell: number } {
+    if (!session.firstBuyTxId || session.timeseriesData.length === 0) {
+      return {
+        peakBuyToSell: null,
+        peakSellToEnd: null,
+        buyCount: 0,
+        buysBeforeFirstSell: 0,
+        buysAfterFirstSell: 0
+      };
+    }
+
+    // Find first buy timestamp from timeseries data
+    const firstBuyDataPoint = session.timeseriesData.find(
+      dp => dp.signature === session.firstBuyTxId
+    );
+    
+    if (!firstBuyDataPoint) {
+      // If first buy not found in timeseries, use session start time
+      const firstBuyTimestamp = session.startTime;
+      
+      // Filter out transactions before first buy
+      const filteredData = session.timeseriesData.filter(dp => {
+        if (!dp.timestamp) return false;
+        const dpTimestamp = new Date(dp.timestamp).getTime();
+        return dpTimestamp >= firstBuyTimestamp;
+      });
+
+      return this.calculatePeaksFromFilteredData(filteredData, session.firstSellTxId);
+    }
+
+    const firstBuyTimestamp = new Date(firstBuyDataPoint.timestamp).getTime();
+    
+    // Filter out transactions before first buy based on timestamp
+    const filteredData = session.timeseriesData.filter(dp => {
+      if (!dp.timestamp) return false;
+      const dpTimestamp = new Date(dp.timestamp).getTime();
+      return dpTimestamp >= firstBuyTimestamp;
+    });
+
+    return this.calculatePeaksFromFilteredData(filteredData, session.firstSellTxId);
+  }
+
+  /**
+   * Calculate peaks from filtered timeseries data
+   */
+  private calculatePeaksFromFilteredData(
+    filteredData: TimeseriesDataPoint[],
+    firstSellTxId: string | null
+  ): { peakBuyToSell: PeakData | null; peakSellToEnd: PeakData | null; buyCount: number; buysBeforeFirstSell: number; buysAfterFirstSell: number } {
+    if (filteredData.length === 0) {
+      return { peakBuyToSell: null, peakSellToEnd: null, buyCount: 0, buysBeforeFirstSell: 0, buysAfterFirstSell: 0 };
+    }
+
+    let peakBuyToSell: PeakData | null = null;
+    let peakSellToEnd: PeakData | null = null;
+    let buyCount = 0;
+    let buysBeforeFirstSell = 0;
+    let buysAfterFirstSell = 0;
+    let sellTimestamp: number | null = null;
+    const TEN_SECONDS_MS = 10 * 1000; // 10 seconds in milliseconds
+
+    // Find sell timestamp if firstSellTxId is provided
+    if (firstSellTxId) {
+      const sellDataPoint = filteredData.find(dp => dp.signature === firstSellTxId);
+      if (sellDataPoint && sellDataPoint.timestamp) {
+        sellTimestamp = new Date(sellDataPoint.timestamp).getTime();
+      }
+    }
+
+    // Process each data point
+    for (const dp of filteredData) {
+      if (!dp.timestamp || !dp.tokenPriceUsd) continue;
+
+      const dpTimestamp = new Date(dp.timestamp).getTime();
+      const priceUsd = dp.tokenPriceUsd;
+      const priceSol = dp.tokenPriceSol || 0;
+      const marketCap = dp.marketcap || 0;
+
+      // Count buy transactions (only BUY type transactions with signature)
+      if (dp.signature && dp.transactionType === 'BUY') {
+        buyCount++;
+        
+        // Count buys before first sell
+        if (!sellTimestamp || dpTimestamp < sellTimestamp) {
+          buysBeforeFirstSell++;
+        } else if (sellTimestamp && dpTimestamp >= sellTimestamp && dpTimestamp <= sellTimestamp + TEN_SECONDS_MS) {
+          // Count buys after first sell (within 10 seconds)
+          buysAfterFirstSell++;
+        }
+      }
+
+      // Calculate peakBuyToSell (before sell)
+      if (!sellTimestamp || dpTimestamp < sellTimestamp) {
+        if (!peakBuyToSell || priceUsd > peakBuyToSell.peakPriceUsd) {
+          peakBuyToSell = {
+            peakPriceSol: priceSol,
+            peakPriceUsd: priceUsd,
+            peakMarketCap: marketCap,
+            timestamp: dpTimestamp
+          };
+        }
+      } else {
+        // Calculate peakSellToEnd (after sell)
+        if (!peakSellToEnd || priceUsd > peakSellToEnd.peakPriceUsd) {
+          peakSellToEnd = {
+            peakPriceSol: priceSol,
+            peakPriceUsd: priceUsd,
+            peakMarketCap: marketCap,
+            timestamp: dpTimestamp
+          };
+        }
+      }
+    }
+
+    return { peakBuyToSell, peakSellToEnd, buyCount, buysBeforeFirstSell, buysAfterFirstSell };
+  }
+
   async savePeakPrices(session: MonitoringSession): Promise<void> {
     try {
-      const peakBuyToSell = session.peakBuyToSell || {
+      // Calculate peak prices from timeseries data
+      const calculated = this.calculatePeakPricesFromTimeseries(session);
+      
+      const peakBuyToSell = calculated.peakBuyToSell || {
         peakPriceSol: 0,
         peakPriceUsd: 0,
         peakMarketCap: 0,
         timestamp: 0
       };
 
-      const peakSellToEnd = session.peakSellToEnd || {
+      const peakSellToEnd = calculated.peakSellToEnd || {
         peakPriceSol: 0,
         peakPriceUsd: 0,
         peakMarketCap: 0,
         timestamp: 0
       };
 
-      console.log(`💾 Saving peak prices:`);
+      const buyCount = calculated.buyCount;
+      const buysBeforeFirstSell = calculated.buysBeforeFirstSell;
+      const buysAfterFirstSell = calculated.buysAfterFirstSell;
+
+      console.log(`💾 Saving peak prices (calculated from ${session.timeseriesData.length} timeseries points):`);
       console.log(`   Buy to Sell: Price SOL=${peakBuyToSell.peakPriceSol}, Price USD=${peakBuyToSell.peakPriceUsd}, MCap=${peakBuyToSell.peakMarketCap}`);
       console.log(`   Sell to End: Price SOL=${peakSellToEnd.peakPriceSol}, Price USD=${peakSellToEnd.peakPriceUsd}, MCap=${peakSellToEnd.peakMarketCap}`);
+      console.log(`   Total Buy Count: ${buyCount}`);
+      console.log(`   Buys Before First Sell: ${buysBeforeFirstSell}`);
+      console.log(`   Buys After First Sell (within 10s): ${buysAfterFirstSell}`);
 
       await dbService.updateWalletPeakPrices(
         session.walletAddress,
@@ -834,12 +1131,33 @@ class LiquidityPoolMonitor {
         peakBuyToSell.peakMarketCap,
         peakSellToEnd.peakPriceSol,
         peakSellToEnd.peakPriceUsd,
-        peakSellToEnd.peakMarketCap
+        peakSellToEnd.peakMarketCap,
+        buysBeforeFirstSell,
+        buysAfterFirstSell
       );
 
       console.log(`💾 Saved peak prices for ${session.walletAddress.substring(0, 8)}... - ${session.tokenAddress.substring(0, 8)}...`);
     } catch (error) {
       console.error('Failed to save peak prices:', error);
+    }
+  }
+
+  async saveTimeseriesData(session: MonitoringSession): Promise<void> {
+    try {
+      if (session.timeseriesData.length === 0) {
+        return;
+      }
+
+      // Save all timeseries data points at once to the database
+      await dbService.savePoolPriceTimeseriesBatch(
+        session.walletAddress,
+        session.tokenAddress,
+        session.timeseriesData
+      );
+
+      console.log(`💾 Saved ${session.timeseriesData.length} timeseries data points for ${session.walletAddress.substring(0, 8)}... - ${session.tokenAddress.substring(0, 8)}...`);
+    } catch (error) {
+      console.error('Failed to save timeseries data:', error);
     }
   }
 
@@ -863,7 +1181,7 @@ class LiquidityPoolMonitor {
     // Clear old subscription by sending empty subscription request before ending stream
     if (this.currentStream && this.isStreaming) {
       try {
-        // Send empty subscription to clear old pools from server
+        // Send empty subscription to clear old tokens from server
         const emptyReq: SubscribeRequest = {
           slots: {},
           accounts: {},
@@ -878,14 +1196,18 @@ class LiquidityPoolMonitor {
         // Send empty subscription to clear old subscription
         await new Promise<void>((resolve) => {
           try {
-            this.currentStream.write(emptyReq, (err: any) => {
-              if (err) {
-                console.error("Error sending empty subscription:", err);
-              } else {
-                console.log("✅ Sent empty subscription to clear old pools");
-              }
+            if (this.currentStream && typeof this.currentStream.write === 'function') {
+              this.currentStream.write(emptyReq, (err: any) => {
+                if (err) {
+                  console.error("Error sending empty subscription:", err);
+                } else {
+                  console.log("✅ Sent empty subscription to clear old tokens");
+                }
+                resolve();
+              });
+            } else {
               resolve();
-            });
+            }
           } catch (error) {
             console.error("Error writing empty subscription:", error);
             resolve();
@@ -905,10 +1227,11 @@ class LiquidityPoolMonitor {
     // Wait a bit for cleanup
     await new Promise(resolve => setTimeout(resolve, 300));
     
-    // Clear all sessions and pools
+    // Clear all sessions and tokens
     this.sessions.clear();
-    this.poolToSessions.clear();
-    this.monitoredPools.clear();
+    this.tokenToSessions.clear();
+    this.monitoredTokens.clear();
+    this.fromSlot = null;
     this.isStreaming = false;
     this.currentStream = null;
     
@@ -929,11 +1252,11 @@ export class PoolMonitoringService {
     if (!PoolMonitoringService.instance) {
       PoolMonitoringService.instance = new PoolMonitoringService();
       
-      // Create pool monitor (uses Yellowstone gRPC for account subscriptions)
+      // Create pool monitor (uses Yellowstone gRPC for transaction subscriptions)
       poolMonitor = new LiquidityPoolMonitor(solanaConnection);
       PoolMonitoringService.instance.monitor = poolMonitor;
       
-      console.log('✅ Pool monitoring service initialized (using Yellowstone gRPC)');
+      console.log('✅ Pool monitoring service initialized (using Yellowstone gRPC transaction subscriptions)');
     }
 
     return PoolMonitoringService.instance;
@@ -944,22 +1267,25 @@ export class PoolMonitoringService {
     tokenAddress: string,
     poolAddress: string,
     maxDuration: number = 3600, // Default 1 hour
-    initialPriceData?: { priceUsd: number; priceSol: number; marketCap: number }
+    initialPriceData?: { priceUsd: number; priceSol: number; marketCap: number },
+    createdAt?: string | null,
+    fromSlot?: string | null,
+    firstBuyTxId?: string | null
   ): Promise<string> {
     if (!this.monitor) {
       throw new Error('Pool monitor not initialized');
     }
 
-    return this.monitor.startMonitoring(walletAddress, tokenAddress, poolAddress, maxDuration, initialPriceData);
+    return this.monitor.startMonitoring(walletAddress, tokenAddress, poolAddress, maxDuration, initialPriceData, createdAt, fromSlot, firstBuyTxId);
   }
 
-  signalSell(walletAddress: string, tokenAddress: string, sellPriceData?: { priceUsd: number; priceSol: number; marketCap: number }): void {
+  signalSell(walletAddress: string, tokenAddress: string, sellPriceData?: { priceUsd: number; priceSol: number; marketCap: number }, createdAt?: string | null, firstSellTxId?: string | null): void {
     if (!this.monitor) {
       return;
     }
 
     const sessionKey = `${walletAddress}-${tokenAddress}`;
-    this.monitor.signalSell(sessionKey, sellPriceData);
+    this.monitor.signalSell(sessionKey, sellPriceData, createdAt, firstSellTxId);
   }
 
   isMonitoring(walletAddress: string, tokenAddress: string): boolean {
