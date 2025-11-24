@@ -1646,13 +1646,17 @@ app.post("/api/dashboard-statistics/:wallet", requireAuth, async (req, res) => {
         ? sellPNLs.reduce((sum, pnl) => sum + pnl, 0)
         : 0;
       
+      // Count of tokens that have a sell at this position
+      const totalSells = sellPNLs.length;
+      
       sellStatistics.push({
         sellNumber: sellPosition,
         avgProfit,
         avgSellPercentOfBuy,
         avgHoldingTime,
         totalSol,
-        totalSolPNL
+        totalSolPNL,
+        totalSells
       });
     }
     

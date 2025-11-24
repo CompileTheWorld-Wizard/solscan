@@ -1118,7 +1118,7 @@ function updateStatisticsDisplay(stats) {
     if (walletSolBalanceEl) {
         if (stats.solBalance !== null && stats.solBalance !== undefined) {
             walletSolBalanceEl.textContent = `${stats.solBalance.toFixed(4)} SOL`;
-            walletSolBalanceEl.style.color = '#10b981';
+            walletSolBalanceEl.style.color = '#3b82f6';
         } else {
             walletSolBalanceEl.textContent = '-';
             walletSolBalanceEl.style.color = '#94a3b8';
@@ -1263,9 +1263,17 @@ function updateSellStatisticsFromBackend(sellStatistics, stats) {
         
         if (stat.avgHoldingTime !== null && stat.avgHoldingTime !== undefined) {
             const timeEl = document.createElement('div');
-            timeEl.style.cssText = 'font-size: 0.75rem; color: #94a3b8;';
+            timeEl.style.cssText = 'font-size: 0.75rem; color: #94a3b8; margin-bottom: 5px;';
             timeEl.textContent = `Avg Holding Time: ${formatDuration(stat.avgHoldingTime)}`;
             card.appendChild(timeEl);
+        }
+        
+        // Add total sells count below Avg Holding Time
+        if (stat.totalSells !== null && stat.totalSells !== undefined) {
+            const totalSellsEl = document.createElement('div');
+            totalSellsEl.style.cssText = 'font-size: 0.75rem; color: #94a3b8;';
+            totalSellsEl.textContent = `Total Sells: ${stat.totalSells}`;
+            card.appendChild(totalSellsEl);
         }
         
         container.appendChild(card);
