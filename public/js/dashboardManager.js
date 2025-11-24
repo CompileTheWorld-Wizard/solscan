@@ -2064,7 +2064,13 @@ function renderDashboardTable() {
             case 'tokenName': return token.tokenName || 'Unknown';
             case 'tokenSymbol': return token.tokenSymbol || '???';
             case 'tokenAddress': return createLink(token.tokenAddress, `https://solscan.io/token/${token.tokenAddress}`, token.tokenAddress ? token.tokenAddress.substring(0, 8) + '...' : '');
-            case 'creatorAddress': return createLink(token.creatorAddress, `https://solscan.io/account/${token.creatorAddress}`, token.creatorAddress || '');
+            case 'creatorAddress': {
+                if (!token.creatorAddress) return '';
+                const link = createLink(token.creatorAddress, `https://solscan.io/account/${token.creatorAddress}`, token.creatorAddress || '');
+                // Add magnifier icon button as HTML string
+                const iconBtnHtml = `<span class="creator-tokens-icon" data-creator="${token.creatorAddress}" style="margin-left: 8px; cursor: pointer; font-size: 0.9rem; opacity: 0.7; transition: opacity 0.2s; display: inline-block;" title="View tokens created by this wallet">🔍</span>`;
+                return link + iconBtnHtml;
+            }
             case 'numberOfSocials': return token.numberOfSocials || 0;
             case 'devBuyAmountSOL': return formatNumber(token.devBuyAmountSOL, 4);
             case 'walletBuyAmountSOL': return formatNumber(token.walletBuyAmountSOL, 4);
@@ -2166,8 +2172,25 @@ function renderDashboardTable() {
         visibleColumns.forEach((col, index) => {
             const cellContent = getCellValue(token, col.key);
             const td = document.createElement('td');
-            if (typeof cellContent === 'string' && cellContent.includes('<a')) {
+            if (typeof cellContent === 'string' && (cellContent.includes('<a') || cellContent.includes('<span'))) {
                 td.innerHTML = cellContent;
+                // Add click handler for creator tokens icon if this is creatorAddress column
+                if (col.key === 'creatorAddress' && token.creatorAddress) {
+                    const iconBtn = td.querySelector('.creator-tokens-icon');
+                    if (iconBtn) {
+                        iconBtn.addEventListener('mouseenter', () => {
+                            iconBtn.style.opacity = '1';
+                        });
+                        iconBtn.addEventListener('mouseleave', () => {
+                            iconBtn.style.opacity = '0.7';
+                        });
+                        iconBtn.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            window.openCreatorTokensDialog(token.creatorAddress);
+                        });
+                    }
+                }
             } else {
                 td.textContent = cellContent;
             }
@@ -3503,7 +3526,106 @@ window.exportAllWalletsToExcel = async function() {
         console.error('Error exporting all wallets:', error);
         showNotification('❌ Error exporting all wallets: ' + error.message, 'error');
     }
+}
+
+/**
+ * Open creator tokens dialog and fetch data
+ */
+window.openCreatorTokensDialog = async function(creatorAddress) {
+    const modal = document.getElementById('creatorTokensModal');
+    const loadingEl = document.getElementById('creatorTokensLoading');
+    const errorEl = document.getElementById('creatorTokensError');
+    const contentEl = document.getElementById('creatorTokensContent');
+    const walletAddressEl = document.getElementById('creatorTokensWalletAddress');
+    const tokenCountEl = document.getElementById('creatorTokensCount');
+    const tokenListEl = document.getElementById('creatorTokensList');
+    
+    if (!modal || !loadingEl || !errorEl || !contentEl || !walletAddressEl || !tokenCountEl || !tokenListEl) {
+        console.error('Creator tokens dialog elements not found');
+        return;
+    }
+    
+    // Show modal and loading state
+    modal.style.display = 'flex';
+    loadingEl.style.display = 'block';
+    errorEl.style.display = 'none';
+    contentEl.style.display = 'none';
+    tokenListEl.innerHTML = '';
+    
+    try {
+        const result = await api.fetchCreatorTokens(creatorAddress);
+        
+        if (result.success) {
+            // Hide loading, show content
+            loadingEl.style.display = 'none';
+            contentEl.style.display = 'block';
+            
+            // Update wallet address
+            walletAddressEl.textContent = result.walletAddress || creatorAddress;
+            
+            // Update token count
+            const count = result.tokenCount || 0;
+            tokenCountEl.textContent = count.toString();
+            
+            // Display token list
+            if (result.tokens && result.tokens.length > 0) {
+                result.tokens.forEach((token, index) => {
+                    const tokenCard = document.createElement('div');
+                    tokenCard.style.cssText = 'padding: 12px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;';
+                    
+                    const tokenInfo = token.tokenInfo || {};
+                    const tokenName = tokenInfo.token_name || 'Unknown';
+                    const tokenSymbol = tokenInfo.token_symbol || '???';
+                    const tokenIcon = tokenInfo.token_icon || null;
+                    
+                    tokenCard.innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            ${tokenIcon ? `<img src="${tokenIcon}" alt="${tokenSymbol}" style="width: 32px; height: 32px; border-radius: 4px;" onerror="this.style.display='none'">` : ''}
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600; color: #e0e7ff; margin-bottom: 4px;">${tokenName} (${tokenSymbol})</div>
+                                <div style="font-size: 0.75rem; color: #94a3b8; font-family: 'Courier New', monospace; word-break: break-all;">
+                                    ${token.tokenAddress}
+                                </div>
+                            </div>
+                            <a href="https://solscan.io/token/${token.tokenAddress}" target="_blank" style="padding: 6px 12px; background: #3b82f6; color: white; border-radius: 4px; text-decoration: none; font-size: 0.85rem; font-weight: 600; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
+                                View
+                            </a>
+                        </div>
+                    `;
+                    
+                    tokenListEl.appendChild(tokenCard);
+                });
+            } else {
+                tokenListEl.innerHTML = '<div style="text-align: center; padding: 20px; color: #94a3b8;">No tokens found</div>';
+            }
+        } else {
+            // Show error
+            loadingEl.style.display = 'none';
+            errorEl.style.display = 'block';
+            errorEl.textContent = result.error || 'Failed to fetch creator tokens';
+        }
+    } catch (error) {
+        console.error('Error opening creator tokens dialog:', error);
+        loadingEl.style.display = 'none';
+        errorEl.style.display = 'block';
+        errorEl.textContent = error.message || 'Failed to fetch creator tokens';
+    }
 };
+
+/**
+ * Close creator tokens dialog
+ */
+window.closeCreatorTokensDialog = function() {
+    const modal = document.getElementById('creatorTokensModal');
+    if (modal) {
+        modal.style.display = 'none';
+        // Remove overlay click handler if it exists
+        if (modal._overlayHandler) {
+            modal.removeEventListener('click', modal._overlayHandler);
+            delete modal._overlayHandler;
+        }
+    }
+};;
 
 // Make functions available globally
 window.loadDashboardData = loadDashboardData;

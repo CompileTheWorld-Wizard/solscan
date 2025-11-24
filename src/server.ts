@@ -2270,6 +2270,97 @@ app.post("/api/what-if/:wallet", requireAuth, async (req, res) => {
 });
 
 /**
+ * GET /api/creator-tokens/:wallet - Get count of tokens created by a wallet
+ */
+app.get("/api/creator-tokens/:wallet", requireAuth, async (req, res) => {
+  try {
+    const { wallet } = req.params;
+    const solscanApiKey = process.env.SOLSCAN_API_KEY;
+    
+    if (!solscanApiKey) {
+      return res.status(500).json({ 
+        success: false, 
+        error: 'SOLSCAN_API_KEY not configured' 
+      });
+    }
+    
+    let allTokens: any[] = [];
+    let page = 1;
+    const pageSize = 100;
+    let hasMore = true;
+    
+    // Fetch all pages until we get fewer items than page_size
+    while (hasMore) {
+      const url = `https://pro-api.solscan.io/v2.0/account/defi/activities?address=${wallet}&activity_type[]=ACTIVITY_SPL_INIT_MINT&page=${page}&page_size=${pageSize}&sort_by=block_time&sort_order=desc`;
+      
+      const requestOptions: RequestInit = {
+        method: 'GET',
+        headers: {
+          'token': solscanApiKey
+        }
+      };
+      
+      const response = await fetch(url, requestOptions);
+      
+      if (!response.ok) {
+        throw new Error(`Solscan API error: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (!data.success || !data.data) {
+        throw new Error('Invalid response from Solscan API');
+      }
+      
+      // Extract token addresses from the data
+      // Token addresses are in routers.token1 field
+      const pageTokens = data.data
+        .filter((activity: any) => activity.routers && activity.routers.token1)
+        .map((activity: any) => ({
+          tokenAddress: activity.routers.token1,
+          transactionId: activity.trans_id,
+          blockTime: activity.block_time,
+          timestamp: activity.time,
+          tokenInfo: data.metadata?.tokens?.[activity.routers.token1] || null
+        }));
+      
+      allTokens = allTokens.concat(pageTokens);
+      
+      // Check if we should continue fetching
+      if (data.data.length < pageSize) {
+        hasMore = false;
+      } else {
+        page++;
+      }
+    }
+    
+    // Remove duplicates by token address (keep first occurrence)
+    const uniqueTokens = new Map<string, any>();
+    allTokens.forEach(token => {
+      if (!uniqueTokens.has(token.tokenAddress)) {
+        uniqueTokens.set(token.tokenAddress, token);
+      }
+    });
+    
+    const tokenCount = uniqueTokens.size;
+    const tokens = Array.from(uniqueTokens.values());
+    
+    res.json({
+      success: true,
+      walletAddress: wallet,
+      tokenCount: tokenCount,
+      tokens: tokens
+    });
+  } catch (error: any) {
+    console.error('Error fetching creator tokens:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to fetch creator tokens' 
+    });
+  }
+});
+
+/**
  * GET /api/wallet-activity/:wallet - Get trading activity aggregated by time interval
  * Query params: interval (hour, quarter_day, day, week, month)
  */

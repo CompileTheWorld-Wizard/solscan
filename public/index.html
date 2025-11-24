@@ -700,6 +700,38 @@
         </div>
     </div>
 
+    <!-- Creator Tokens Dialog -->
+    <div id="creatorTokensModal" class="modal-overlay" style="display: none; align-items: center; justify-content: center;">
+        <div class="modal" style="max-width: 700px; max-height: 80vh;">
+            <div class="modal-header">
+                <h2>🔍 Tokens Created by Wallet</h2>
+                <button class="modal-close" onclick="window.closeCreatorTokensDialog()">×</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto;">
+                <div id="creatorTokensLoading" style="text-align: center; padding: 40px; color: #94a3b8;">
+                    Loading tokens...
+                </div>
+                <div id="creatorTokensError" style="text-align: center; padding: 20px; color: #ef4444; display: none;">
+                </div>
+                <div id="creatorTokensContent" style="display: none;">
+                    <div style="margin-bottom: 20px; padding: 15px; background: #1a1f2e; border-radius: 8px; border: 1px solid #334155;">
+                        <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 5px;">Wallet Address</div>
+                        <div id="creatorTokensWalletAddress" style="font-size: 1rem; font-weight: 600; color: #e0e7ff; font-family: 'Courier New', monospace; word-break: break-all;"></div>
+                    </div>
+                    <div style="margin-bottom: 20px; padding: 15px; background: linear-gradient(135deg, #1a1f2e 0%, #0f1419 100%); border: 1px solid #334155; border-radius: 8px; display: flex; align-items: center; gap: 10px;">
+                        <div style="flex: 1;">
+                            <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 5px;">Total Tokens Created</div>
+                            <div id="creatorTokensCount" style="font-size: 1.5rem; font-weight: 600; color: #10b981;">-</div>
+                        </div>
+                    </div>
+                    <div id="creatorTokensList" style="display: flex; flex-direction: column; gap: 10px;">
+                        <!-- Token list will be inserted here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script type="module" src="/js/app.js"></script>

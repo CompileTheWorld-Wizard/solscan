@@ -528,6 +528,35 @@ export async function fetchSolPrice() {
 }
 
 /**
+ * Fetch tokens created by a wallet from Solscan API
+ * @param {string} walletAddress - Wallet address (creator address)
+ */
+export async function fetchCreatorTokens(walletAddress) {
+    try {
+        const response = await fetch(`/api/creator-tokens/${encodeURIComponent(walletAddress)}`, {
+            method: 'GET',
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch creator tokens');
+        }
+
+        const data = await response.json();
+        return { 
+            success: true, 
+            walletAddress: data.walletAddress,
+            tokenCount: data.tokenCount || 0,
+            tokens: data.tokens || []
+        };
+    } catch (error) {
+        console.error('Error fetching creator tokens:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
  * Calculate what-if PNL with adjusted sell times
  * @param {string} walletAddress - Wallet address
  * @param {number} firstSellTimeAdjustment - Adjust first sell time by N seconds (can be negative)
