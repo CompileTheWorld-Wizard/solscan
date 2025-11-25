@@ -1017,7 +1017,19 @@ class LiquidityPoolMonitor {
       return dpTimestamp > firstBuyTimestamp;
     });
 
-    return this.calculatePeaksFromFilteredData(filteredData, session.firstSellTxId, firstBuyTimestamp, session.firstBuyTxId);
+    // Find first sell data point from all timeseries data (not filtered)
+    const firstSellDataPoint = session.firstSellTxId 
+      ? session.timeseriesData.find(dp => dp.signature === session.firstSellTxId)
+      : null;
+
+    return this.calculatePeaksFromFilteredData(
+      filteredData, 
+      session.firstSellTxId, 
+      firstBuyTimestamp, 
+      session.firstBuyTxId,
+      firstBuyDataPoint,
+      firstSellDataPoint
+    );
   }
 
   /**
@@ -1027,7 +1039,9 @@ class LiquidityPoolMonitor {
     filteredData: TimeseriesDataPoint[],
     firstSellTxId: string | null,
     firstBuyTimestamp: number,
-    firstBuyTxId: string | null
+    firstBuyTxId: string | null,
+    firstBuyDataPoint: TimeseriesDataPoint | undefined,
+    firstSellDataPoint: TimeseriesDataPoint | undefined
   ): { peakBuyToSell: PeakData | null; peakSellToEnd: PeakData | null; buyCount: number; buysBeforeFirstSell: number; buysAfterFirstSell: number } {
     if (filteredData.length === 0) {
       return { peakBuyToSell: null, peakSellToEnd: null, buyCount: 0, buysBeforeFirstSell: 0, buysAfterFirstSell: 0 };
@@ -1124,6 +1138,40 @@ class LiquidityPoolMonitor {
             timestamp: dpTimestamp
           };
         }
+      }
+    }
+
+    // Fallback: If no buys before first sell, use first buy market cap for peakBuyToSell
+    if (!peakBuyToSell && buysBeforeFirstSell === 0 && firstBuyDataPoint) {
+      const buyTimestamp = firstBuyDataPoint.timestamp ? new Date(firstBuyDataPoint.timestamp).getTime() : firstBuyTimestamp;
+      const buyPriceUsd = firstBuyDataPoint.tokenPriceUsd || 0;
+      const buyPriceSol = firstBuyDataPoint.tokenPriceSol || 0;
+      const buyMarketCap = firstBuyDataPoint.marketcap || 0;
+      
+      if (buyMarketCap > 0) {
+        peakBuyToSell = {
+          peakPriceSol: buyPriceSol,
+          peakPriceUsd: buyPriceUsd,
+          peakMarketCap: buyMarketCap,
+          timestamp: buyTimestamp
+        };
+      }
+    }
+
+    // Fallback: If no buys after first sell, use first sell market cap for peakSellToEnd
+    if (!peakSellToEnd && buysAfterFirstSell === 0 && firstSellDataPoint) {
+      const sellTimestamp = firstSellDataPoint.timestamp ? new Date(firstSellDataPoint.timestamp).getTime() : 0;
+      const sellPriceUsd = firstSellDataPoint.tokenPriceUsd || 0;
+      const sellPriceSol = firstSellDataPoint.tokenPriceSol || 0;
+      const sellMarketCap = firstSellDataPoint.marketcap || 0;
+      
+      if (sellMarketCap > 0) {
+        peakSellToEnd = {
+          peakPriceSol: sellPriceSol,
+          peakPriceUsd: sellPriceUsd,
+          peakMarketCap: sellMarketCap,
+          timestamp: sellTimestamp
+        };
       }
     }
 

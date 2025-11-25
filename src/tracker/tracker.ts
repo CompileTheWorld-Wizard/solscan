@@ -458,11 +458,13 @@ class TransactionTracker {
 
       console.log(`💾 Wallet ${txType} tracked: ${walletAddress.substring(0, 8)}... - ${tokenAddress.substring(0, 8)}... (First: ${isFirst})`);
 
-      // Fetch and save creator token count (at the end, as requested)
+      // Fetch and save creator token count (at the end, as requested, after 45 seconds)
       if (result.creator) {
-        this.fetchAndSaveCreatorTokenCount(result.creator, tokenAddress).catch(error => {
-          console.error(`Failed to fetch and save creator token count:`, error?.message || error);
-        });
+        setTimeout(() => {
+          this.fetchAndSaveCreatorTokenCount(result.creator, tokenAddress).catch(error => {
+            console.error(`Failed to fetch and save creator token count:`, error?.message || error);
+          });
+        }, 45000); // 45 seconds delay
       }
     } catch (error: any) {
       console.error(`❌ Error in processWalletTracking:`, error?.message || error);
