@@ -49,41 +49,42 @@ const COLUMN_DEFINITIONS = [
     { key: 'tokenSymbol', label: 'Token Symbol', order: 3, group: 'Token Info' },
     { key: 'tokenAddress', label: 'Token Address', order: 4, group: 'Token Info' },
     { key: 'creatorAddress', label: 'Creator Address', order: 5, group: 'Token Info' },
-    { key: 'numberOfSocials', label: 'Number of Socials', order: 6, group: 'Token Info' },
+    { key: 'creatorTokenCount', label: 'Creator Token Count', order: 6, group: 'Token Info' },
+    { key: 'numberOfSocials', label: 'Number of Socials', order: 7, group: 'Token Info' },
     
     // Dev Buy Group
-    { key: 'devBuyAmountSOL', label: 'Dev Buy Amount in SOL', order: 7, group: 'Dev Buy' },
-    { key: 'devBuyAmountTokens', label: 'Dev Buy Amount in Tokens', order: 10, group: 'Dev Buy' },
+    { key: 'devBuyAmountSOL', label: 'Dev Buy Amount in SOL', order: 8, group: 'Dev Buy' },
+    { key: 'devBuyAmountTokens', label: 'Dev Buy Amount in Tokens', order: 11, group: 'Dev Buy' },
     
     // Wallet Buy Group
-    { key: 'walletBuyAmountSOL', label: 'Wallet Buy Amount in SOL', order: 8, group: 'Wallet Buy' },
-    { key: 'walletBuyAmountTokens', label: 'Wallet Buy Amount in Tokens', order: 11, group: 'Wallet Buy' },
-    { key: 'walletBuySOLPercentOfDev', label: 'Wallet buy SOL % of dev', order: 9, group: 'Wallet Buy' },
-    { key: 'walletBuyTokensPercentOfDev', label: 'Wallet buy Tokens % of dev', order: 12, group: 'Wallet Buy' },
+    { key: 'walletBuyAmountSOL', label: 'Wallet Buy Amount in SOL', order: 9, group: 'Wallet Buy' },
+    { key: 'walletBuyAmountTokens', label: 'Wallet Buy Amount in Tokens', order: 12, group: 'Wallet Buy' },
+    { key: 'walletBuySOLPercentOfDev', label: 'Wallet buy SOL % of dev', order: 10, group: 'Wallet Buy' },
+    { key: 'walletBuyTokensPercentOfDev', label: 'Wallet buy Tokens % of dev', order: 13, group: 'Wallet Buy' },
     
     // Supply Percentages Group
-    { key: 'devBuyTokensPercentOfTotalSupply', label: 'Dev buy Tokens % of total supply', order: 13, group: 'Supply Percentages' },
-    { key: 'walletBuyPercentOfTotalSupply', label: 'Wallet buy % of total supply', order: 14, group: 'Supply Percentages' },
-    { key: 'walletBuyPercentOfRemainingSupply', label: 'Wallet buy % of the remaining supply', order: 15, group: 'Supply Percentages' },
+    { key: 'devBuyTokensPercentOfTotalSupply', label: 'Dev buy Tokens % of total supply', order: 14, group: 'Supply Percentages' },
+    { key: 'walletBuyPercentOfTotalSupply', label: 'Wallet buy % of total supply', order: 15, group: 'Supply Percentages' },
+    { key: 'walletBuyPercentOfRemainingSupply', label: 'Wallet buy % of the remaining supply', order: 16, group: 'Supply Percentages' },
     
     // Price & Market Cap Group
-    { key: 'tokenPeakPriceBeforeFirstSell', label: 'Token Peak Price Before 1st Sell', order: 16, group: 'Price & Market Cap' },
-    { key: 'tokenPeakPrice10sAfterFirstSell', label: 'Token Peak Price 10s After 1st Sell', order: 17, group: 'Price & Market Cap' },
-    { key: 'walletBuyMarketCap', label: 'Wallet Buy Market Cap', order: 22, group: 'Price & Market Cap' },
+    { key: 'tokenPeakPriceBeforeFirstSell', label: 'Token Peak Price Before 1st Sell', order: 17, group: 'Price & Market Cap' },
+    { key: 'tokenPeakPrice10sAfterFirstSell', label: 'Token Peak Price 10s After 1st Sell', order: 18, group: 'Price & Market Cap' },
+    { key: 'walletBuyMarketCap', label: 'Wallet Buy Market Cap', order: 23, group: 'Price & Market Cap' },
     
     // Buy Counts Group
-    { key: 'buysBeforeFirstSell', label: 'Buys Before First Sell', order: 25, group: 'Buy Counts' },
-    { key: 'buysAfterFirstSell', label: 'Buys After First Sell (10s)', order: 26, group: 'Buy Counts' },
+    { key: 'buysBeforeFirstSell', label: 'Buys Before First Sell', order: 26, group: 'Buy Counts' },
+    { key: 'buysAfterFirstSell', label: 'Buys After First Sell (10s)', order: 27, group: 'Buy Counts' },
     
     // Position & Timing Group
-    { key: 'walletBuyPositionAfterDev', label: 'Wallet Buy Position After Dev', order: 18, group: 'Position & Timing' },
-    { key: 'walletBuyBlockNumber', label: 'Wallet Buy Block #', order: 19, group: 'Position & Timing' },
-    { key: 'walletBuyBlockNumberAfterDev', label: 'Wallet Buy Block # After Dev', order: 20, group: 'Position & Timing' },
-    { key: 'walletBuyTimestamp', label: 'Wallet Buy Timestamp', order: 21, group: 'Position & Timing' },
+    { key: 'walletBuyPositionAfterDev', label: 'Wallet Buy Position After Dev', order: 19, group: 'Position & Timing' },
+    { key: 'walletBuyBlockNumber', label: 'Wallet Buy Block #', order: 20, group: 'Position & Timing' },
+    { key: 'walletBuyBlockNumberAfterDev', label: 'Wallet Buy Block # After Dev', order: 21, group: 'Position & Timing' },
+    { key: 'walletBuyTimestamp', label: 'Wallet Buy Timestamp', order: 22, group: 'Position & Timing' },
     
     // Transaction Group
-    { key: 'walletGasAndFeesAmount', label: 'Wallet Gas & Fees Amount', order: 23, group: 'Transaction' },
-    { key: 'transactionSignature', label: 'Transaction Signature', order: 24, group: 'Transaction' }
+    { key: 'walletGasAndFeesAmount', label: 'Wallet Gas & Fees Amount', order: 24, group: 'Transaction' },
+    { key: 'transactionSignature', label: 'Transaction Signature', order: 25, group: 'Transaction' }
 ];
 
 // Sell column definitions
@@ -2071,6 +2072,10 @@ function renderDashboardTable() {
                 const iconBtnHtml = `<span class="creator-tokens-icon" data-creator="${token.creatorAddress}" style="margin-left: 8px; cursor: pointer; font-size: 0.9rem; opacity: 0.7; transition: opacity 0.2s; display: inline-block;" title="View tokens created by this wallet">🔍</span>`;
                 return link + iconBtnHtml;
             }
+            case 'creatorTokenCount': 
+                return token.creatorTokenCount !== null && token.creatorTokenCount !== undefined 
+                    ? token.creatorTokenCount.toString() 
+                    : '-';
             case 'numberOfSocials': return token.numberOfSocials || 0;
             case 'devBuyAmountSOL': return formatNumber(token.devBuyAmountSOL, 4);
             case 'walletBuyAmountSOL': return formatNumber(token.walletBuyAmountSOL, 4);

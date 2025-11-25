@@ -1943,6 +1943,7 @@ app.post("/api/dashboard-data/:wallet", requireAuth, async (req, res) => {
         tokenSymbol: tokenInfo?.symbol || '???',
         tokenAddress: token,
         creatorAddress: tokenInfo?.creator || '',
+        creatorTokenCount: tokenInfo?.creator_token_count || null,
         numberOfSocials: socialCount,
         
         // Dev buy data

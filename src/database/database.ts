@@ -41,6 +41,7 @@ interface TokenData {
   website?: string;
   discord?: string;
   telegram?: string;
+  creator_token_count?: number | null;
 }
 
 interface SkipToken {
@@ -140,9 +141,21 @@ class DatabaseService {
           website TEXT,
           discord TEXT,
           telegram TEXT,
+          creator_token_count INTEGER,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        
+        -- Add creator_token_count column if it doesn't exist (for existing databases)
+        DO $$ 
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'tokens' AND column_name = 'creator_token_count'
+          ) THEN
+            ALTER TABLE tokens ADD COLUMN creator_token_count INTEGER;
+          END IF;
+        END $$;
 
         CREATE INDEX IF NOT EXISTS idx_mint_address ON tokens(mint_address);
         CREATE INDEX IF NOT EXISTS idx_creator ON tokens(creator);
@@ -1078,6 +1091,43 @@ class DatabaseService {
   }
 
   /**
+   * Update creator token count for a token
+   */
+  async updateCreatorTokenCount(tokenAddress: string, creatorAddress: string, tokenCount: number): Promise<void> {
+    try {
+      // Check if creator_token_count column exists
+      const hasCreatorTokenCount = await this.columnExists('tokens', 'creator_token_count');
+      
+      if (!hasCreatorTokenCount) {
+        console.log(`⚠️ creator_token_count column does not exist, skipping update`);
+        return;
+      }
+
+      // Update the token's creator_token_count by mint_address only
+      // Also update creator if it's not set or different
+      const query = `
+        UPDATE tokens
+        SET 
+          creator_token_count = $1,
+          creator = COALESCE(creator, $3),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE mint_address = $2
+      `;
+
+      const result = await this.pool.query(query, [tokenCount, tokenAddress, creatorAddress]);
+      
+      if (result.rowCount === 0) {
+        console.log(`⚠️ Token ${tokenAddress.substring(0, 8)}... not found in database, cannot update creator_token_count`);
+      } else {
+        console.log(`💾 Updated creator_token_count for token ${tokenAddress.substring(0, 8)}... (creator: ${creatorAddress.substring(0, 8)}..., count: ${tokenCount})`);
+      }
+    } catch (error: any) {
+      console.error(`❌ Failed to update creator_token_count for ${tokenAddress}:`, error.message);
+      // Don't throw - this is a non-critical update
+    }
+  }
+
+  /**
    * Get token data by mint address
    */
   async getToken(mintAddress: string): Promise<TokenData | null> {
@@ -1100,6 +1150,7 @@ class DatabaseService {
           website,
           discord,
           telegram,
+          creator_token_count,
           created_at,
           updated_at
         FROM tokens
@@ -1146,6 +1197,7 @@ class DatabaseService {
           website,
           discord,
           telegram,
+          creator_token_count,
           created_at,
           updated_at
         FROM tokens

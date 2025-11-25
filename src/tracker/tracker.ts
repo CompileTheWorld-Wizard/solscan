@@ -457,6 +457,13 @@ class TransactionTracker {
       );
 
       console.log(`💾 Wallet ${txType} tracked: ${walletAddress.substring(0, 8)}... - ${tokenAddress.substring(0, 8)}... (First: ${isFirst})`);
+
+      // Fetch and save creator token count (at the end, as requested)
+      if (result.creator) {
+        this.fetchAndSaveCreatorTokenCount(result.creator, tokenAddress).catch(error => {
+          console.error(`Failed to fetch and save creator token count:`, error?.message || error);
+        });
+      }
     } catch (error: any) {
       console.error(`❌ Error in processWalletTracking:`, error?.message || error);
     }
@@ -802,6 +809,79 @@ class TransactionTracker {
     });
   }
 
+  /**
+   * Fetch creator token count from Solscan API and save to database
+   */
+  private async fetchAndSaveCreatorTokenCount(creatorAddress: string, tokenAddress: string): Promise<void> {
+    try {
+      const solscanApiKey = process.env.SOLSCAN_API_KEY;
+      
+      if (!solscanApiKey) {
+        console.log(`⚠️ SOLSCAN_API_KEY not configured, skipping creator token count fetch`);
+        return;
+      }
+
+      let allTokens: any[] = [];
+      let page = 1;
+      const pageSize = 100;
+      let hasMore = true;
+
+      // Fetch all pages until we get fewer items than page_size
+      while (hasMore) {
+        const url = `https://pro-api.solscan.io/v2.0/account/defi/activities?address=${creatorAddress}&activity_type[]=ACTIVITY_SPL_INIT_MINT&page=${page}&page_size=${pageSize}&sort_by=block_time&sort_order=desc`;
+        
+        const requestOptions: RequestInit = {
+          method: 'GET',
+          headers: {
+            'token': solscanApiKey
+          }
+        };
+        
+        const response = await fetch(url, requestOptions);
+        
+        if (!response.ok) {
+          throw new Error(`Solscan API error: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!data.success || !data.data) {
+          throw new Error('Invalid response from Solscan API');
+        }
+        
+        // Extract token addresses from the data
+        const pageTokens = data.data
+          .filter((activity: any) => activity.routers && activity.routers.token1)
+          .map((activity: any) => activity.routers.token1);
+        
+        allTokens = allTokens.concat(pageTokens);
+        
+        // Check if we should continue fetching
+        if (data.data.length < pageSize) {
+          hasMore = false;
+        } else {
+          page++;
+        }
+      }
+      
+      // Remove duplicates by token address
+      const uniqueTokens = new Set<string>();
+      allTokens.forEach(tokenAddress => {
+        uniqueTokens.add(tokenAddress);
+      });
+      
+      const tokenCount = uniqueTokens.size;
+      console.log(`Token count = ${tokenCount}`)
+      
+      // Save to database
+      await dbService.updateCreatorTokenCount(tokenAddress, creatorAddress, tokenCount);
+      
+      console.log(`✅ Fetched and saved creator token count: ${creatorAddress.substring(0, 8)}... has ${tokenCount} tokens`);
+    } catch (error: any) {
+      console.error(`❌ Failed to fetch creator token count for ${creatorAddress.substring(0, 8)}...:`, error?.message || error);
+      // Don't throw - this is a non-critical operation
+    }
+  }
 
   /**
    * Start tracking transactions
