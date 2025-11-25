@@ -269,7 +269,7 @@ class TransactionTracker {
       }
 
       // Save transaction to database (dev_still_holding will be updated asynchronously)
-      dbService.saveTransaction(signature, {
+      await dbService.saveTransaction(signature, {
         platform: result.platform,
         type: result.type,
         mint_from: result.mintFrom,
