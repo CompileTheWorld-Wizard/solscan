@@ -422,62 +422,62 @@ class DatabaseService {
     transactionData: Omit<TransactionData, 'transaction_id'>
   ): Promise<void> {
     // Use setImmediate to ensure this is truly async and non-blocking
-    setImmediate(async () => {
-      try {
-        // Convert block timestamp from Unix timestamp (seconds) to PostgreSQL TIMESTAMP
-        const blockTimestamp = transactionData.blockTimestamp
-          ? new Date(transactionData.blockTimestamp * 1000).toISOString()
-          : null;
+    // setImmediate(async () => {
+    try {
+      // Convert block timestamp from Unix timestamp (seconds) to PostgreSQL TIMESTAMP
+      const blockTimestamp = transactionData.blockTimestamp
+        ? new Date(transactionData.blockTimestamp * 1000).toISOString()
+        : null;
 
-        const query = `
-          INSERT INTO transactions (
-            transaction_id,
-            platform,
-            type,
-            mint_from,
-            mint_to,
-            in_amount,
-            out_amount,
-            fee_payer,
-            tip_amount,
-            fee_amount,
-            block_number,
-            block_timestamp,
-            token_price_sol,
-            token_price_usd,
-            dev_still_holding
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-          ON CONFLICT (transaction_id) DO UPDATE SET
-            dev_still_holding = EXCLUDED.dev_still_holding
-        `;
+      const query = `
+        INSERT INTO transactions (
+          transaction_id,
+          platform,
+          type,
+          mint_from,
+          mint_to,
+          in_amount,
+          out_amount,
+          fee_payer,
+          tip_amount,
+          fee_amount,
+          block_number,
+          block_timestamp,
+          token_price_sol,
+          token_price_usd,
+          dev_still_holding
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ON CONFLICT (transaction_id) DO UPDATE SET
+          dev_still_holding = EXCLUDED.dev_still_holding
+      `;
 
-        const values = [
-          transactionId,
-          transactionData.platform,
-          transactionData.type,
-          transactionData.mint_from,
-          transactionData.mint_to,
-          transactionData.in_amount?.toString() || '0',
-          transactionData.out_amount?.toString() || '0',
-          transactionData.feePayer,
-          transactionData.tipAmount ?? null,
-          transactionData.feeAmount ?? null,
-          transactionData.blockNumber ?? null,
-          blockTimestamp,
-          transactionData.token_price_sol ?? null,
-          transactionData.token_price_usd ?? null,
-          transactionData.dev_still_holding ?? null,
-        ];
+      const values = [
+        transactionId,
+        transactionData.platform,
+        transactionData.type,
+        transactionData.mint_from,
+        transactionData.mint_to,
+        transactionData.in_amount?.toString() || '0',
+        transactionData.out_amount?.toString() || '0',
+        transactionData.feePayer,
+        transactionData.tipAmount ?? null,
+        transactionData.feeAmount ?? null,
+        transactionData.blockNumber ?? null,
+        blockTimestamp,
+        transactionData.token_price_sol ?? null,
+        transactionData.token_price_usd ?? null,
+        transactionData.dev_still_holding ?? null,
+      ];
 
-        await this.pool.query(query, values);
-        console.log(`💾 Transaction saved to DB: ${transactionId}`);
-      } catch (error: any) {
-        // Only log errors that aren't duplicate key conflicts
-        if (error.code !== '23505') {
-          console.error(`❌ Failed to save transaction ${transactionId}:`, error.message);
-        }
+      await this.pool.query(query, values);
+      console.log(`💾 Transaction saved to DB: ${transactionId}`);
+    } catch (error: any) {
+      // Only log errors that aren't duplicate key conflicts
+      if (error.code !== '23505') {
+        console.error(`❌ Failed to save transaction ${transactionId}:`, error.message);
       }
-    });
+    }
+    // });
   }
 
   /**
