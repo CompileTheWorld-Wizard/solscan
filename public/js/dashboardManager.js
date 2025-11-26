@@ -1129,10 +1129,26 @@ function updateStatisticsDisplay(stats) {
     // Total Wallet PNL
     const totalPNLEl = document.getElementById('totalWalletPNL');
     if (totalPNLEl) {
-        totalPNLEl.textContent = stats.totalWalletPNL >= 0 
-            ? `+${stats.totalWalletPNL.toFixed(4)} SOL` 
-            : `${stats.totalWalletPNL.toFixed(4)} SOL`;
-        totalPNLEl.style.color = stats.totalWalletPNL >= 0 ? '#10b981' : '#ef4444';
+        // Calculate what-if total wallet PNL if enabled
+        const whatIfTotals = calculateWhatIfSellTotals();
+        
+        if (whatIfModeEnabled && whatIfTotals) {
+            const whatIfSign = whatIfTotals.totalWhatIfWalletPNL >= 0 ? '+' : '';
+            totalPNLEl.innerHTML = `
+                <div style="margin-bottom: 4px;">
+                    <span style="color: ${stats.totalWalletPNL >= 0 ? '#10b981' : '#ef4444'};">${stats.totalWalletPNL >= 0 ? '+' : ''}${stats.totalWalletPNL.toFixed(4)} SOL</span>
+                </div>
+                <div style="font-size: 0.9rem; border-top: 1px solid #334155; padding-top: 4px;">
+                    <span style="color: #3b82f6; font-weight: 600;">🔮 What-If: </span>
+                    <span style="color: ${whatIfTotals.totalWhatIfWalletPNL >= 0 ? '#3b82f6' : '#ef4444'};">${whatIfSign}${whatIfTotals.totalWhatIfWalletPNL.toFixed(4)} SOL</span>
+                </div>
+            `;
+        } else {
+            totalPNLEl.textContent = stats.totalWalletPNL >= 0 
+                ? `+${stats.totalWalletPNL.toFixed(4)} SOL` 
+                : `${stats.totalWalletPNL.toFixed(4)} SOL`;
+            totalPNLEl.style.color = stats.totalWalletPNL >= 0 ? '#10b981' : '#ef4444';
+        }
     }
     
     // Cumulative PNL
@@ -1189,6 +1205,104 @@ function updateStatisticsDisplay(stats) {
 }
 
 /**
+ * Calculate what-if totals for sell statistics
+ */
+function calculateWhatIfSellTotals() {
+    if (!whatIfModeEnabled || !whatIfData || whatIfData.length === 0) {
+        return null;
+    }
+    
+    // Calculate what-if totals for each sell number
+    const whatIfSellTotals = {};
+    let totalWhatIfSellAmountSOL = 0;
+    let totalWhatIfBuyAmountSOL = 0;
+    let totalWhatIfGasAndFees = 0;
+    
+    // Track per-token totals for more accurate PNL calculation
+    const tokenSellData = [];
+    
+    whatIfData.forEach(tokenData => {
+        if (tokenData.sells && tokenData.sells.length > 0) {
+            const tokenBuyAmount = tokenData.walletBuyAmountSOL || 0;
+            const tokenGasAndFees = tokenData.totalGasAndFees || 0;
+            totalWhatIfBuyAmountSOL += tokenBuyAmount;
+            totalWhatIfGasAndFees += tokenGasAndFees;
+            
+            // Calculate total adjusted sell amount for this token
+            let tokenTotalAdjustedSellAmount = 0;
+            tokenData.sells.forEach(sell => {
+                tokenTotalAdjustedSellAmount += sell.adjustedSellAmountSOL || 0;
+            });
+            
+            // Store token data for PNL calculation
+            tokenSellData.push({
+                buyAmount: tokenBuyAmount,
+                gasAndFees: tokenGasAndFees,
+                totalAdjustedSellAmount: tokenTotalAdjustedSellAmount,
+                sells: tokenData.sells
+            });
+            
+            // Aggregate by sell number
+            tokenData.sells.forEach(sell => {
+                const sellNumber = sell.sellNumber;
+                if (!whatIfSellTotals[sellNumber]) {
+                    whatIfSellTotals[sellNumber] = {
+                        totalAdjustedSellAmountSOL: 0,
+                        count: 0
+                    };
+                }
+                whatIfSellTotals[sellNumber].totalAdjustedSellAmountSOL += sell.adjustedSellAmountSOL || 0;
+                whatIfSellTotals[sellNumber].count += 1;
+                totalWhatIfSellAmountSOL += sell.adjustedSellAmountSOL || 0;
+            });
+        }
+    });
+    
+    // Calculate what-if PNL for each sell number
+    // Use proportional allocation similar to backend logic
+    const whatIfSellPNLs = {};
+    Object.keys(whatIfSellTotals).forEach(sellNumber => {
+        const sellNumberInt = parseInt(sellNumber);
+        let totalSellPNL = 0;
+        
+        // Calculate PNL per token for this sell number
+        tokenSellData.forEach(tokenData => {
+            const sell = tokenData.sells.find(s => s.sellNumber === sellNumberInt);
+            if (sell && sell.adjustedSellAmountSOL > 0 && tokenData.totalAdjustedSellAmount > 0) {
+                // Calculate proportional costs for this sell
+                const sellRatio = sell.adjustedSellAmountSOL / tokenData.totalAdjustedSellAmount;
+                const proportionalBuyCost = tokenData.buyAmount * sellRatio;
+                const proportionalGasAndFees = tokenData.gasAndFees * sellRatio;
+                
+                // Calculate sell PNL (simplified - we don't have per-sell gas/fees in what-if data)
+                const sellPNL = sell.adjustedSellAmountSOL - (proportionalBuyCost + proportionalGasAndFees);
+                totalSellPNL += sellPNL;
+            }
+        });
+        
+        whatIfSellPNLs[sellNumber] = totalSellPNL;
+    });
+    
+    // Calculate total what-if sell PNL
+    const totalWhatIfSellPNL = totalWhatIfSellAmountSOL - (totalWhatIfBuyAmountSOL + totalWhatIfGasAndFees);
+    
+    // Calculate total what-if wallet PNL (sum of all token what-if PNLs)
+    const totalWhatIfWalletPNL = whatIfData.reduce((sum, tokenData) => {
+        return sum + (tokenData.whatIfPnlSOL || 0);
+    }, 0);
+    
+    return {
+        sellTotals: whatIfSellTotals,
+        sellPNLs: whatIfSellPNLs,
+        totalWhatIfSellPNL,
+        totalWhatIfWalletPNL,
+        totalWhatIfSellAmountSOL,
+        totalWhatIfBuyAmountSOL,
+        totalWhatIfGasAndFees
+    };
+}
+
+/**
  * Update sell statistics from backend data
  */
 function updateSellStatisticsFromBackend(sellStatistics, stats) {
@@ -1199,10 +1313,26 @@ function updateSellStatisticsFromBackend(sellStatistics, stats) {
     // This should match totalWalletPNL
     const totalSellsPNL = stats && stats.totalSellsPNL !== undefined ? stats.totalSellsPNL : 0;
     
+    // Calculate what-if totals if enabled
+    const whatIfTotals = calculateWhatIfSellTotals();
+    
     // Update total sells PNL display
     const totalSolSoldEl = document.getElementById('totalSolSoldValue');
     if (totalSolSoldEl) {
-        if (totalSellsPNL !== 0) {
+        if (whatIfModeEnabled && whatIfTotals && totalSellsPNL !== 0) {
+            // Show both actual and what-if
+            const sign = totalSellsPNL >= 0 ? '+' : '';
+            const whatIfSign = whatIfTotals.totalWhatIfSellPNL >= 0 ? '+' : '';
+            totalSolSoldEl.innerHTML = `
+                <div style="margin-bottom: 4px;">
+                    <span style="color: ${totalSellsPNL >= 0 ? '#10b981' : '#ef4444'};">${sign}${totalSellsPNL.toFixed(4)} SOL</span>
+                </div>
+                <div style="font-size: 0.9rem; border-top: 1px solid #334155; padding-top: 4px;">
+                    <span style="color: #3b82f6; font-weight: 600;">🔮 What-If: </span>
+                    <span style="color: ${whatIfTotals.totalWhatIfSellPNL >= 0 ? '#3b82f6' : '#ef4444'};">${whatIfSign}${whatIfTotals.totalWhatIfSellPNL.toFixed(4)} SOL</span>
+                </div>
+            `;
+        } else if (totalSellsPNL !== 0) {
             const sign = totalSellsPNL >= 0 ? '+' : '';
             totalSolSoldEl.textContent = `${sign}${totalSellsPNL.toFixed(4)} SOL`;
             totalSolSoldEl.style.color = totalSellsPNL >= 0 ? '#10b981' : '#ef4444';
@@ -1243,7 +1373,25 @@ function updateSellStatisticsFromBackend(sellStatistics, stats) {
             totalSolPNLEl.style.cssText = 'font-size: 1rem; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;';
             const pnlColor = stat.totalSolPNL >= 0 ? '#10b981' : '#ef4444';
             const pnlSign = stat.totalSolPNL >= 0 ? '+' : '';
-            totalSolPNLEl.innerHTML = `<img src="/img/wsol.svg" alt="SOL" style="width: 18px; height: 18px;"> <span style="color: ${pnlColor};">Total SOL PNL: ${pnlSign}${stat.totalSolPNL.toFixed(4)} SOL</span>`;
+            
+            // Add what-if PNL if enabled
+            if (whatIfModeEnabled && whatIfTotals && whatIfTotals.sellPNLs[stat.sellNumber] !== undefined) {
+                const whatIfPNL = whatIfTotals.sellPNLs[stat.sellNumber];
+                const whatIfColor = whatIfPNL >= 0 ? '#3b82f6' : '#ef4444';
+                const whatIfSign = whatIfPNL >= 0 ? '+' : '';
+                totalSolPNLEl.innerHTML = `
+                    <img src="/img/wsol.svg" alt="SOL" style="width: 18px; height: 18px;">
+                    <div style="flex: 1;">
+                        <div style="color: ${pnlColor};">Total SOL PNL: ${pnlSign}${stat.totalSolPNL.toFixed(4)} SOL</div>
+                        <div style="font-size: 0.85rem; margin-top: 4px; border-top: 1px solid #334155; padding-top: 4px;">
+                            <span style="color: #3b82f6; font-weight: 600;">🔮 What-If: </span>
+                            <span style="color: ${whatIfColor};">${whatIfSign}${whatIfPNL.toFixed(4)} SOL</span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                totalSolPNLEl.innerHTML = `<img src="/img/wsol.svg" alt="SOL" style="width: 18px; height: 18px;"> <span style="color: ${pnlColor};">Total SOL PNL: ${pnlSign}${stat.totalSolPNL.toFixed(4)} SOL</span>`;
+            }
             card.appendChild(totalSolPNLEl);
         }
         
@@ -1579,6 +1727,8 @@ window.calculateWhatIf = async function() {
             whatIfData = result.whatIfData || [];
             // Re-render table with what-if columns
             renderDashboardTable();
+            // Refresh statistics display to show what-if totals
+            await updateStatisticsFromBackend();
         } else {
             alert(`Error: ${result.error || 'Failed to calculate what-if PNL'}`);
         }
