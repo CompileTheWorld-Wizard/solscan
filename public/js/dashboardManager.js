@@ -1300,37 +1300,52 @@ function calculateWhatIfSellTotals() {
     // Calculate what-if PNL for each sell number
     // Use proportional allocation similar to backend logic
     const whatIfSellPNLs = {};
+    const whatIfAvgProfits = {};
     Object.keys(whatIfSellTotals).forEach(sellNumber => {
         const sellNumberInt = parseInt(sellNumber);
         let totalSellPNL = 0;
+        const whatIfProfits = [];
         
         // Calculate PNL per token for this sell number
         // Use token-based percentage allocation (matching backend logic)
         tokenSellData.forEach(tokenData => {
             const sell = tokenData.sells.find(s => s.sellNumber === sellNumberInt);
-            if (sell && sell.adjustedSellAmountSOL > 0) {
+            if (sell) {
                 const sellPercentOfBuy = sell.sellPercentOfBuy;
                 
-                if (sellPercentOfBuy !== null && sellPercentOfBuy > 0 && tokenData.buyAmount > 0) {
-                    // Calculate proportional costs using normalized token percentage (matching backend)
-                    const proportionalBuyCost = tokenData.buyAmount * (sellPercentOfBuy / 100);
-                    // Allocate gas/fees proportionally (we don't have separate sell/non-sell breakdown in what-if data)
-                    const proportionalGasAndFees = tokenData.gasAndFees * (sellPercentOfBuy / 100);
-                    
-                    // Calculate sell PNL
-                    const sellPNL = sell.adjustedSellAmountSOL - (proportionalBuyCost + proportionalGasAndFees);
-                    totalSellPNL += sellPNL;
-                } else if (tokenData.sells.length > 0) {
-                    // Edge case: equal allocation if we can't calculate percentage
-                    const equalShareOfBuyCost = tokenData.buyAmount / tokenData.sells.length;
-                    const equalShareOfGasAndFees = tokenData.gasAndFees / tokenData.sells.length;
-                    const sellPNL = sell.adjustedSellAmountSOL - (equalShareOfBuyCost + equalShareOfGasAndFees);
-                    totalSellPNL += sellPNL;
+                // Collect what-if profit (firstSellPNL) for average calculation
+                if (sell.firstSellPNL !== null && sell.firstSellPNL !== undefined) {
+                    whatIfProfits.push(sell.firstSellPNL);
+                }
+                
+                // Calculate PNL if we have adjusted sell amount
+                if (sell.adjustedSellAmountSOL > 0) {
+                    if (sellPercentOfBuy !== null && sellPercentOfBuy > 0 && tokenData.buyAmount > 0) {
+                        // Calculate proportional costs using normalized token percentage (matching backend)
+                        const proportionalBuyCost = tokenData.buyAmount * (sellPercentOfBuy / 100);
+                        // Allocate gas/fees proportionally (we don't have separate sell/non-sell breakdown in what-if data)
+                        const proportionalGasAndFees = tokenData.gasAndFees * (sellPercentOfBuy / 100);
+                        
+                        // Calculate sell PNL
+                        const sellPNL = sell.adjustedSellAmountSOL - (proportionalBuyCost + proportionalGasAndFees);
+                        totalSellPNL += sellPNL;
+                    } else if (tokenData.sells.length > 0) {
+                        // Edge case: equal allocation if we can't calculate percentage
+                        const equalShareOfBuyCost = tokenData.buyAmount / tokenData.sells.length;
+                        const equalShareOfGasAndFees = tokenData.gasAndFees / tokenData.sells.length;
+                        const sellPNL = sell.adjustedSellAmountSOL - (equalShareOfBuyCost + equalShareOfGasAndFees);
+                        totalSellPNL += sellPNL;
+                    }
                 }
             }
         });
         
         whatIfSellPNLs[sellNumber] = totalSellPNL;
+        
+        // Calculate average what-if profit for this sell number
+        whatIfAvgProfits[sellNumber] = whatIfProfits.length > 0
+            ? whatIfProfits.reduce((sum, p) => sum + p, 0) / whatIfProfits.length
+            : null;
     });
     
     // Calculate total what-if sell PNL as the sum of all sell card PNLs (matching backend logic)
@@ -1344,6 +1359,7 @@ function calculateWhatIfSellTotals() {
     return {
         sellTotals: whatIfSellTotals,
         sellPNLs: whatIfSellPNLs,
+        avgProfits: whatIfAvgProfits,
         totalWhatIfSellPNL,
         totalWhatIfWalletPNL,
         totalWhatIfSellAmountSOL,
@@ -1448,8 +1464,25 @@ function updateSellStatisticsFromBackend(sellStatistics, stats) {
         if (stat.avgProfit !== null && stat.avgProfit !== undefined) {
             const profitEl = document.createElement('div');
             profitEl.style.cssText = 'font-size: 0.75rem; color: #94a3b8; margin-bottom: 5px;';
-            profitEl.textContent = `Avg Profit: ${stat.avgProfit >= 0 ? '+' : ''}${stat.avgProfit.toFixed(2)}%`;
-            profitEl.style.color = stat.avgProfit >= 0 ? '#10b981' : '#ef4444';
+            
+            // Add what-if average profit if enabled
+            if (whatIfModeEnabled && whatIfTotals && whatIfTotals.avgProfits[stat.sellNumber] !== undefined && whatIfTotals.avgProfits[stat.sellNumber] !== null) {
+                const whatIfAvgProfit = whatIfTotals.avgProfits[stat.sellNumber];
+                const profitColor = stat.avgProfit >= 0 ? '#10b981' : '#ef4444';
+                const whatIfProfitColor = whatIfAvgProfit >= 0 ? '#3b82f6' : '#ef4444';
+                profitEl.innerHTML = `
+                    <div style="color: ${profitColor};">
+                        Avg Profit: ${stat.avgProfit >= 0 ? '+' : ''}${stat.avgProfit.toFixed(2)}%
+                    </div>
+                    <div style="font-size: 0.7rem; margin-top: 3px; border-top: 1px solid #334155; padding-top: 3px;">
+                        <span style="color: #3b82f6; font-weight: 600;">🔮 What-If Avg Profit: </span>
+                        <span style="color: ${whatIfProfitColor};">${whatIfAvgProfit >= 0 ? '+' : ''}${whatIfAvgProfit.toFixed(2)}%</span>
+                    </div>
+                `;
+            } else {
+                profitEl.textContent = `Avg Profit: ${stat.avgProfit >= 0 ? '+' : ''}${stat.avgProfit.toFixed(2)}%`;
+                profitEl.style.color = stat.avgProfit >= 0 ? '#10b981' : '#ef4444';
+            }
             card.appendChild(profitEl);
         }
         
