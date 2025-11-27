@@ -11,6 +11,7 @@ import { setupFileLogging } from "./utils/logger";
 import { dbService } from "./database";
 import { tracker } from "./tracker";
 import { tokenService } from "./services/tokenService";
+import { bitqueryService } from "./services";
 
 // Extend session type to include authenticated property
 declare module "express-session" {
@@ -2357,6 +2358,58 @@ app.get("/api/creator-tokens/:wallet", requireAuth, async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Failed to fetch creator tokens' 
+    });
+  }
+});
+
+/**
+ * POST /api/tokens/ath-mcap - Get ATH market cap for a list of tokens
+ * Request body: { tokens: string[], sinceDate?: string }
+ */
+app.post("/api/tokens/ath-mcap", requireAuth, async (req, res) => {
+  try {
+    const { tokens, sinceDate } = req.body;
+    
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      return res.status(400).json({ 
+        success: false,
+        error: "Tokens array is required and must not be empty" 
+      });
+    }
+
+    // Limit to prevent abuse
+    if (tokens.length > 50) {
+      return res.status(400).json({ 
+        success: false,
+        error: "Maximum 50 tokens allowed per request" 
+      });
+    }
+
+    console.log(`🔍 Fetching ATH market cap for ${tokens.length} tokens...`);
+
+    const results = await bitqueryService.getATHMarketCap(tokens, sinceDate);
+
+    // Create an object for easy lookup (Map is not JSON serializable)
+    const mcapObject: { [key: string]: any } = {};
+    results.forEach(result => {
+      mcapObject[result.mintAddress] = {
+        athPriceUSD: result.athPriceUSD,
+        athMarketCap: result.athMarketCap,
+        name: result.name,
+        symbol: result.symbol
+      };
+    });
+
+    res.json({
+      success: true,
+      results: mcapObject,
+      count: results.length
+    });
+  } catch (error: any) {
+    console.error('Error fetching ATH market cap:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to fetch ATH market cap' 
     });
   }
 });

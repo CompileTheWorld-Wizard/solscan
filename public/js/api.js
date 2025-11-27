@@ -557,6 +557,42 @@ export async function fetchCreatorTokens(walletAddress) {
 }
 
 /**
+ * Fetch ATH market cap for a list of tokens
+ * @param {string[]} tokenAddresses - Array of token mint addresses
+ * @param {string} sinceDate - Optional date string in ISO format
+ */
+export async function fetchATHMarketCap(tokenAddresses, sinceDate) {
+    try {
+        const response = await fetch('/api/tokens/ath-mcap', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            credentials: 'include',
+            body: JSON.stringify({
+                tokens: tokenAddresses,
+                sinceDate: sinceDate
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch ATH market cap');
+        }
+
+        const data = await response.json();
+        return {
+            success: true,
+            results: data.results || {},
+            count: data.count || 0
+        };
+    } catch (error) {
+        console.error('Error fetching ATH market cap:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
  * Calculate what-if PNL with adjusted sell times
  * @param {string} walletAddress - Wallet address
  * @param {number} firstSellTimeAdjustment - Adjust first sell time by N seconds (can be negative)

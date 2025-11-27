@@ -1139,7 +1139,7 @@ function updateStatisticsDisplay(stats) {
                     <span style="color: ${stats.totalWalletPNL >= 0 ? '#10b981' : '#ef4444'};">${stats.totalWalletPNL >= 0 ? '+' : ''}${stats.totalWalletPNL.toFixed(4)} SOL</span>
                 </div>
                 <div style="font-size: 0.9rem; border-top: 1px solid #334155; padding-top: 4px;">
-                    <span style="color: #3b82f6; font-weight: 600;">🔮 What-If: </span>
+                    <span style="color: #3b82f6; font-weight: 600;">🔮 What-If PNL SOL: </span>
                     <span style="color: ${whatIfTotals.totalWhatIfWalletPNL >= 0 ? '#3b82f6' : '#ef4444'};">${whatIfSign}${whatIfTotals.totalWhatIfWalletPNL.toFixed(4)} SOL</span>
                 </div>
             `;
@@ -1234,12 +1234,51 @@ function calculateWhatIfSellTotals() {
                 tokenTotalAdjustedSellAmount += sell.adjustedSellAmountSOL || 0;
             });
             
+            // Calculate total sell tokens for percentage calculation
+            let tokenTotalSellTokens = 0;
+            tokenData.sells.forEach(sell => {
+                tokenTotalSellTokens += sell.sellAmountTokens || 0;
+            });
+            
+            // Calculate normalized sell percentages (matching backend logic)
+            const buyAmountTokens = tokenData.walletBuyAmountTokens || 0;
+            const sellPercentages = [];
+            
+            if (buyAmountTokens > 0 && tokenTotalSellTokens > 0) {
+                // Calculate raw percentages based on buy tokens
+                const rawPercentages = tokenData.sells.map(sell => {
+                    return ((sell.sellAmountTokens || 0) / buyAmountTokens) * 100;
+                });
+                const sumRawPercentages = rawPercentages.reduce((sum, p) => sum + p, 0);
+                if (sumRawPercentages > 0) {
+                    // Normalize to 100% to ensure proportional costs sum correctly
+                    sellPercentages.push(...rawPercentages.map(p => (p / sumRawPercentages) * 100));
+                } else {
+                    sellPercentages.push(...rawPercentages);
+                }
+            } else if (tokenTotalSellTokens > 0) {
+                // If no buy tokens, use sell tokens as basis
+                tokenData.sells.forEach(sell => {
+                    sellPercentages.push(((sell.sellAmountTokens || 0) / tokenTotalSellTokens) * 100);
+                });
+            }
+            
+            // Add normalized percentages to each sell
+            const sellsWithPercentages = tokenData.sells.map((sell, index) => {
+                return {
+                    ...sell,
+                    sellPercentOfBuy: sellPercentages[index] !== undefined ? sellPercentages[index] : null
+                };
+            });
+            
             // Store token data for PNL calculation
             tokenSellData.push({
                 buyAmount: tokenBuyAmount,
+                buyAmountTokens: buyAmountTokens,
                 gasAndFees: tokenGasAndFees,
                 totalAdjustedSellAmount: tokenTotalAdjustedSellAmount,
-                sells: tokenData.sells
+                totalSellTokens: tokenTotalSellTokens,
+                sells: sellsWithPercentages
             });
             
             // Aggregate by sell number
@@ -1266,25 +1305,36 @@ function calculateWhatIfSellTotals() {
         let totalSellPNL = 0;
         
         // Calculate PNL per token for this sell number
+        // Use token-based percentage allocation (matching backend logic)
         tokenSellData.forEach(tokenData => {
             const sell = tokenData.sells.find(s => s.sellNumber === sellNumberInt);
-            if (sell && sell.adjustedSellAmountSOL > 0 && tokenData.totalAdjustedSellAmount > 0) {
-                // Calculate proportional costs for this sell
-                const sellRatio = sell.adjustedSellAmountSOL / tokenData.totalAdjustedSellAmount;
-                const proportionalBuyCost = tokenData.buyAmount * sellRatio;
-                const proportionalGasAndFees = tokenData.gasAndFees * sellRatio;
+            if (sell && sell.adjustedSellAmountSOL > 0) {
+                const sellPercentOfBuy = sell.sellPercentOfBuy;
                 
-                // Calculate sell PNL (simplified - we don't have per-sell gas/fees in what-if data)
-                const sellPNL = sell.adjustedSellAmountSOL - (proportionalBuyCost + proportionalGasAndFees);
-                totalSellPNL += sellPNL;
+                if (sellPercentOfBuy !== null && sellPercentOfBuy > 0 && tokenData.buyAmount > 0) {
+                    // Calculate proportional costs using normalized token percentage (matching backend)
+                    const proportionalBuyCost = tokenData.buyAmount * (sellPercentOfBuy / 100);
+                    // Allocate gas/fees proportionally (we don't have separate sell/non-sell breakdown in what-if data)
+                    const proportionalGasAndFees = tokenData.gasAndFees * (sellPercentOfBuy / 100);
+                    
+                    // Calculate sell PNL
+                    const sellPNL = sell.adjustedSellAmountSOL - (proportionalBuyCost + proportionalGasAndFees);
+                    totalSellPNL += sellPNL;
+                } else if (tokenData.sells.length > 0) {
+                    // Edge case: equal allocation if we can't calculate percentage
+                    const equalShareOfBuyCost = tokenData.buyAmount / tokenData.sells.length;
+                    const equalShareOfGasAndFees = tokenData.gasAndFees / tokenData.sells.length;
+                    const sellPNL = sell.adjustedSellAmountSOL - (equalShareOfBuyCost + equalShareOfGasAndFees);
+                    totalSellPNL += sellPNL;
+                }
             }
         });
         
         whatIfSellPNLs[sellNumber] = totalSellPNL;
     });
     
-    // Calculate total what-if sell PNL
-    const totalWhatIfSellPNL = totalWhatIfSellAmountSOL - (totalWhatIfBuyAmountSOL + totalWhatIfGasAndFees);
+    // Calculate total what-if sell PNL as the sum of all sell card PNLs (matching backend logic)
+    const totalWhatIfSellPNL = Object.values(whatIfSellPNLs).reduce((sum, pnl) => sum + pnl, 0);
     
     // Calculate total what-if wallet PNL (sum of all token what-if PNLs)
     const totalWhatIfWalletPNL = whatIfData.reduce((sum, tokenData) => {
@@ -1328,7 +1378,7 @@ function updateSellStatisticsFromBackend(sellStatistics, stats) {
                     <span style="color: ${totalSellsPNL >= 0 ? '#10b981' : '#ef4444'};">${sign}${totalSellsPNL.toFixed(4)} SOL</span>
                 </div>
                 <div style="font-size: 0.9rem; border-top: 1px solid #334155; padding-top: 4px;">
-                    <span style="color: #3b82f6; font-weight: 600;">🔮 What-If: </span>
+                    <span style="color: #3b82f6; font-weight: 600;">🔮 What-If PNL SOL: </span>
                     <span style="color: ${whatIfTotals.totalWhatIfSellPNL >= 0 ? '#3b82f6' : '#ef4444'};">${whatIfSign}${whatIfTotals.totalWhatIfSellPNL.toFixed(4)} SOL</span>
                 </div>
             `;
@@ -1384,7 +1434,7 @@ function updateSellStatisticsFromBackend(sellStatistics, stats) {
                     <div style="flex: 1;">
                         <div style="color: ${pnlColor};">Total SOL PNL: ${pnlSign}${stat.totalSolPNL.toFixed(4)} SOL</div>
                         <div style="font-size: 0.85rem; margin-top: 4px; border-top: 1px solid #334155; padding-top: 4px;">
-                            <span style="color: #3b82f6; font-weight: 600;">🔮 What-If: </span>
+                            <span style="color: #3b82f6; font-weight: 600;">🔮 What-If PNL SOL: </span>
                             <span style="color: ${whatIfColor};">${whatIfSign}${whatIfPNL.toFixed(4)} SOL</span>
                         </div>
                     </div>
@@ -2729,6 +2779,20 @@ function createPaginationButton(text, disabled, onClick, iconType = null) {
 /**
  * Format number with decimal places
  */
+function formatMarketCap(value) {
+    if (value === null || value === undefined || isNaN(value) || value === 0) return 'N/A';
+    const num = parseFloat(value);
+    if (num >= 1e9) {
+        return `$${(num / 1e9).toFixed(2)}B`;
+    } else if (num >= 1e6) {
+        return `$${(num / 1e6).toFixed(2)}M`;
+    } else if (num >= 1e3) {
+        return `$${(num / 1e3).toFixed(2)}K`;
+    } else {
+        return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+}
+
 function formatNumber(value, decimals = 2) {
     if (value === null || value === undefined || value === '') return '';
     const num = parseFloat(value);
@@ -3724,8 +3788,11 @@ window.openCreatorTokensDialog = async function(creatorAddress) {
             
             // Display token list
             if (result.tokens && result.tokens.length > 0) {
+                // First, render all tokens with loading state for ATH market cap
                 result.tokens.forEach((token, index) => {
                     const tokenCard = document.createElement('div');
+                    tokenCard.className = 'token-card';
+                    tokenCard.setAttribute('data-token-address', token.tokenAddress);
                     tokenCard.style.cssText = 'padding: 12px; background: #1a1f2e; border-radius: 6px; border: 1px solid #334155;';
                     
                     const tokenInfo = token.tokenInfo || {};
@@ -3738,8 +3805,12 @@ window.openCreatorTokensDialog = async function(creatorAddress) {
                             ${tokenIcon ? `<img src="${tokenIcon}" alt="${tokenSymbol}" style="width: 32px; height: 32px; border-radius: 4px;" onerror="this.style.display='none'">` : ''}
                             <div style="flex: 1;">
                                 <div style="font-weight: 600; color: #e0e7ff; margin-bottom: 4px;">${tokenName} (${tokenSymbol})</div>
-                                <div style="font-size: 0.75rem; color: #94a3b8; font-family: 'Courier New', monospace; word-break: break-all;">
+                                <div style="font-size: 0.75rem; color: #94a3b8; font-family: 'Courier New', monospace; word-break: break-all; margin-bottom: 6px;">
                                     ${token.tokenAddress}
+                                </div>
+                                <div class="ath-mcap-info" style="font-size: 0.8rem; color: #94a3b8;">
+                                    <span style="color: #64748b;">ATH Market Cap: </span>
+                                    <span class="ath-mcap-value" style="color: #10b981; font-weight: 600;">Loading...</span>
                                 </div>
                             </div>
                             <a href="https://solscan.io/token/${token.tokenAddress}" target="_blank" style="padding: 6px 12px; background: #3b82f6; color: white; border-radius: 4px; text-decoration: none; font-size: 0.85rem; font-weight: 600; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
@@ -3750,6 +3821,61 @@ window.openCreatorTokensDialog = async function(creatorAddress) {
                     
                     tokenListEl.appendChild(tokenCard);
                 });
+
+                // Fetch ATH market cap for all tokens
+                const tokenAddresses = result.tokens.map(t => t.tokenAddress);
+                try {
+                    const mcapResult = await api.fetchATHMarketCap(tokenAddresses);
+                    
+                    if (mcapResult.success && mcapResult.results) {
+                        // Update each token card with ATH market cap
+                        result.tokens.forEach((token) => {
+                            const tokenCard = tokenListEl.querySelector(`[data-token-address="${token.tokenAddress}"]`);
+                            if (tokenCard) {
+                                const mcapValueEl = tokenCard.querySelector('.ath-mcap-value');
+                                const mcapData = mcapResult.results[token.tokenAddress];
+                                
+                                if (mcapData && mcapData.athMarketCap > 0) {
+                                    const formattedMcap = formatMarketCap(mcapData.athMarketCap);
+                                    if (mcapValueEl) {
+                                        mcapValueEl.textContent = formattedMcap;
+                                        mcapValueEl.style.color = '#10b981';
+                                    }
+                                } else {
+                                    if (mcapValueEl) {
+                                        mcapValueEl.textContent = 'N/A';
+                                        mcapValueEl.style.color = '#64748b';
+                                    }
+                                }
+                            }
+                        });
+                    } else {
+                        // Show error for ATH market cap
+                        result.tokens.forEach((token) => {
+                            const tokenCard = tokenListEl.querySelector(`[data-token-address="${token.tokenAddress}"]`);
+                            if (tokenCard) {
+                                const mcapValueEl = tokenCard.querySelector('.ath-mcap-value');
+                                if (mcapValueEl) {
+                                    mcapValueEl.textContent = 'Error';
+                                    mcapValueEl.style.color = '#ef4444';
+                                }
+                            }
+                        });
+                    }
+                } catch (mcapError) {
+                    console.error('Error fetching ATH market cap:', mcapError);
+                    // Update all tokens to show error
+                    result.tokens.forEach((token) => {
+                        const tokenCard = tokenListEl.querySelector(`[data-token-address="${token.tokenAddress}"]`);
+                        if (tokenCard) {
+                            const mcapValueEl = tokenCard.querySelector('.ath-mcap-value');
+                            if (mcapValueEl) {
+                                mcapValueEl.textContent = 'Error';
+                                mcapValueEl.style.color = '#ef4444';
+                            }
+                        }
+                    });
+                }
             } else {
                 tokenListEl.innerHTML = '<div style="text-align: center; padding: 20px; color: #94a3b8;">No tokens found</div>';
             }
