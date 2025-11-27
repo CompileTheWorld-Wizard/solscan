@@ -210,6 +210,7 @@ export async function updateActivityChart() {
         const sellsData = result.data.map(item => item.sells);
         const totalData = result.data.map(item => item.total);
         const pnlPercentData = result.data.map(item => item.pnlPercent || 0);
+        const pnlSOLData = result.data.map(item => item.pnlSOL || 0);
         
         // Chart.js configuration
         const ctx = canvas.getContext('2d');
@@ -279,7 +280,25 @@ export async function updateActivityChart() {
                         titleColor: '#e0e7ff',
                         bodyColor: '#e0e7ff',
                         borderColor: '#334155',
-                        borderWidth: 1
+                        borderWidth: 1,
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.datasetIndex === 3) { // PNL % dataset
+                                    const dataIndex = context.dataIndex;
+                                    const pnlPercent = pnlPercentData[dataIndex];
+                                    const pnlSOL = pnlSOLData[dataIndex];
+                                    const sign = pnlSOL >= 0 ? '+' : '';
+                                    label += `${pnlPercent.toFixed(2)}% (${sign}${pnlSOL.toFixed(4)} SOL)`;
+                                } else {
+                                    label += context.parsed.y;
+                                }
+                                return label;
+                            }
+                        }
                     }
                 },
                 scales: {

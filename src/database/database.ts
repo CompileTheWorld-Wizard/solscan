@@ -718,7 +718,7 @@ class DatabaseService {
   async getWalletTradingActivity(
     walletAddress: string,
     interval: 'hour' | 'quarter_day' | 'day' | 'week' | 'month'
-  ): Promise<Array<{ period: string; buys: number; sells: number; total: number; pnlPercent: number }>> {
+  ): Promise<Array<{ period: string; buys: number; sells: number; total: number; pnlPercent: number; pnlSOL: number }>> {
     try {
       const SOL_MINT = 'So11111111111111111111111111111111111111112';
       const SOL_DECIMALS = 9;
@@ -829,7 +829,8 @@ class DatabaseService {
           buys: parseInt(row.buys) || 0,
           sells: parseInt(row.sells) || 0,
           total: parseInt(row.total) || 0,
-          pnlPercent: pnlPercent
+          pnlPercent: pnlPercent,
+          pnlSOL: pnlSOL
         };
       });
     } catch (error) {

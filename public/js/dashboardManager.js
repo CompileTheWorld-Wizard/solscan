@@ -1596,6 +1596,7 @@ function getRawValue(token, key) {
         case 'tokenSymbol': return token.tokenSymbol || '';
         case 'tokenAddress': return token.tokenAddress || '';
         case 'creatorAddress': return token.creatorAddress || '';
+        case 'creatorTokenCount': return token.creatorTokenCount !== null && token.creatorTokenCount !== undefined ? token.creatorTokenCount : null;
         case 'numberOfSocials': return token.numberOfSocials || 0;
         case 'devBuyAmountSOL': return token.devBuyAmountSOL;
         case 'walletBuyAmountSOL': return token.walletBuyAmountSOL;
