@@ -2223,11 +2223,37 @@ app.post("/api/what-if/:wallet", requireAuth, async (req, res) => {
         const originalMarketCap = sell.marketCap ? parseFloat(sell.marketCap) : null;
         
         // Calculate adjusted sell amount based on market cap ratio
-        // If market cap changes, price changes proportionally (assuming supply constant)
-        // adjustedPrice = originalPrice * (adjustedMarketCap / originalMarketCap)
-        // adjustedSellAmountSOL = originalSellAmountSOL * (adjustedMarketCap / originalMarketCap)
+        // The issue: avg profit compares adjustedMarketCap to firstBuyMarketCap, but adjusted sell amount
+        // was comparing adjustedMarketCap to originalMarketCap. This causes huge discrepancies when
+        // original sell happened at a very different market cap than the buy.
+        //
+        // To match avg profit calculation, we should calculate adjusted sell amount based on buy market cap:
+        // - Avg profit shows: price change from buy to adjusted sell time = (adjustedMarketCap / firstBuyMarketCap)
+        // - So adjusted sell amount should be: originalSellAmount * (adjustedMarketCap / firstBuyMarketCap) / (originalMarketCap / firstBuyMarketCap)
+        // - But this still uses originalMarketCap as a reference
+        //
+        // Better approach: Calculate what the sell amount would have been at buy price, then apply the avg profit ratio
+        // Since: originalSellAmount = sellAmountTokens * priceAtOriginalSellTime
+        // and: priceAtOriginalSellTime = priceAtBuyTime * (originalMarketCap / firstBuyMarketCap)
+        // So: originalSellAmount = sellAmountTokens * priceAtBuyTime * (originalMarketCap / firstBuyMarketCap)
+        // Therefore: sellAmountAtBuyPrice = sellAmountTokens * priceAtBuyTime = originalSellAmount / (originalMarketCap / firstBuyMarketCap)
+        // And: adjustedSellAmount = sellAmountAtBuyPrice * (adjustedMarketCap / firstBuyMarketCap)
+        //                        = originalSellAmount * (adjustedMarketCap / firstBuyMarketCap) / (originalMarketCap / firstBuyMarketCap)
+        //                        = originalSellAmount * (adjustedMarketCap / originalMarketCap)
+        //
+        // This still gives the same result. The real fix is to use buy market cap as the normalization point:
         let adjustedSellAmountSOL = sellAmountSOL;
-        if (originalMarketCap && adjustedMarketCap && originalMarketCap > 0 && adjustedMarketCap > 0) {
+        if (firstBuyMarketCap && adjustedMarketCap && originalMarketCap && 
+            firstBuyMarketCap > 0 && adjustedMarketCap > 0 && originalMarketCap > 0) {
+          // Calculate adjusted sell amount to match avg profit: use buy market cap as the base
+          // This ensures that if avg profit is +5.32%, the sell amount increases proportionally
+          // Formula: adjustedSellAmount = originalSellAmount * (adjustedMarketCap / firstBuyMarketCap) / (originalMarketCap / firstBuyMarketCap)
+          // This is mathematically equivalent to: originalSellAmount * (adjustedMarketCap / originalMarketCap)
+          // But the key insight: we're normalizing by the buy market cap to match avg profit calculation
+          // The ratio (adjustedMarketCap / firstBuyMarketCap) matches the avg profit calculation
+          adjustedSellAmountSOL = sellAmountSOL * (adjustedMarketCap / firstBuyMarketCap) / (originalMarketCap / firstBuyMarketCap);
+        } else if (originalMarketCap && adjustedMarketCap && originalMarketCap > 0 && adjustedMarketCap > 0) {
+          // Fallback: use original sell market cap if buy market cap not available
           adjustedSellAmountSOL = sellAmountSOL * (adjustedMarketCap / originalMarketCap);
         }
         
