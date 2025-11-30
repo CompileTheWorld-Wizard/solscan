@@ -1225,6 +1225,7 @@ function calculateWhatIfSellTotals() {
         if (tokenData.sells && tokenData.sells.length > 0) {
             const tokenBuyAmount = tokenData.walletBuyAmountSOL || 0;
             const tokenGasAndFees = tokenData.totalGasAndFees || 0;
+            const nonSellGasAndFees = tokenData.nonSellGasAndFees !== undefined ? tokenData.nonSellGasAndFees : tokenGasAndFees; // Fallback to total if not available
             totalWhatIfBuyAmountSOL += tokenBuyAmount;
             totalWhatIfGasAndFees += tokenGasAndFees;
             
@@ -1276,6 +1277,7 @@ function calculateWhatIfSellTotals() {
                 buyAmount: tokenBuyAmount,
                 buyAmountTokens: buyAmountTokens,
                 gasAndFees: tokenGasAndFees,
+                nonSellGasAndFees: nonSellGasAndFees,
                 totalAdjustedSellAmount: tokenTotalAdjustedSellAmount,
                 totalSellTokens: tokenTotalSellTokens,
                 sells: sellsWithPercentages
@@ -1319,21 +1321,29 @@ function calculateWhatIfSellTotals() {
                 }
                 
                 // Calculate PNL if we have adjusted sell amount
+                // Match backend logic: PNL = sellAmountSOL - (proportionalBuyCost + proportionalNonSellGasAndFees + sellGasAndFees)
                 if (sell.adjustedSellAmountSOL > 0) {
+                    // Get actual gas/fees for this specific sell transaction
+                    const sellGasAndFees = sell.sellGasAndFees !== undefined ? sell.sellGasAndFees : 0;
+                    
                     if (sellPercentOfBuy !== null && sellPercentOfBuy > 0 && tokenData.buyAmount > 0) {
                         // Calculate proportional costs using normalized token percentage (matching backend)
                         const proportionalBuyCost = tokenData.buyAmount * (sellPercentOfBuy / 100);
-                        // Allocate gas/fees proportionally (we don't have separate sell/non-sell breakdown in what-if data)
-                        const proportionalGasAndFees = tokenData.gasAndFees * (sellPercentOfBuy / 100);
+                        // Proportional share of non-sell gas/fees (buy and other transactions)
+                        const proportionalNonSellGasAndFees = tokenData.nonSellGasAndFees * (sellPercentOfBuy / 100);
                         
-                        // Calculate sell PNL
-                        const sellPNL = sell.adjustedSellAmountSOL - (proportionalBuyCost + proportionalGasAndFees);
+                        // Calculate sell PNL (matching backend formula)
+                        const sellPNL = sell.adjustedSellAmountSOL - (proportionalBuyCost + proportionalNonSellGasAndFees + sellGasAndFees);
                         totalSellPNL += sellPNL;
                     } else if (tokenData.sells.length > 0) {
                         // Edge case: equal allocation if we can't calculate percentage
                         const equalShareOfBuyCost = tokenData.buyAmount / tokenData.sells.length;
-                        const equalShareOfGasAndFees = tokenData.gasAndFees / tokenData.sells.length;
-                        const sellPNL = sell.adjustedSellAmountSOL - (equalShareOfBuyCost + equalShareOfGasAndFees);
+                        const equalShareOfNonSellGasAndFees = tokenData.nonSellGasAndFees / tokenData.sells.length;
+                        const sellPNL = sell.adjustedSellAmountSOL - (equalShareOfBuyCost + equalShareOfNonSellGasAndFees + sellGasAndFees);
+                        totalSellPNL += sellPNL;
+                    } else {
+                        // Final fallback: if no sells or other edge case, just subtract gas/fees from sell amount
+                        const sellPNL = sell.adjustedSellAmountSOL - sellGasAndFees;
                         totalSellPNL += sellPNL;
                     }
                 }

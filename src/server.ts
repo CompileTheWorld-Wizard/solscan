@@ -2172,6 +2172,17 @@ app.post("/api/what-if/:wallet", requireAuth, async (req, res) => {
         return null;
       }
       
+      // Calculate total gas/fees for all sell transactions
+      let totalSellGasAndFees = 0;
+      sells.forEach((sell: any) => {
+        const sellTipAmount = (sell.tipAmount != null ? parseFloat(sell.tipAmount) : 0) || 0;
+        const sellFeeAmount = (sell.feeAmount != null ? parseFloat(sell.feeAmount) : 0) || 0;
+        totalSellGasAndFees += (sellTipAmount + sellFeeAmount);
+      });
+      
+      // Calculate non-sell gas/fees (buy transactions and any other transactions)
+      const nonSellGasAndFees = totalGasAndFees - totalSellGasAndFees;
+      
       // Get buy timestamp
       const buyTimestamp = firstBuy.blockTimestamp || firstBuy.created_at;
       const buyTime = new Date(buyTimestamp).getTime();
@@ -2226,6 +2237,11 @@ app.post("/api/what-if/:wallet", requireAuth, async (req, res) => {
           firstSellPNL = (adjustedMarketCap / firstBuyMarketCap - 1) * 100;
         }
         
+        // Get actual gas/fees for this specific sell transaction
+        const sellTipAmount = (sell.tipAmount != null ? parseFloat(sell.tipAmount) : 0) || 0;
+        const sellFeeAmount = (sell.feeAmount != null ? parseFloat(sell.feeAmount) : 0) || 0;
+        const sellGasAndFees = sellTipAmount + sellFeeAmount;
+        
         totalSellAmountSOL += sellAmountSOL;
         totalWhatIfSellAmountSOL += adjustedSellAmountSOL;
         
@@ -2237,6 +2253,7 @@ app.post("/api/what-if/:wallet", requireAuth, async (req, res) => {
           sellAmountSOL: sellAmountSOL,
           adjustedSellAmountSOL: adjustedSellAmountSOL,
           sellAmountTokens: sellAmountTokens,
+          sellGasAndFees: sellGasAndFees,
           originalTimestamp: sellTimestamp,
           adjustedTimestamp: new Date(adjustedSellTime).toISOString()
         };
@@ -2252,6 +2269,7 @@ app.post("/api/what-if/:wallet", requireAuth, async (req, res) => {
         walletBuyAmountTokens: walletBuyAmountTokens,
         firstBuyMarketCap: firstBuyMarketCap,
         totalGasAndFees: totalGasAndFees,
+        nonSellGasAndFees: nonSellGasAndFees,
         whatIfPnlSOL: whatIfPnlSOL,
         whatIfPnlPercent: whatIfPnlPercent,
         sells: whatIfSells

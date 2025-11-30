@@ -1,25 +1,13 @@
-import fetch from "node-fetch";
+var myHeaders = new Headers();
+myHeaders.append("x-api-key", "C5WUfQxUvSmrEBES");
 
-async function getSocials(mint) {
-  const apiKey = "C5WUfQxUvSmrEBES";
-  const query = `
-    query GetTokenMeta($mint: String!) {
-      solana {
-        tokens(where: { mint: { _eq: $mint } }) {
-          metadataUri
-        }
-      }
-    }`;
-  const res = await fetch(`https://programs.shyft.to/v0/graphql/?api_key=${apiKey}&network=mainnet-beta`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, variables: { mint } })
-  });
-  const data = await res.json();
-  const uri = data?.data?.solana?.tokens?.[0]?.metadataUri;
-  if (!uri) throw new Error("No metadata URI found");
-  const meta = await fetch(uri).then(r => r.json());
-  return meta.extensions || {};
-}
+var requestOptions = {
+  method: 'GET',
+  headers: myHeaders,
+  redirect: 'follow'
+};
 
-getSocials("8zKRLUuJwMZyEv8rgr8mXgxqJdVuB2Lg84JGi8L4PuQe").then(console.log);
+fetch("https://api.shyft.to/sol/v1/transaction/parsed?network=mainnet-beta&txn_signature=3fgjxx4w2eSazTySUiZZktqdXqpTxTCdi2UrUxdPKQWKhAWppEdCZHgMXJfkuPxfT8g3fNQ2BhNh69W4hAUujDZg", requestOptions)
+  .then(response => response.text())
+  .then(result => console.log(result))
+  .catch(error => console.log('error', error));
