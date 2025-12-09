@@ -35,7 +35,7 @@ async function testLadybugStreamer() {
       "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", // Pump.fun program
       // Add more addresses here for testing
     ];
-    
+
     ladybugStreamerService.addAddresses(addressesToAdd);
     console.log(`   ✅ Added addresses: ${addressesToAdd.join(", ")}\n`);
 
@@ -54,7 +54,7 @@ async function testLadybugStreamer() {
       // Add more test addresses here
       // "AnotherAddressHere",
     ];
-    
+
     if (additionalAddresses.length > 0) {
       ladybugStreamerService.addAddresses(additionalAddresses);
       console.log(`   ✅ Added ${additionalAddresses.length} more address(es)\n`);
@@ -68,7 +68,7 @@ async function testLadybugStreamer() {
       // Uncomment to test removal
       // "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
     ];
-    
+
     if (addressesToRemove.length > 0) {
       ladybugStreamerService.removeAddresses(addressesToRemove);
       console.log(`   ✅ Removed ${addressesToRemove.length} address(es)\n`);
@@ -80,9 +80,11 @@ async function testLadybugStreamer() {
     console.log("6️⃣  Testing onData() callback...");
     ladybugStreamerService.onData((tx: any) => {
       console.log("\n📥 Received transaction:");
-      console.log(tx?.transaction?.signatures)
-      console.log(JSON.stringify(tx?.transaction?.message?.events, null, 2));
-      console.log(JSON.stringify(tx?.transaction, null, 2));
+      if (tx?.transaction?.message?.events?.length > 0) {
+        console.log(tx?.transaction?.signatures)
+        console.log(JSON.stringify(tx?.transaction?.message?.events, null, 2));
+        console.log(JSON.stringify(tx?.transaction?.message?.compiledInstructions, null, 2));
+      }
     });
     console.log("   ✅ Callback set\n");
 
@@ -95,7 +97,7 @@ async function testLadybugStreamer() {
     } else {
       ladybugStreamerService.start();
       console.log(`   ✅ Started streaming for ${trackedBeforeStart.length} address(es)\n`);
-      
+
       // Check streaming status
       console.log("8️⃣  Checking streaming status...");
       const isStreaming = ladybugStreamerService.getIsStreaming();
@@ -104,7 +106,7 @@ async function testLadybugStreamer() {
       // Keep the process running for a bit to receive transactions
       console.log("⏳ Streaming transactions for 30 seconds...");
       console.log("   (Press Ctrl+C to stop early)\n");
-      
+
       await new Promise(resolve => setTimeout(resolve, 30000));
 
       // Test: Stop streaming
