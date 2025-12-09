@@ -8,6 +8,7 @@ import raydiumAmmIdl from "./idls/raydiumAmm/raydium_amm_0.3.0.json";
 import raydiumClmmIdl from "./idls/raydiumClmm/raydium_clmm_0.1.0.json";
 import raydiumCPIdl from "./idls/raydiumCp/raydium_cp_0.2.0.json";
 import meteoraDammV2Idl from "./idls/meteoraDammV2/meteora_dammV2.json";
+import jupiterAggregatorIdl from "./idls/jupiterAggregator/jup_ag_0.1.0.json";
 
 const PUMP_PROGRAM_ID = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
 const PUMP_AMM_PROGRAM_ID = new PublicKey("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA");
@@ -15,6 +16,7 @@ const RAYDIUM_AMM_PROGRAM_ID = new PublicKey("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H2
 const RAYDIUM_CLMM_PROGRAM_ID = new PublicKey("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
 const RAYDIUM_CP_PROGRAM_ID = new PublicKey("CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C");
 const METEORA_DAMM_V2_PROGRAM_ID = new PublicKey("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG");
+const JUPITER_AGGREGATOR_PROGRAM_ID = new PublicKey("JUP6rZpY64TM5Rf9MhWvXkYFJyAUHbS3Y7sEKtJqLqY");
 
 /**
  * Ladybug Streamer Service
@@ -46,6 +48,7 @@ class LadybugStreamerService {
       this.parser.addIDL(RAYDIUM_AMM_PROGRAM_ID, raydiumAmmIdl as SerumIdl);
       this.parser.addIDL(RAYDIUM_CP_PROGRAM_ID, raydiumCPIdl as Idl);
       this.parser.addIDL(METEORA_DAMM_V2_PROGRAM_ID, meteoraDammV2Idl as Idl);
+      this.parser.addIDL(JUPITER_AGGREGATOR_PROGRAM_ID, jupiterAggregatorIdl as Idl);
     } catch (error) {
       console.error(`❌ Error loading pump IDL:`, error);
     }
