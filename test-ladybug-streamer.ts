@@ -80,7 +80,7 @@ async function testLadybugStreamer() {
     console.log("6️⃣  Testing onData() callback...");
     ladybugStreamerService.onData((tx: any) => {
       console.log("\n📥 Received transaction:");
-      console.log(JSON.stringify(tx, null, 2));
+      console.log(JSON.stringify(tx?.transaction?.message?.events, null, 2));
     });
     console.log("   ✅ Callback set\n");
 
