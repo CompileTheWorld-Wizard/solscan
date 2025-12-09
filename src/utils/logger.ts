@@ -18,6 +18,22 @@ class Logger {
     this.originalConsoleError = console.error.bind(console);
     this.originalConsoleWarn = console.warn.bind(console);
 
+    // Ensure proper encoding for stdout/stderr (important for SSH terminals)
+    if (process.stdout.setDefaultEncoding) {
+      try {
+        process.stdout.setDefaultEncoding('utf8');
+      } catch (e) {
+        // Ignore if not available
+      }
+    }
+    if (process.stderr.setDefaultEncoding) {
+      try {
+        process.stderr.setDefaultEncoding('utf8');
+      } catch (e) {
+        // Ignore if not available
+      }
+    }
+
     // Create logs directory in project root
     this.logDir = path.join(process.cwd(), 'logs');
     
@@ -126,6 +142,77 @@ class Logger {
   }
 
   /**
+   * Sanitize string for SSH terminal compatibility
+   * Removes emojis, non-printable characters, and handles binary data
+   */
+  public sanitizeForTerminal(str: string): string {
+    // Replace common emojis with plain text alternatives
+    const emojiMap: { [key: string]: string } = {
+      '✅': '[OK]',
+      '❌': '[ERROR]',
+      '⚠️': '[WARN]',
+      '🔴': '[RED]',
+      '🟢': '[GREEN]',
+      '🟡': '[YELLOW]',
+      '🔵': '[BLUE]',
+      '📥': '[RECV]',
+      '📊': '[STATS]',
+      '🧪': '[TEST]',
+      '💡': '[TIP]',
+      '⏳': '[WAIT]',
+      '1️⃣': '[1]',
+      '2️⃣': '[2]',
+      '3️⃣': '[3]',
+      '4️⃣': '[4]',
+      '5️⃣': '[5]',
+      '6️⃣': '[6]',
+      '7️⃣': '[7]',
+      '8️⃣': '[8]',
+      '9️⃣': '[9]',
+    };
+
+    let sanitized = str;
+    
+    // Replace emojis
+    for (const [emoji, replacement] of Object.entries(emojiMap)) {
+      sanitized = sanitized.replace(new RegExp(emoji, 'g'), replacement);
+    }
+
+    // Remove other emojis and non-printable characters (except common whitespace)
+    // Keep ASCII printable characters (32-126) and common whitespace (tab, newline, carriage return)
+    sanitized = sanitized.replace(/[\u{1F300}-\u{1F9FF}]/gu, ''); // Emoji range
+    sanitized = sanitized.replace(/[\u{2600}-\u{26FF}]/gu, ''); // Miscellaneous symbols
+    sanitized = sanitized.replace(/[\u{2700}-\u{27BF}]/gu, ''); // Dingbats
+    
+    // Remove non-printable characters except common whitespace (tab=0x09, newline=0x0A, carriage return=0x0D)
+    // Keep printable ASCII (0x20-0x7E) and common whitespace
+    sanitized = sanitized.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+    
+    // Handle any remaining binary data or invalid UTF-8 sequences
+    // Convert to safe ASCII representation
+    try {
+      // Try to decode as UTF-8, replacing invalid sequences
+      sanitized = Buffer.from(sanitized, 'utf8').toString('utf8');
+      
+      // Replace any remaining non-ASCII characters that might cause issues
+      // Keep only ASCII printable characters and common whitespace
+      sanitized = sanitized.replace(/[^\x09\x0A\x0D\x20-\x7E]/g, (char) => {
+        // For non-ASCII characters, try to represent them safely
+        const code = char.charCodeAt(0);
+        if (code <= 0xFF) {
+          return `\\x${code.toString(16).padStart(2, '0')}`;
+        }
+        return `\\u${code.toString(16).padStart(4, '0')}`;
+      });
+    } catch (e) {
+      // If UTF-8 conversion fails, replace all non-ASCII with placeholder
+      sanitized = sanitized.replace(/[^\x09\x0A\x0D\x20-\x7E]/g, '?');
+    }
+
+    return sanitized;
+  }
+
+  /**
    * Format console message with timestamp and module
    */
   private formatConsoleMessage(module: string, ...args: any[]): string {
@@ -141,7 +228,10 @@ class Logger {
       return String(arg);
     }).join(' ');
     
-    return `[${timestamp}] ${message}`;
+    const formatted = `[${timestamp}] ${message}`;
+    
+    // Sanitize for terminal compatibility
+    return this.sanitizeForTerminal(formatted);
   }
 
   /**
@@ -157,6 +247,7 @@ class Logger {
     // Write to console with formatted message (with error handling for broken pipes)
     try {
       const formattedMessage = this.formatConsoleMessage(moduleName, ...args);
+      // Use original console method directly to avoid recursion, but with sanitized message
       consoleMethod(formattedMessage);
     } catch (error: any) {
       // Handle EPIPE and other stream errors gracefully
@@ -168,14 +259,15 @@ class Logger {
       } else {
         // For other errors, try to log them (but don't crash)
         try {
-          this.originalConsoleError('Console write error (non-fatal):', error.message || error);
+          const errorMsg = this.sanitizeForTerminal(`Console write error (non-fatal): ${error.message || error}`);
+          this.originalConsoleError(errorMsg);
         } catch {
           // If even error logging fails, silently ignore
         }
       }
     }
     
-    // Write to file
+    // Write to file (preserve original data, no sanitization)
     if (this.currentLogFile) {
       try {
         const logMessage = this.formatMessage(level, ...args);
@@ -183,7 +275,8 @@ class Logger {
       } catch (error: any) {
         // Fallback: if file write fails, try to log to console (but don't crash)
         try {
-          this.originalConsoleError('Failed to write to log file:', error.message || error);
+          const errorMsg = this.sanitizeForTerminal(`Failed to write to log file: ${error.message || error}`);
+          this.originalConsoleError(errorMsg);
         } catch {
           // If even error logging fails, silently ignore
         }
@@ -233,6 +326,30 @@ class Logger {
 const logger = new Logger();
 
 /**
+ * Sanitize buffer data for terminal output
+ */
+function sanitizeBuffer(buffer: Buffer): string {
+  let str = buffer.toString('utf8');
+  
+  // Remove non-printable characters except common whitespace
+  str = str.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+  
+  // Replace emojis and non-ASCII characters
+  str = str.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
+  
+  // Replace any remaining non-ASCII with safe representation
+  str = str.replace(/[^\x09\x0A\x0D\x20-\x7E]/g, (char) => {
+    const code = char.charCodeAt(0);
+    if (code <= 0xFF) {
+      return `\\x${code.toString(16).padStart(2, '0')}`;
+    }
+    return `\\u${code.toString(16).padStart(4, '0')}`;
+  });
+  
+  return str;
+}
+
+/**
  * Override console methods to also write to file
  */
 export function setupFileLogging(): void {
@@ -240,6 +357,32 @@ export function setupFileLogging(): void {
   const originalLog = console.log;
   const originalError = console.error;
   const originalWarn = console.warn;
+
+  // Intercept stdout writes to sanitize output
+  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = function(chunk: any, encoding?: any, cb?: any): boolean {
+    if (Buffer.isBuffer(chunk)) {
+      const sanitized = sanitizeBuffer(chunk);
+      return originalStdoutWrite(sanitized, encoding, cb);
+    } else if (typeof chunk === 'string') {
+      const sanitized = logger.sanitizeForTerminal(chunk);
+      return originalStdoutWrite(sanitized, encoding, cb);
+    }
+    return originalStdoutWrite(chunk, encoding, cb);
+  };
+
+  // Intercept stderr writes to sanitize output
+  const originalStderrWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = function(chunk: any, encoding?: any, cb?: any): boolean {
+    if (Buffer.isBuffer(chunk)) {
+      const sanitized = sanitizeBuffer(chunk);
+      return originalStderrWrite(sanitized, encoding, cb);
+    } else if (typeof chunk === 'string') {
+      const sanitized = logger.sanitizeForTerminal(chunk);
+      return originalStderrWrite(sanitized, encoding, cb);
+    }
+    return originalStderrWrite(chunk, encoding, cb);
+  };
 
   // Override console.log
   console.log = (...args: any[]) => {
