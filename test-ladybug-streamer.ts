@@ -32,7 +32,7 @@ async function testLadybugStreamer() {
     // Test: Add addresses using array variable
     console.log("2️⃣  Testing addAddresses() with array variable...");
     const addressesToAdd = [
-      "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", // Pump.fun program
+      "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", // Pump.fun program
       // Add more addresses here for testing
     ];
     
