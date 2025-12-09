@@ -6,7 +6,7 @@ import pumpIdl from "./idls/pumpfun/pump_0.1.0.json";
 import pumpAmmIdl from "./idls/pumpAmm/pump_amm_0.1.0.json";
 import raydiumAmmIdl from "./idls/raydiumAmm/raydium_amm_0.3.0.json";
 import raydiumClmmIdl from "./idls/raydiumClmm/raydium_clmm_0.1.0.json";
-import raydiumCPIdl from "./idls/raydiumCP/raydium_cp_0.2.0.json";
+import raydiumCPIdl from "./idls/raydiumCp/raydium_cp_0.2.0.json";
 
 const PUMP_PROGRAM_ID = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
 const PUMP_AMM_PROGRAM_ID = new PublicKey("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA");
