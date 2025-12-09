@@ -82,6 +82,7 @@ async function testLadybugStreamer() {
       console.log("\n📥 Received transaction:");
       console.log(tx?.transaction?.signatures)
       console.log(JSON.stringify(tx?.transaction?.message?.events, null, 2));
+      console.log(JSON.stringify(tx?.transaction, null, 2));
     });
     console.log("   ✅ Callback set\n");
 
