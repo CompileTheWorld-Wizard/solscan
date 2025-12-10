@@ -1,23 +1,26 @@
 /**
  * Pool Monitoring Service
- * Monitors pool transactions using Yellowstone gRPC for pump.fun and pump AMM
+ * Monitors pool transactions using ladybug streaming
  * Tracks price and market cap changes and calculates peak values
  */
 
-import Client, { CommitmentLevel } from "@triton-one/yellowstone-grpc";
-import { SubscribeRequest } from "@triton-one/yellowstone-grpc/dist/types/grpc/geyser";
 import { BorshAccountsCoder } from "@coral-xyz/anchor";
 import { PublicKey, Connection } from "@solana/web3.js";
 import { dbService } from '../database';
 import { redisService } from './redisService';
+import { Parser, TransactionStreamer } from "@shyft-to/ladybug-sdk";
+import { Idl } from "@coral-xyz/anchor";
+import { Idl as SerumIdl } from "@project-serum/anchor";
+import { convertLadybugEventToTrackerFormat } from './ladybugEventConverter';
+import { LadybugEvent, LadybugTransaction } from './ladybugTypes';
+import pumpIdl from "./idls/pumpfun/pump_0.1.0.json";
+import pumpAmmIdl from "./idls/pumpAmm/pump_amm_0.1.0.json";
 import * as fs from 'fs';
 import * as path from 'path';
 import { isObject } from "lodash";
-import * as bs58 from "bs58";
-import { parseTransaction } from '../parsers/parseFilter';
 
-const RETRY_DELAY_MS = 1000;
-const MAX_RETRY_WITH_LAST_SLOT = 5;
+const PUMP_FUN_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+const PUMP_AMM_PROGRAM_ID = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
 
 // const PUMP_PROGRAM_ID = '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P';
 
@@ -49,7 +52,6 @@ interface MonitoringSession {
   timeseriesData: TimeseriesDataPoint[]; // Store timeseries data in memory
   timeoutId: NodeJS.Timeout | null;
   stopAfterSellTimeout: NodeJS.Timeout | null;
-  fromSlot: string | null; // Slot number to start subscription from (for first buy recovery)
   processedSignatures: Set<string>; // Track processed transaction signatures to avoid duplicates
   firstBuyTxId: string | null; // First buy transaction ID
   firstSellTxId: string | null; // First sell transaction ID
@@ -74,32 +76,25 @@ function bnLayoutFormatter(obj: any) {
 }
 
 class LiquidityPoolMonitor {
-  grpcClient: Client | null;
   accountCoder: BorshAccountsCoder;
   solanaConnection: Connection;
   sessions: Map<string, MonitoringSession>; // Key: walletAddress-tokenAddress-timestamp
   tokenToSessions: Map<string, Set<string>>; // Key: tokenAddress, Value: Set of sessionKeys
-  currentStream: any;
-  isStreaming: boolean;
-  shouldStop: boolean;
-  isRunning: boolean;
-  grpcUrl: string;
-  xToken: string;
-  monitoredTokens: Set<string>; // Track which tokens we're subscribed to
-  fromSlot: string | null; // Slot to start subscription from (for first buy recovery)
+  monitoredTokens: Set<string>; // Track which tokens we're monitoring
+  private parser: Parser;
+  private streamer: TransactionStreamer | null = null;
+  private isStreaming: boolean = false;
+  private grpcUrl: string;
+  private xToken: string;
+  private lastSlot: number | null = null; // Track last processed slot for reconnection
+  private fromSlot: number | null = null; // Slot to start from (for first buy recovery)
 
   constructor(solanaConnection: Connection) {
-    this.grpcClient = null;
     this.solanaConnection = solanaConnection;
     this.sessions = new Map();
     this.tokenToSessions = new Map();
-    this.currentStream = null;
-    this.isStreaming = false;
-    this.shouldStop = false;
-    this.isRunning = false;
     this.monitoredTokens = new Set();
-    this.fromSlot = null;
-    
+
     // Get gRPC credentials from environment
     if (!process.env.GRPC_URL || !process.env.X_TOKEN) {
       throw new Error("Missing GRPC_URL or X_TOKEN environment variables for pool monitoring");
@@ -107,15 +102,14 @@ class LiquidityPoolMonitor {
     this.grpcUrl = process.env.GRPC_URL;
     this.xToken = process.env.X_TOKEN;
 
-    // Initialize gRPC client
-    this.grpcClient = new Client(this.grpcUrl, this.xToken, {
-      "grpc.keepalive_permit_without_calls": 1,
-      "grpc.keepalive_time_ms": 10000,
-      "grpc.keepalive_timeout_ms": 1000,
-      "grpc.default_compression_algorithm": 2,
-    });
+    // Initialize ladybug parser
+    this.parser = new Parser();
+    this.initializeParser();
 
-    // Load IDL files
+    // Initialize ladybug streamer
+    this.initializeStreamer();
+
+    // Load IDL files for account decoding
     const pumpFunIdlPath = path.join(__dirname, '../parsers/pumpFun/idls/pump_0.1.0.json');
     const pumpAmmIdlPath = path.join(__dirname, '../parsers/pumpAmm/idls/pump_amm_0.1.0.json');
 
@@ -134,8 +128,223 @@ class LiquidityPoolMonitor {
       console.error('Failed to load IDL files:', error);
       throw error;
     }
+  }
 
-    // Don't start stream here - it will start when first pool is added
+  /**
+   * Initialize parser with IDL files
+   */
+  private initializeParser(): void {
+    try {
+      this.parser.addIDL(new PublicKey(PUMP_FUN_PROGRAM_ID), pumpIdl as Idl);
+      this.parser.addIDL(new PublicKey(PUMP_AMM_PROGRAM_ID), pumpAmmIdl as Idl);
+    } catch (error) {
+      console.error(`❌ Error loading IDL files:`, error);
+    }
+  }
+
+  /**
+   * Initialize the ladybug streamer
+   */
+  private initializeStreamer(): void {
+    try {
+      this.streamer = new TransactionStreamer(this.grpcUrl, this.xToken);
+      this.streamer.addParser(this.parser);
+      
+      // Set up callback for ladybug events
+      this.streamer.onData((tx: LadybugTransaction) => {
+        this.handleLadybugTransaction(tx);
+      });
+      
+      // Set up error callback for manual reconnection
+      this.streamer.onError((error: any) => {
+        console.error('❌ Pool monitoring streamer error:', error);
+        this.handleStreamerError(error);
+      });
+      
+      // Add PumpFun and PumpAmm program addresses to track
+      this.streamer.addAddresses([
+        PUMP_FUN_PROGRAM_ID,
+        PUMP_AMM_PROGRAM_ID
+      ]);
+      
+      console.log("✅ Pool monitoring ladybug streamer initialized");
+    } catch (error: any) {
+      console.error('Failed to initialize pool monitoring ladybug streamer:', error?.message || error);
+    }
+  }
+
+  /**
+   * Handle streamer errors and reconnect from lastSlot
+   */
+  private handleStreamerError(error: any): void {
+    if (!this.streamer) {
+      return;
+    }
+
+    // If we have a lastSlot, reconnect from there
+    if (this.lastSlot !== null) {
+      console.log(`🔄 Reconnecting pool monitoring streamer from last slot: ${this.lastSlot}`);
+      this.reconnectFromSlot(this.lastSlot);
+    } else if (this.fromSlot !== null) {
+      // Fallback to fromSlot if lastSlot is not available
+      console.log(`🔄 Reconnecting pool monitoring streamer from fromSlot: ${this.fromSlot}`);
+      this.reconnectFromSlot(this.fromSlot);
+    } else {
+      console.error('❌ No slot available for reconnection');
+    }
+  }
+
+  /**
+   * Reconnect streamer from a specific slot
+   */
+  private reconnectFromSlot(slot: number): void {
+    if (!this.streamer) {
+      return;
+    }
+
+    try {
+      // Stop current stream
+      if (this.isStreaming) {
+        this.streamer.stop();
+        this.isStreaming = false;
+      }
+
+      // Disable auto-reconnect when using fromSlot
+      this.streamer.enableAutoReconnect(false);
+      
+      // Set fromSlot
+      this.streamer.setFromSlot(slot);
+      
+      // Restart streamer
+      this.streamer.start();
+      this.isStreaming = true;
+      
+      console.log(`✅ Reconnected pool monitoring streamer from slot ${slot}`);
+    } catch (error: any) {
+      console.error(`Failed to reconnect from slot ${slot}:`, error?.message || error);
+    }
+  }
+
+  /**
+   * Handle transactions from ladybug streamer
+   */
+  private handleLadybugTransaction(tx: LadybugTransaction): void {
+    try {
+      // Update lastSlot from transaction
+      if (tx?.transaction?.slot) {
+        const slot = typeof tx.transaction.slot === 'string' 
+          ? parseInt(tx.transaction.slot, 10) 
+          : tx.transaction.slot;
+        if (!isNaN(slot)) {
+          this.lastSlot = slot;
+        }
+      }
+
+      const events = tx?.transaction?.message?.events;
+      if (!events || events.length === 0) {
+        return;
+      }
+
+      const signature = tx?.transaction?.signatures?.[0];
+      const slot = tx?.transaction?.slot;
+      const createdAt = tx?.createdAt;
+
+      // Process each event
+      for (const event of events) {
+        // Only process PumpFun and PumpAmm events
+        if (event.name !== "TradeEvent" && event.name !== "BuyEvent" && event.name !== "SellEvent") {
+          continue;
+        }
+
+        // Convert event to tracker format
+        const result = convertLadybugEventToTrackerFormat(
+          event as LadybugEvent,
+          signature,
+          slot,
+          createdAt
+        );
+
+        if (!result || !result.price) {
+          continue;
+        }
+
+        // Extract token address for buy/sell events
+        let tokenAddress: string | null = null;
+        const txType = result.type?.toUpperCase();
+        const SOL_MINT = 'So11111111111111111111111111111111111111112';
+        
+        if (txType === 'BUY') {
+          tokenAddress = result.mintTo && result.mintTo !== SOL_MINT ? result.mintTo : null;
+        } else if (txType === 'SELL') {
+          tokenAddress = result.mintFrom && result.mintFrom !== SOL_MINT ? result.mintFrom : null;
+        }
+
+        // For PumpAmm events, fetch token mint from pool account if not available
+        if (!tokenAddress && result.platform === "PumpFun Amm" && result.pool) {
+          // Fetch token mint asynchronously
+          this.fetchTokenMintFromPool(result.pool).then(mint => {
+            if (mint) {
+              // Update result with token mint
+              if (txType === 'BUY') {
+                result.mintTo = mint;
+              } else if (txType === 'SELL') {
+                result.mintFrom = mint;
+              }
+              
+              // Process the transaction with the updated token address
+              this.handlePoolUpdate(result, mint, signature || null, createdAt || null);
+            }
+          }).catch(error => {
+            console.error(`Error fetching token mint from pool:`, error?.message || error);
+          });
+          
+          continue;
+        }
+
+        if (!tokenAddress) {
+          continue;
+        }
+
+        // Only process if this token is being monitored
+        if (!this.monitoredTokens.has(tokenAddress)) {
+          continue;
+        }
+
+        // Process the pool update
+        this.handlePoolUpdate(result, tokenAddress, signature || null, createdAt || null);
+      }
+    } catch (error: any) {
+      console.error(`❌ Error handling ladybug transaction in pool monitoring:`, error?.message || error);
+    }
+  }
+
+  /**
+   * Fetch token mint from PumpAmm pool account
+   */
+  private async fetchTokenMintFromPool(poolAddress: string): Promise<string | null> {
+    if (!this.solanaConnection || !poolAddress) {
+      return null;
+    }
+
+    try {
+      const poolPublicKey = new PublicKey(poolAddress);
+      const accountInfo = await this.solanaConnection.getAccountInfo(poolPublicKey);
+      
+      if (!accountInfo || !accountInfo.data) {
+        return null;
+      }
+
+      // PumpAmm pool account structure: base_mint is at offset 33 (after pool_bump: u8, index: u16, creator: pubkey)
+      if (accountInfo.data.length >= 65) {
+        const baseMintBytes = accountInfo.data.slice(33, 65);
+        const baseMint = new PublicKey(baseMintBytes);
+        return baseMint.toString();
+      }
+    } catch (error: any) {
+      console.error(`Failed to fetch token mint from pool ${poolAddress}:`, error?.message || error);
+    }
+
+    return null;
   }
 
   getAccountName(data: string): string {
@@ -233,34 +442,18 @@ class LiquidityPoolMonitor {
     }
   }
 
-  async handleTokenUpdate(transactionData: any, createdAt: string | null = null, signature: string | null = null): Promise<void> {
+  /**
+   * Handle pool updates from ladybug streamer
+   */
+  async handlePoolUpdate(
+    result: any,
+    tokenAddress: string,
+    signature: string | null,
+    createdAt: string | null
+  ): Promise<void> {
     try {
-      // Parse transaction using parseFilter
-      const result = parseTransaction(transactionData);
       if (!result || !result.price) {
-        console.log(`⚠️ Failed to parse transaction or no price found`);
-        return;
-      }
-
-      // Extract token address from transaction result
-      const SOL_MINT = 'So11111111111111111111111111111111111111112';
-      const txType = result.type?.toUpperCase();
-      let tokenAddress: string | null = null;
-      
-      if (txType === 'BUY') {
-        // For BUY: mintTo is the token we're buying (should not be SOL)
-        if (result.mintTo && result.mintTo !== SOL_MINT) {
-          tokenAddress = result.mintTo;
-        }
-      } else if (txType === 'SELL') {
-        // For SELL: mintFrom is the token we're selling (should not be SOL)
-        if (result.mintFrom && result.mintFrom !== SOL_MINT) {
-          tokenAddress = result.mintFrom;
-        }
-      }
-
-      if (!tokenAddress) {
-        console.log(`⚠️ No valid token address found in transaction result`);
+        console.log(`⚠️ No price found in transaction result`);
         return;
       }
 
@@ -316,6 +509,61 @@ class LiquidityPoolMonitor {
       }
 
       const priceUsd = tokenPriceSol * solPriceUsd;
+      
+      // Validate priceUsd
+      if (!priceUsd || isNaN(priceUsd) || !isFinite(priceUsd) || priceUsd <= 0) {
+        console.warn(`⚠️ [MARKETCAP DEBUG] Invalid priceUsd: ${priceUsd} (tokenPriceSol: ${tokenPriceSol}, solPriceUsd: ${solPriceUsd})`);
+        return;
+      }
+
+      // Calculate market cap once for this token (all sessions share the same token)
+      let marketCap = 0;
+      try {
+        console.log(`🔍 [MARKETCAP DEBUG] Starting marketcap calculation for token ${tokenAddress.substring(0, 8)}...`);
+        console.log(`🔍 [MARKETCAP DEBUG] Price USD: ${priceUsd}, Price SOL: ${tokenPriceSol}`);
+        
+        const mintPublicKey = new PublicKey(tokenAddress);
+        console.log(`🔍 [MARKETCAP DEBUG] Fetching token supply for mint: ${tokenAddress}`);
+        
+        const tokenSupply = await this.solanaConnection.getTokenSupply(mintPublicKey);
+        console.log(`🔍 [MARKETCAP DEBUG] Token supply response:`, tokenSupply ? 'exists' : 'null', tokenSupply?.value ? 'has value' : 'no value');
+        
+        if (tokenSupply && tokenSupply.value) {
+          const rawSupply = parseFloat(tokenSupply.value.amount);
+          const decimals = tokenSupply.value.decimals;
+          console.log(`🔍 [MARKETCAP DEBUG] Raw supply: ${rawSupply}, Decimals: ${decimals}`);
+          
+          if (isNaN(rawSupply) || !isFinite(rawSupply) || rawSupply <= 0) {
+            console.warn(`⚠️ [MARKETCAP DEBUG] Invalid raw supply: ${rawSupply}`);
+          } else if (isNaN(decimals) || decimals < 0 || decimals > 18) {
+            console.warn(`⚠️ [MARKETCAP DEBUG] Invalid decimals: ${decimals}`);
+          } else {
+            const totalSupply = rawSupply / Math.pow(10, decimals);
+            console.log(`🔍 [MARKETCAP DEBUG] Total supply (after decimals): ${totalSupply}`);
+            
+            if (totalSupply <= 0 || !isFinite(totalSupply)) {
+              console.warn(`⚠️ [MARKETCAP DEBUG] Invalid total supply: ${totalSupply}`);
+            } else {
+              marketCap = totalSupply * priceUsd;
+              console.log(`🔍 [MARKETCAP DEBUG] Calculated marketcap: ${totalSupply} * ${priceUsd} = ${marketCap}`);
+              
+              if (marketCap === 0 || isNaN(marketCap) || !isFinite(marketCap)) {
+                console.warn(`⚠️ [MARKETCAP DEBUG] Invalid marketcap result: ${marketCap} (totalSupply: ${totalSupply}, priceUsd: ${priceUsd})`);
+              } else {
+                console.log(`✅ [MARKETCAP DEBUG] Successfully calculated marketcap: $${marketCap.toFixed(2)}`);
+              }
+            }
+          }
+        } else {
+          console.warn(`⚠️ [MARKETCAP DEBUG] Token supply is null or missing value. tokenSupply:`, tokenSupply);
+        }
+      } catch (error) {
+        console.error(`❌ [MARKETCAP DEBUG] Failed to fetch token supply for ${tokenAddress.substring(0, 8)}...:`, error);
+        if (error instanceof Error) {
+          console.error(`❌ [MARKETCAP DEBUG] Error message: ${error.message}`);
+          console.error(`❌ [MARKETCAP DEBUG] Error stack: ${error.stack}`);
+        }
+      }
 
       // Get token address from result or session
       // Process update for each session monitoring this pool
@@ -336,23 +584,12 @@ class LiquidityPoolMonitor {
           session.processedSignatures.add(signature);
         }
 
-        // Get token address from session
-        const tokenAddress = session.tokenAddress;
-
-        // Calculate market cap
-        let marketCap = 0;
-        try {
-          const mintPublicKey = new PublicKey(tokenAddress);
-          const tokenSupply = await this.solanaConnection.getTokenSupply(mintPublicKey);
-          
-          if (tokenSupply && tokenSupply.value) {
-            const rawSupply = parseFloat(tokenSupply.value.amount);
-            const decimals = tokenSupply.value.decimals;
-            const totalSupply = rawSupply / Math.pow(10, decimals);
-            marketCap = totalSupply * priceUsd;
-          }
-        } catch (error) {
-          console.error('Failed to fetch token supply:', error);
+        // Get token address from session (should match the tokenAddress parameter)
+        const sessionTokenAddress = session.tokenAddress;
+        
+        // Validate that session token address matches (safety check)
+        if (sessionTokenAddress !== tokenAddress) {
+          console.warn(`⚠️ [MARKETCAP DEBUG] Session token address mismatch: session has ${sessionTokenAddress.substring(0, 8)}..., but update is for ${tokenAddress.substring(0, 8)}...`);
         }
 
         // Use createdAt timestamp from stream (slot timestamp) if available, otherwise fallback to current time
@@ -380,9 +617,17 @@ class LiquidityPoolMonitor {
         // Get transaction type from parsed result
         const txType = result.type?.toUpperCase() || null;
         
+        // Only store marketcap if it's a valid positive number
+        // Use null if calculation failed (marketCap is 0 due to error)
+        const marketcapValue = (marketCap > 0 && isFinite(marketCap)) ? marketCap : null;
+        
+        if (marketcapValue === null && marketCap === 0) {
+          console.warn(`⚠️ [MARKETCAP DEBUG] Storing null marketcap for session ${sessionKey.substring(0, 20)}... (calculation resulted in 0 or failed)`);
+        }
+        
         session.timeseriesData.push({
           timestamp: timestampISO,
-          marketcap: marketCap || null,
+          marketcap: marketcapValue,
           tokenPriceSol: tokenPriceSol || null,
           tokenPriceUsd: priceUsd || null,
           poolAddress: poolAddress || null,
@@ -391,334 +636,76 @@ class LiquidityPoolMonitor {
           transactionType: txType
         });
 
-        console.log(`📊 Token ${tokenAddress.substring(0, 8)}... | Price: ${tokenPriceSol.toFixed(10)} SOL ($${priceUsd.toFixed(6)}) | MCap: $${marketCap.toFixed(2)}, txid: ${signature ? signature.substring(0, 8) : 'N/A'}`);
+        const mcapDisplay = marketcapValue ? `$${marketcapValue.toFixed(2)}` : 'N/A';
+        console.log(`📊 Token ${tokenAddress.substring(0, 8)}... | Price: ${tokenPriceSol.toFixed(10)} SOL ($${priceUsd.toFixed(6)}) | MCap: ${mcapDisplay}, txid: ${signature ? signature.substring(0, 8) : 'N/A'}`);
       }
     } catch (error) {
       console.error('Error handling pool update:', error);
     }
   }
 
-  async startStream(): Promise<void> {
-    if (!this.grpcClient) {
-      throw new Error('gRPC client not initialized');
-    }
-
-    // Prevent multiple streams - if already running, don't start another
-    if (this.isRunning) {
-      console.log('⚠️ Stream already running, skipping start');
+  /**
+   * Start the ladybug streamer if not already running
+   */
+  private startStreamerIfNeeded(): void {
+    if (!this.streamer) {
+      console.warn('⚠️ Streamer not initialized');
       return;
     }
 
-    // Clean up any existing stream reference
-    if (this.currentStream) {
+    if (!this.isStreaming) {
       try {
-        this.currentStream.end();
-      } catch (error) {
-        // Ignore errors when ending old stream
+        // If fromSlot is set, ensure auto-reconnect is disabled
+        if (this.fromSlot !== null) {
+          this.streamer.enableAutoReconnect(false);
+          this.streamer.setFromSlot(this.fromSlot);
+          console.log(`📍 Starting streamer with fromSlot: ${this.fromSlot}`);
+        }
+        
+        this.streamer.start();
+        this.isStreaming = true;
+        console.log('✅ Started pool monitoring ladybug streamer');
+      } catch (error: any) {
+        console.error('Failed to start pool monitoring streamer:', error?.message || error);
       }
-      this.currentStream = null;
     }
-
-    this.shouldStop = false;
-    this.isRunning = true;
-    this.isStreaming = false;
-
-    // Start streaming in background with retry mechanism
-    this.subscribeCommand().then(() => {
-      this.isRunning = false;
-      this.isStreaming = false;
-    }).catch(error => {
-      console.error('gRPC stream error:', error);
-      this.isRunning = false;
-      this.isStreaming = false;
-    });
   }
 
   /**
-   * Subscribe to the stream with retry mechanism (similar to tracker)
+   * Stop the ladybug streamer
    */
-  private async subscribeCommand(): Promise<void> {
-    let retryCount = 0;
-
-    while (this.isRunning && !this.shouldStop) {
+  private stopStreamer(): void {
+    if (this.streamer && this.isStreaming) {
       try {
-        const result = await this.handleStream();
-        
-        // If we finished normally and should stop, break the loop
-        if (this.shouldStop) {
-          break;
-        }
-      } catch (err: any) {
-        // If we should stop, break the loop
-        if (this.shouldStop) {
-          break;
-        }
-        console.log(err);
-        console.error(
-          `Stream error, retrying in ${RETRY_DELAY_MS}ms...`,
-        );
-
-        // In case the stream is interrupted, it waits for a while before retrying
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-
-        if (err.hasRcvdMSg) retryCount = 0;
-
-        if (retryCount < MAX_RETRY_WITH_LAST_SLOT) {
-          console.log(
-            `#${retryCount} retrying, remaining retries ${MAX_RETRY_WITH_LAST_SLOT - retryCount}`,
-          );
-          retryCount++;
-        } else {
-          console.log("Retrying from latest (max retries reached)");
-          retryCount = 0;
-        }
+        this.streamer.stop();
+        this.isStreaming = false;
+        console.log('✅ Stopped pool monitoring ladybug streamer');
+      } catch (error: any) {
+        console.error('Failed to stop pool monitoring streamer:', error?.message || error);
       }
     }
-
-    console.log("🛑 Pool monitoring stream stopped");
   }
 
-  private async handleStream(): Promise<void> {
-    if (!this.grpcClient) {
-      throw new Error('gRPC client not initialized');
-    }
-
-    console.log('🔌 Starting gRPC stream for pool monitoring...');
-    const stream = await this.grpcClient.subscribe();
-    this.currentStream = stream;
-    this.isStreaming = true;
-    let hasRcvdMSg = false;
-
-    return new Promise((resolve, reject) => {
-      // Handle stream events
-      stream.on("error", (error) => {
-        console.error("❌ gRPC stream error:", error);
-        stream.end();
-        reject({ error, hasRcvdMSg });
-      });
-
-      stream.on("end", () => {
-        console.log("🔌 gRPC stream ended");
-        resolve();
-      });
-
-      stream.on("close", () => {
-        console.log("🔌 gRPC stream closed");
-        resolve();
-      });
-
-      // Handle transaction updates
-      stream.on("data", async (data) => {
-        try {
-          if (this.shouldStop) {
-            stream.end();
-            return;
-          }
-
-          if (data?.transaction) {
-            hasRcvdMSg = true;
-            
-            // Extract createdAt timestamp from stream data (slot timestamp)
-            const createdAt = data.createdAt || null;
-            
-            // Extract transaction signature
-            const tx = data.transaction?.transaction?.transaction;
-            let signature: string | null = null;
-            if (tx?.signatures?.[0]) {
-              signature = bs58.encode(tx.signatures[0]);
-            }
-            
-            // Parse transaction to get token address and price
-            const result = parseTransaction(data.transaction);
-            if (!result || !result.price) {
-              // Not a relevant transaction, skip
-              return;
-            }
-
-            // Extract token address from transaction result
-            const SOL_MINT = 'So11111111111111111111111111111111111111112';
-            const txType = result.type?.toUpperCase();
-            let tokenAddress: string | null = null;
-            
-            if (txType === 'BUY') {
-              // For BUY: mintTo is the token we're buying (should not be SOL)
-              if (result.mintTo && result.mintTo !== SOL_MINT) {
-                tokenAddress = result.mintTo;
-              }
-            } else if (txType === 'SELL') {
-              // For SELL: mintFrom is the token we're selling (should not be SOL)
-              if (result.mintFrom && result.mintFrom !== SOL_MINT) {
-                tokenAddress = result.mintFrom;
-              }
-            }
-
-            if (!tokenAddress) {
-              // Not a relevant transaction (no token address), skip
-              return;
-            }
-            
-            // Check if this token is being monitored
-            if (!this.monitoredTokens.has(tokenAddress)) {
-              return;
-            }
-
-            console.log(`📥 Received transaction update for token ${tokenAddress.substring(0, 8)}...${signature ? ` (tx: ${signature.substring(0, 8)}...)` : ''}`);
-            await this.handleTokenUpdate(data.transaction, createdAt, signature);
-          }
-        } catch (error) {
-          console.error('Error processing gRPC data:', error);
-        }
-      });
-
-      // Build subscription request
-      // If tokens are empty, send empty subscription request
-      // Otherwise, send request with monitored tokens
-      let req: SubscribeRequest;
-      
-      if (this.monitoredTokens.size === 0) {
-        // Send empty subscription when no tokens to monitor
-        req = {
-          slots: {},
-          accounts: {},
-          transactions: {},
-          blocks: {},
-          blocksMeta: {},
-          accountsDataSlice: [],
-          transactionsStatus: {},
-          entry: {}
-        };
-        console.log('📤 Sending empty subscription request (no tokens to monitor)');
-      } else {
-        req = {
-          accounts: {},
-          slots: {},
-          transactions: {
-            targetWallet: {
-              vote: false,
-              failed: false,
-              accountInclude: Array.from(this.monitoredTokens), // Token Addresses
-              accountExclude: [],
-              accountRequired: [],
-            },
-          },
-          transactionsStatus: {},
-          blocks: {},
-          blocksMeta: {},
-          entry: {},
-          accountsDataSlice: [],
-          commitment: CommitmentLevel.CONFIRMED,
-        };
-        
-        // Add fromSlot if available (for first buy recovery)
-        if (this.fromSlot) {
-          req.fromSlot = this.fromSlot;
-          console.log(`📤 Subscribing to ${this.monitoredTokens.size} token(s) via transaction subscription from slot ${this.fromSlot}`);
-        } else {
-          console.log(`📤 Subscribing to ${this.monitoredTokens.size} token(s) via transaction subscription`);
-        }
-      }
-
-      // Send initial subscribe request
-      stream.write(req, (err: any) => {
-        if (err === null || err === undefined) {
-          if (this.monitoredTokens.size === 0) {
-            console.log(`✅ Sent empty subscription request`);
-          } else {
-            console.log(`✅ Subscribed to ${this.monitoredTokens.size} token(s) via gRPC`);
-          }
-        } else {
-          reject({ error: err, hasRcvdMSg });
-        }
-      });
-    });
-  }
-
-  async updateSubscription(): Promise<void> {
-    // If stream is not running, start it
-    if (!this.isRunning) {
-      await this.startStream();
+  /**
+   * Update streamer addresses when tokens are added/removed
+   */
+  private updateStreamerAddresses(): void {
+    if (!this.streamer) {
       return;
     }
 
-    // If stream is not active yet, wait for it
-    if (!this.currentStream || !this.isStreaming) {
-      console.log('⚠️ Stream not ready yet, will update when ready');
-      return;
-    }
-
-    // Dynamically update the subscription without restarting the stream
-    try {
-      let req: SubscribeRequest;
-      
-      if (this.monitoredTokens.size === 0) {
-        // Send empty subscription when no tokens to monitor
-        req = {
-          slots: {},
-          accounts: {},
-          transactions: {},
-          blocks: {},
-          blocksMeta: {},
-          accountsDataSlice: [],
-          transactionsStatus: {},
-          entry: {}
-        };
-        console.log('🔄 Updating gRPC subscription: sending empty subscription (no tokens to monitor)');
-      } else {
-        req = {
-          accounts: {},
-          slots: {},
-          transactions: {
-            targetWallet: {
-              vote: false,
-              failed: false,
-              accountInclude: Array.from(this.monitoredTokens), // Token Addresses
-              accountExclude: [],
-              accountRequired: [],
-            },
-          },
-          transactionsStatus: {},
-          blocks: {},
-          blocksMeta: {},
-          entry: {},
-          accountsDataSlice: [],
-          commitment: CommitmentLevel.CONFIRMED,
-        };
-        
-        // Add fromSlot if available (for first buy recovery)
-        if (this.fromSlot) {
-          req.fromSlot = this.fromSlot;
-          console.log(`🔄 Updating gRPC subscription: ${this.monitoredTokens.size} token(s) - ${Array.from(this.monitoredTokens).map(t => t.substring(0, 8)).join(', ')} from slot ${this.fromSlot}`);
-        } else {
-          console.log(`🔄 Updating gRPC subscription: ${this.monitoredTokens.size} token(s) - ${Array.from(this.monitoredTokens).map(t => t.substring(0, 8)).join(', ')}`);
-        }
-      }
-      
-      // Wait for the subscription update to be sent
-      await new Promise<void>((resolve, reject) => {
-        const streamRef = this.currentStream;
-        if (!streamRef) {
-          reject(new Error('Stream no longer exists'));
-          return;
-        }
-        
-        streamRef.write(req, (err: any) => {
-          if (err === null || err === undefined) {
-            if (this.monitoredTokens.size === 0) {
-              console.log(`✅ Updated gRPC subscription: empty subscription sent`);
-            } else {
-              console.log(`✅ Updated gRPC subscription: ${this.monitoredTokens.size} token(s)`);
-            }
-            resolve();
-          } else {
-            reject(err);
-          }
-        });
-      });
-    } catch (error) {
-      console.error('Failed to update subscription:', error);
-      // If update fails, the retry mechanism in subscribeCommand will handle it
+    // For pool monitoring, we track program addresses (PumpFun/PumpAmm)
+    // The streamer already has these addresses, so we just need to ensure it's running
+    // when we have tokens to monitor
+    if (this.monitoredTokens.size > 0) {
+      this.startStreamerIfNeeded();
+    } else {
+      // If no tokens to monitor, we can stop the streamer
+      // But keep it running since program addresses are always tracked
+      // this.stopStreamer();
     }
   }
+
 
   async startMonitoring(
     walletAddress: string,
@@ -754,7 +741,6 @@ class LiquidityPoolMonitor {
       timeseriesData: [], // Initialize empty array for timeseries data
       timeoutId: null,
       stopAfterSellTimeout: null,
-      fromSlot: fromSlot || null,
       processedSignatures: new Set<string>(),
       firstBuyTxId: firstBuyTxId || null,
       firstSellTxId: null
@@ -785,8 +771,17 @@ class LiquidityPoolMonitor {
 
     // Set fromSlot for first buy recovery (only if this is the first session with fromSlot)
     if (fromSlot && !this.fromSlot) {
-      this.fromSlot = fromSlot;
-      console.log(`📍 Set fromSlot to ${fromSlot} for first buy recovery`);
+      const slotNumber = typeof fromSlot === 'string' ? parseInt(fromSlot, 10) : fromSlot;
+      if (!isNaN(slotNumber)) {
+        this.fromSlot = slotNumber;
+        console.log(`📍 Set fromSlot to ${slotNumber} for first buy recovery`);
+        
+        // Configure streamer with fromSlot
+        if (this.streamer) {
+          this.streamer.enableAutoReconnect(false); // Disable auto-reconnect when using fromSlot
+          this.streamer.setFromSlot(slotNumber);
+        }
+      }
     }
 
     // Track which sessions are monitoring this token
@@ -795,10 +790,9 @@ class LiquidityPoolMonitor {
     }
     this.tokenToSessions.get(tokenAddress)!.add(sessionKey);
 
-    // Update gRPC subscription if this is a new token
-    if (isNewToken) {
-      await this.updateSubscription();
-    }
+    // Token is now being monitored (updates will come from ladybug streamer)
+    // Start streamer if needed
+    this.updateStreamerAddresses();
 
     // Set timeout for maximum duration
     session.timeoutId = setTimeout(() => {
@@ -949,14 +943,7 @@ class LiquidityPoolMonitor {
         if (wasRemoved) {
           console.log(`➖ Removed token ${tokenAddress.substring(0, 8)}... from monitoring (no active sessions, remaining tokens: ${this.monitoredTokens.size})`);
           
-          // Clear fromSlot if no tokens left
-          if (this.monitoredTokens.size === 0) {
-            this.fromSlot = null;
-            console.log(`📍 Cleared fromSlot (no tokens remaining)`);
-          }
-          
-          // Update subscription to remove this token (this will stop stream if no tokens left)
-          await this.updateSubscription();
+          // Token removed from monitoring
         }
       } else {
         console.log(`ℹ️ Token ${tokenAddress.substring(0, 8)}... still has ${tokenSessions.size} active session(s)`);
@@ -1304,65 +1291,13 @@ class LiquidityPoolMonitor {
   async cleanup(): Promise<void> {
     console.log('🧹 Cleaning up pool monitoring service...');
     
-    this.shouldStop = true;
-    this.isRunning = false;
-    
-    // Clear old subscription by sending empty subscription request before ending stream
-    if (this.currentStream && this.isStreaming) {
-      try {
-        // Send empty subscription to clear old tokens from server
-        const emptyReq: SubscribeRequest = {
-          slots: {},
-          accounts: {},
-          transactions: {},
-          blocks: {},
-          blocksMeta: {},
-          accountsDataSlice: [],
-          transactionsStatus: {},
-          entry: {}
-        };
-        
-        // Send empty subscription to clear old subscription
-        await new Promise<void>((resolve) => {
-          try {
-            if (this.currentStream && typeof this.currentStream.write === 'function') {
-              this.currentStream.write(emptyReq, (err: any) => {
-                if (err) {
-                  console.error("Error sending empty subscription:", err);
-                } else {
-                  console.log("✅ Sent empty subscription to clear old tokens");
-                }
-                resolve();
-              });
-            } else {
-              resolve();
-            }
-          } catch (error) {
-            console.error("Error writing empty subscription:", error);
-            resolve();
-          }
-        });
-
-        // Wait a bit for the empty subscription to be processed
-        await new Promise(resolve => setTimeout(resolve, 200));
-
-        // Now end the stream
-        this.currentStream.end();
-      } catch (error) {
-        console.error("Error ending stream:", error);
-      }
-    }
-    
-    // Wait a bit for cleanup
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // Stop the streamer
+    this.stopStreamer();
     
     // Clear all sessions and tokens
     this.sessions.clear();
     this.tokenToSessions.clear();
     this.monitoredTokens.clear();
-    this.fromSlot = null;
-    this.isStreaming = false;
-    this.currentStream = null;
     
     console.log('✅ Pool monitoring service cleaned up');
   }
@@ -1381,11 +1316,11 @@ export class PoolMonitoringService {
     if (!PoolMonitoringService.instance) {
       PoolMonitoringService.instance = new PoolMonitoringService();
       
-      // Create pool monitor (uses Yellowstone gRPC for transaction subscriptions)
+      // Create pool monitor (uses ladybug streaming)
       poolMonitor = new LiquidityPoolMonitor(solanaConnection);
       PoolMonitoringService.instance.monitor = poolMonitor;
       
-      console.log('✅ Pool monitoring service initialized (using Yellowstone gRPC transaction subscriptions)');
+      console.log('✅ Pool monitoring service initialized (using ladybug streaming)');
     }
 
     return PoolMonitoringService.instance;
