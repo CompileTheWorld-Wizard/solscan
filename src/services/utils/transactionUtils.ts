@@ -93,6 +93,8 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
 
     // If no pairs found from compiledInstructions, try innerInstructions
     // In innerInstructions, data might be null, so we only check programId and accounts length
+    // Structure: innerInstructions is an array of instruction objects directly
+    // Each instruction has: outerIndex, programId (string), accounts (array of strings), data (string or null)
     if (pairs.length === 0) {
       const txMeta = tx.meta || tx.transaction?.meta;
       const innerInstructions = txMeta?.innerInstructions || tx.innerInstructions;
@@ -101,53 +103,33 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
         return pairs;
       }
 
-      // Get accountKeys for resolving indices (if needed)
-      const accountKeys = txMessage?.accountKeys || tx.accountKeys || [];
-      const accountKeysLength = accountKeys.length;
-
-      // Process innerInstructions without flattening if possible
+      // Process innerInstructions directly (they're already an array of instructions)
       for (let i = 0; i < innerInstructions.length; i++) {
-        const innerIxGroup = innerInstructions[i];
-        const instructions = innerIxGroup?.instructions || (Array.isArray(innerIxGroup) ? innerIxGroup : null);
+        const ix = innerInstructions[i];
         
-        if (!Array.isArray(instructions)) {
+        // Check if this is a PumpFun instruction (programId is a string address)
+        if (ix.programId !== PUMP_FUN_PROGRAM_ID) {
           continue;
         }
 
-        for (let j = 0; j < instructions.length; j++) {
-          const ix = instructions[j];
-          
-          // Resolve programId (check direct first, then index)
-          let programId: string | null = null;
-          if (ix.programId === PUMP_FUN_PROGRAM_ID) {
-            programId = ix.programId;
-          } else if (typeof ix.programIdIndex === 'number' && accountKeysLength > ix.programIdIndex) {
-            programId = resolveAccount(accountKeys[ix.programIdIndex], accountKeys);
-            if (programId !== PUMP_FUN_PROGRAM_ID) {
-              continue;
-            }
-          } else {
-            continue;
-          }
+        // Extract accounts array - should be array of string addresses
+        const accounts = ix.accounts;
+        if (!Array.isArray(accounts) || accounts.length < 4) {
+          continue;
+        }
 
-          // Extract accounts array - might be indices or addresses
-          const accounts = ix.accounts;
-          if (!Array.isArray(accounts) || accounts.length < 4) {
-            continue;
-          }
+        // accounts[2] is mint, accounts[3] is bonding_curve (both should be string addresses)
+        const mint = accounts[2];
+        const bondingCurve = accounts[3];
 
-          // Resolve account addresses using helper function
-          const mint = resolveAccount(accounts[2], accountKeys);
-          const bondingCurve = resolveAccount(accounts[3], accountKeys);
-
-          // Validate addresses
-          if (mint && bondingCurve) {
-            pairs.push({
-              mint,
-              bondingCurve,
-              instructionName: 'unknown' // Can't determine from innerInstructions
-            });
-          }
+        // Validate addresses (should already be strings in innerInstructions)
+        if (typeof mint === 'string' && mint.length > 0 && 
+            typeof bondingCurve === 'string' && bondingCurve.length > 0) {
+          pairs.push({
+            mint,
+            bondingCurve,
+            instructionName: 'unknown' // Can't determine buy/sell from innerInstructions (data is null or base64)
+          });
         }
       }
     }
