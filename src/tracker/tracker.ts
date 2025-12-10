@@ -373,32 +373,32 @@ class TransactionTracker {
       if (marketCapData) {
         console.log(`🔍 [TRACKER WALLET] Building marketData from marketCapData: marketCap=${marketCapData.marketCap}, totalSupply=${marketCapData.totalSupply}, tokenPriceUsd=${marketCapData.tokenPriceUsd}`);
         
+        // Determine decimals based on platform
+        // PumpFun and PumpAmm tokens always use 6 decimals
+        const isPumpFunOrPumpAmm = result.platform === "PumpFun" || result.platform === "PumpFun Amm";
+        let decimals: number | null = null;
+        
+        if (isPumpFunOrPumpAmm) {
+          decimals = 6; // PumpFun/PumpAmm tokens always use 6 decimals
+          console.log(`🔍 [TRACKER WALLET] PumpFun/PumpAmm token - using fixed decimals: 6`);
+        } else if (tokenAddress) {
+          // For other platforms, fetch decimals from token supply
+          console.log(`🔍 [TRACKER WALLET] Fetching decimals for token ${tokenAddress.substring(0, 8)}...`);
+          const supplyData = await this.getTokenTotalSupply(tokenAddress);
+          if (supplyData) {
+            decimals = supplyData.decimals;
+            console.log(`🔍 [TRACKER WALLET] Set decimals to ${supplyData.decimals}`);
+          } else {
+            console.warn(`⚠️ [TRACKER WALLET] Could not fetch decimals for token ${tokenAddress.substring(0, 8)}...`);
+          }
+        }
+
         marketData = {
           market_cap: marketCapData.marketCap,
           supply: marketCapData.totalSupply ? marketCapData.totalSupply.toString() : null,
           price: marketCapData.tokenPriceUsd,
-          decimals: null // Will be set from token supply data if available
+          decimals: decimals
         };
-
-        // Get decimals from token supply if available
-        // For PumpFun/PumpAmm, use 6 decimals directly
-        if (tokenAddress) {
-          const isPumpFunOrPumpAmm = result.platform === "PumpFun" || result.platform === "PumpFun Amm";
-          
-          if (isPumpFunOrPumpAmm) {
-            marketData.decimals = 6; // PumpFun tokens use 6 decimals
-            console.log(`🔍 [TRACKER WALLET] PumpFun/PumpAmm token - using fixed decimals: 6`);
-          } else {
-            console.log(`🔍 [TRACKER WALLET] Fetching decimals for token ${tokenAddress.substring(0, 8)}...`);
-            const supplyData = await this.getTokenTotalSupply(tokenAddress);
-            if (supplyData) {
-              marketData.decimals = supplyData.decimals;
-              console.log(`🔍 [TRACKER WALLET] Set decimals to ${supplyData.decimals}`);
-            } else {
-              console.warn(`⚠️ [TRACKER WALLET] Could not fetch decimals for token ${tokenAddress.substring(0, 8)}...`);
-            }
-          }
-        }
         
         console.log(`🔍 [TRACKER WALLET] Final marketData: market_cap=${marketData.market_cap}, supply=${marketData.supply}, price=${marketData.price}, decimals=${marketData.decimals}`);
       } else {
@@ -981,6 +981,7 @@ class TransactionTracker {
         // For PumpAmm & pumpfun events, fetch token mint from pool account if not available
         if ((result.type?.toUpperCase() === 'BUY' || result.type?.toUpperCase() === 'SELL') && 
             !tokenAddress && 
+            (result.platform === "PumpFun Amm" || result.platform === "PumpFun") && 
             result.pool) {
           // Fetch token mint asynchronously
           this.fetchTokenMintFromPool(result.pool).then(mint => {
