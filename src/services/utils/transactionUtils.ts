@@ -44,7 +44,7 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
     
     // Cache transaction properties to avoid repeated lookups
     const txMessage = tx.transaction?.message || tx.message;
-    const compiledInstructions = txMessage?.compiledInstructions || tx.compiledInstructions || txMessage?.instructions;
+    const compiledInstructions = txMessage?.compiledInstructions || txMessage?.instructions;
 
     // First, try to extract from compiledInstructions (with data.name)
     if (Array.isArray(compiledInstructions) && compiledInstructions.length > 0) {
@@ -146,8 +146,8 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
 }
 
 /**
- * Match a parsed event with a mint/bonding_curve pair based on mint address
- * Optimized with Map for O(1) lookup instead of O(n) find()
+ * Match a parsed event with a mint/bonding_curve pair based on mint address or instruction name
+ * Optimized with direct iteration for small arrays
  * 
  * @param event - Parsed event (TradeEvent, BuyEvent, or SellEvent)
  * @param pairs - Array of mint/bonding_curve pairs from compiledInstructions
@@ -159,30 +159,68 @@ export function matchEventWithBondingCurve(event: any, pairs: MintBondingCurvePa
   }
 
   try {
-    // Early exit for PumpAmm events (can't match by mint)
     const eventName = event.name;
-    if (eventName === "BuyEvent" || eventName === "SellEvent") {
-      return null;
-    }
 
-    // Extract mint from TradeEvent
-    if (eventName !== "TradeEvent") {
-      return null;
-    }
-
-    const eventMint = event.data?.mint;
-    if (!eventMint) {
-      return null;
-    }
-
-    // Use Map for O(1) lookup instead of O(n) find()
-    // Build map only once if pairs array is reused, but for single lookup, direct iteration is faster
-    // For small arrays (< 10 items), direct iteration is actually faster than Map overhead
-    // For larger arrays, Map would be better, but we'll optimize for common case (1-2 pairs)
-    for (let i = 0; i < pairs.length; i++) {
-      if (pairs[i].mint === eventMint) {
-        return pairs[i].bondingCurve;
+    // For TradeEvent: match by mint address
+    if (eventName === "TradeEvent") {
+      const eventMint = event.data?.mint;
+      if (!eventMint) {
+        return null;
       }
+
+      // Find matching pair by mint address
+      for (let i = 0; i < pairs.length; i++) {
+        if (pairs[i].mint === eventMint) {
+          return pairs[i].bondingCurve;
+        }
+      }
+      return null;
+    }
+
+    // For BuyEvent: match by instruction name 'buy'
+    if (eventName === "BuyEvent") {
+      // Find pairs with instructionName 'buy'
+      const buyPairs = pairs.filter(pair => pair.instructionName === 'buy');
+      if (buyPairs.length === 1) {
+        return buyPairs[0].bondingCurve;
+      }
+      // If multiple buy pairs, try to match by mint if available
+      const eventMint = event.data?.mint;
+      if (eventMint) {
+        for (let i = 0; i < buyPairs.length; i++) {
+          if (buyPairs[i].mint === eventMint) {
+            return buyPairs[i].bondingCurve;
+          }
+        }
+      }
+      // If no mint match, return first buy pair
+      if (buyPairs.length > 0) {
+        return buyPairs[0].bondingCurve;
+      }
+      return null;
+    }
+
+    // For SellEvent: match by instruction name 'sell'
+    if (eventName === "SellEvent") {
+      // Find pairs with instructionName 'sell'
+      const sellPairs = pairs.filter(pair => pair.instructionName === 'sell');
+      if (sellPairs.length === 1) {
+        return sellPairs[0].bondingCurve;
+      }
+      // If multiple sell pairs, try to match by mint if available
+      const eventMint = event.data?.mint;
+      if (eventMint) {
+        for (let i = 0; i < sellPairs.length; i++) {
+          if (sellPairs[i].mint === eventMint) {
+            return sellPairs[i].bondingCurve;
+          }
+        }
+      }
+      // If no mint match, return first sell pair
+      if (sellPairs.length > 0) {
+        return sellPairs[0].bondingCurve;
+      }
+      return null;
     }
 
     return null;
@@ -206,19 +244,13 @@ export function matchEventWithBondingCurve(event: any, pairs: MintBondingCurvePa
  * @returns bonding_curve address or null if not found
  */
 export function extractBondingCurveForEvent(tx: any, event: any): string | null {
-  // Early exit for non-TradeEvent (can't extract bonding curve)
+  // Early exit for unsupported event types
   if (!event || (event.name !== "TradeEvent" && event.name !== "BuyEvent" && event.name !== "SellEvent")) {
-    return null;
-  }
-  
-  // Early exit for PumpAmm events
-  if (event.name === "BuyEvent" || event.name === "SellEvent") {
     return null;
   }
 
   const pairs = extractAllMintBondingCurvePairs(tx);
   if (pairs.length === 0) {
-    console.log(tx)
     return null;
   }
 
