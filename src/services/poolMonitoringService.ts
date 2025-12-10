@@ -517,51 +517,73 @@ class LiquidityPoolMonitor {
       }
 
       // Calculate market cap once for this token (all sessions share the same token)
+      // Check if this is PumpFun or PumpAmm - they have fixed supply of 1 billion (1,000,000,000) with 6 decimals
+      const platform = result.platform;
+      const isPumpFunOrPumpAmm = platform === "PumpFun" || platform === "PumpFun Amm";
+      
       let marketCap = 0;
-      try {
-        console.log(`🔍 [MARKETCAP DEBUG] Starting marketcap calculation for token ${tokenAddress.substring(0, 8)}...`);
+      
+      if (isPumpFunOrPumpAmm) {
+        // PumpFun/PumpAmm tokens have fixed supply of 1 billion
+        const totalSupply = 1_000_000_000; // 1 billion tokens
+        console.log(`🔍 [MARKETCAP DEBUG] PumpFun/PumpAmm token detected (platform: ${platform}) - using fixed supply: ${totalSupply}`);
         console.log(`🔍 [MARKETCAP DEBUG] Price USD: ${priceUsd}, Price SOL: ${tokenPriceSol}`);
         
-        const mintPublicKey = new PublicKey(tokenAddress);
-        console.log(`🔍 [MARKETCAP DEBUG] Fetching token supply for mint: ${tokenAddress}`);
+        marketCap = totalSupply * priceUsd;
+        console.log(`🔍 [MARKETCAP DEBUG] Calculated marketcap: ${totalSupply} * ${priceUsd} = ${marketCap}`);
         
-        const tokenSupply = await this.solanaConnection.getTokenSupply(mintPublicKey);
-        console.log(`🔍 [MARKETCAP DEBUG] Token supply response:`, tokenSupply ? 'exists' : 'null', tokenSupply?.value ? 'has value' : 'no value');
-        
-        if (tokenSupply && tokenSupply.value) {
-          const rawSupply = parseFloat(tokenSupply.value.amount);
-          const decimals = tokenSupply.value.decimals;
-          console.log(`🔍 [MARKETCAP DEBUG] Raw supply: ${rawSupply}, Decimals: ${decimals}`);
+        if (marketCap === 0 || isNaN(marketCap) || !isFinite(marketCap)) {
+          console.warn(`⚠️ [MARKETCAP DEBUG] Invalid marketcap result: ${marketCap} (totalSupply: ${totalSupply}, priceUsd: ${priceUsd})`);
+        } else {
+          console.log(`✅ [MARKETCAP DEBUG] Successfully calculated marketcap: $${marketCap.toFixed(2)}`);
+        }
+      } else {
+        // For other platforms, fetch token supply from RPC
+        try {
+          console.log(`🔍 [MARKETCAP DEBUG] Starting marketcap calculation for token ${tokenAddress.substring(0, 8)}...`);
+          console.log(`🔍 [MARKETCAP DEBUG] Price USD: ${priceUsd}, Price SOL: ${tokenPriceSol}`);
           
-          if (isNaN(rawSupply) || !isFinite(rawSupply) || rawSupply <= 0) {
-            console.warn(`⚠️ [MARKETCAP DEBUG] Invalid raw supply: ${rawSupply}`);
-          } else if (isNaN(decimals) || decimals < 0 || decimals > 18) {
-            console.warn(`⚠️ [MARKETCAP DEBUG] Invalid decimals: ${decimals}`);
-          } else {
-            const totalSupply = rawSupply / Math.pow(10, decimals);
-            console.log(`🔍 [MARKETCAP DEBUG] Total supply (after decimals): ${totalSupply}`);
+          const mintPublicKey = new PublicKey(tokenAddress);
+          console.log(`🔍 [MARKETCAP DEBUG] Fetching token supply for mint: ${tokenAddress}`);
+          
+          const tokenSupply = await this.solanaConnection.getTokenSupply(mintPublicKey);
+          console.log(`🔍 [MARKETCAP DEBUG] Token supply response:`, tokenSupply ? 'exists' : 'null', tokenSupply?.value ? 'has value' : 'no value');
+          
+          if (tokenSupply && tokenSupply.value) {
+            const rawSupply = parseFloat(tokenSupply.value.amount);
+            const decimals = tokenSupply.value.decimals;
+            console.log(`🔍 [MARKETCAP DEBUG] Raw supply: ${rawSupply}, Decimals: ${decimals}`);
             
-            if (totalSupply <= 0 || !isFinite(totalSupply)) {
-              console.warn(`⚠️ [MARKETCAP DEBUG] Invalid total supply: ${totalSupply}`);
+            if (isNaN(rawSupply) || !isFinite(rawSupply) || rawSupply <= 0) {
+              console.warn(`⚠️ [MARKETCAP DEBUG] Invalid raw supply: ${rawSupply}`);
+            } else if (isNaN(decimals) || decimals < 0 || decimals > 18) {
+              console.warn(`⚠️ [MARKETCAP DEBUG] Invalid decimals: ${decimals}`);
             } else {
-              marketCap = totalSupply * priceUsd;
-              console.log(`🔍 [MARKETCAP DEBUG] Calculated marketcap: ${totalSupply} * ${priceUsd} = ${marketCap}`);
+              const totalSupply = rawSupply / Math.pow(10, decimals);
+              console.log(`🔍 [MARKETCAP DEBUG] Total supply (after decimals): ${totalSupply}`);
               
-              if (marketCap === 0 || isNaN(marketCap) || !isFinite(marketCap)) {
-                console.warn(`⚠️ [MARKETCAP DEBUG] Invalid marketcap result: ${marketCap} (totalSupply: ${totalSupply}, priceUsd: ${priceUsd})`);
+              if (totalSupply <= 0 || !isFinite(totalSupply)) {
+                console.warn(`⚠️ [MARKETCAP DEBUG] Invalid total supply: ${totalSupply}`);
               } else {
-                console.log(`✅ [MARKETCAP DEBUG] Successfully calculated marketcap: $${marketCap.toFixed(2)}`);
+                marketCap = totalSupply * priceUsd;
+                console.log(`🔍 [MARKETCAP DEBUG] Calculated marketcap: ${totalSupply} * ${priceUsd} = ${marketCap}`);
+                
+                if (marketCap === 0 || isNaN(marketCap) || !isFinite(marketCap)) {
+                  console.warn(`⚠️ [MARKETCAP DEBUG] Invalid marketcap result: ${marketCap} (totalSupply: ${totalSupply}, priceUsd: ${priceUsd})`);
+                } else {
+                  console.log(`✅ [MARKETCAP DEBUG] Successfully calculated marketcap: $${marketCap.toFixed(2)}`);
+                }
               }
             }
+          } else {
+            console.warn(`⚠️ [MARKETCAP DEBUG] Token supply is null or missing value. tokenSupply:`, tokenSupply);
           }
-        } else {
-          console.warn(`⚠️ [MARKETCAP DEBUG] Token supply is null or missing value. tokenSupply:`, tokenSupply);
-        }
-      } catch (error) {
-        console.error(`❌ [MARKETCAP DEBUG] Failed to fetch token supply for ${tokenAddress.substring(0, 8)}...:`, error);
-        if (error instanceof Error) {
-          console.error(`❌ [MARKETCAP DEBUG] Error message: ${error.message}`);
-          console.error(`❌ [MARKETCAP DEBUG] Error stack: ${error.stack}`);
+        } catch (error) {
+          console.error(`❌ [MARKETCAP DEBUG] Failed to fetch token supply for ${tokenAddress.substring(0, 8)}...:`, error);
+          if (error instanceof Error) {
+            console.error(`❌ [MARKETCAP DEBUG] Error message: ${error.message}`);
+            console.error(`❌ [MARKETCAP DEBUG] Error stack: ${error.stack}`);
+          }
         }
       }
 

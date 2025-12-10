@@ -194,7 +194,8 @@ class TransactionTracker {
         }
 
         // Calculate market cap, total supply, and token prices
-        const marketCapData = await this.calculateMarketCapData(signature, tokenPriceSol, tokenAddress);
+        // Pass platform to determine if it's PumpFun/PumpAmm (fixed supply of 1B)
+        const marketCapData = await this.calculateMarketCapData(signature, tokenPriceSol, tokenAddress, result.platform);
 
         // Update transaction with market cap data
         if (marketCapData) {
@@ -235,11 +236,13 @@ class TransactionTracker {
 
   /**
    * Calculate market cap data from token price in SOL
+   * @param platform - Platform name (e.g., "PumpFun", "PumpFun Amm") to determine if fixed supply should be used
    */
   private async calculateMarketCapData(
     transactionId: string,
     tokenPriceSol: number,
-    tokenAddress: string
+    tokenAddress: string,
+    platform?: string
   ): Promise<{ marketCap: number | null; totalSupply: number | null; tokenPriceUsd: number | null } | null> {
     try {
       console.log(`🔍 [TRACKER MARKETCAP] Starting marketcap calculation for tx ${transactionId.substring(0, 8)}...`);
@@ -268,32 +271,54 @@ class TransactionTracker {
         return null;
       }
 
-      // Get token total supply
-      console.log(`🔍 [TRACKER MARKETCAP] Fetching token supply for ${tokenAddress.substring(0, 8)}...`);
-      const supplyData = await this.getTokenTotalSupply(tokenAddress);
-
+      // Check if this is PumpFun or PumpAmm - they have fixed supply of 1 billion (1,000,000,000) with 6 decimals
+      const isPumpFunOrPumpAmm = platform === "PumpFun" || platform === "PumpFun Amm";
+      
       let marketCap: number | null = null;
       let totalSupply: number | null = null;
+      let decimals: number = 6; // Default for PumpFun tokens
 
-      if (supplyData) {
-        totalSupply = supplyData.supply;
-        console.log(`🔍 [TRACKER MARKETCAP] Token supply: ${totalSupply}, Decimals: ${supplyData.decimals}`);
+      if (isPumpFunOrPumpAmm) {
+        // PumpFun/PumpAmm tokens have fixed supply of 1 billion
+        totalSupply = 1_000_000_000; // 1 billion tokens
+        decimals = 6; // PumpFun tokens use 6 decimals
+        console.log(`🔍 [TRACKER MARKETCAP] PumpFun/PumpAmm token detected - using fixed supply: ${totalSupply} (decimals: ${decimals})`);
         
-        if (!totalSupply || isNaN(totalSupply) || !isFinite(totalSupply) || totalSupply <= 0) {
-          console.warn(`⚠️ [TRACKER MARKETCAP] Invalid totalSupply: ${totalSupply}`);
+        // Calculate market cap = total supply * token price in USD
+        marketCap = totalSupply * tokenPriceUsd;
+        console.log(`🔍 [TRACKER MARKETCAP] Calculated marketcap: ${totalSupply} * ${tokenPriceUsd} = ${marketCap}`);
+        
+        if (marketCap === 0 || isNaN(marketCap) || !isFinite(marketCap)) {
+          console.warn(`⚠️ [TRACKER MARKETCAP] Invalid marketcap result: ${marketCap}`);
         } else {
-          // Calculate market cap = total supply * token price in USD
-          marketCap = totalSupply * tokenPriceUsd;
-          console.log(`🔍 [TRACKER MARKETCAP] Calculated marketcap: ${totalSupply} * ${tokenPriceUsd} = ${marketCap}`);
-          
-          if (marketCap === 0 || isNaN(marketCap) || !isFinite(marketCap)) {
-            console.warn(`⚠️ [TRACKER MARKETCAP] Invalid marketcap result: ${marketCap}`);
-          } else {
-            console.log(`✅ [TRACKER MARKETCAP] Successfully calculated marketcap: $${marketCap.toFixed(2)}`);
-          }
+          console.log(`✅ [TRACKER MARKETCAP] Successfully calculated marketcap: $${marketCap.toFixed(2)}`);
         }
       } else {
-        console.warn(`⚠️ [TRACKER MARKETCAP] Token supply data is null - cannot calculate marketcap`);
+        // For other platforms, fetch token supply from RPC
+        console.log(`🔍 [TRACKER MARKETCAP] Fetching token supply from RPC for ${tokenAddress.substring(0, 8)}...`);
+        const supplyData = await this.getTokenTotalSupply(tokenAddress);
+
+        if (supplyData) {
+          totalSupply = supplyData.supply;
+          decimals = supplyData.decimals;
+          console.log(`🔍 [TRACKER MARKETCAP] Token supply: ${totalSupply}, Decimals: ${decimals}`);
+          
+          if (!totalSupply || isNaN(totalSupply) || !isFinite(totalSupply) || totalSupply <= 0) {
+            console.warn(`⚠️ [TRACKER MARKETCAP] Invalid totalSupply: ${totalSupply}`);
+          } else {
+            // Calculate market cap = total supply * token price in USD
+            marketCap = totalSupply * tokenPriceUsd;
+            console.log(`🔍 [TRACKER MARKETCAP] Calculated marketcap: ${totalSupply} * ${tokenPriceUsd} = ${marketCap}`);
+            
+            if (marketCap === 0 || isNaN(marketCap) || !isFinite(marketCap)) {
+              console.warn(`⚠️ [TRACKER MARKETCAP] Invalid marketcap result: ${marketCap}`);
+            } else {
+              console.log(`✅ [TRACKER MARKETCAP] Successfully calculated marketcap: $${marketCap.toFixed(2)}`);
+            }
+          }
+        } else {
+          console.warn(`⚠️ [TRACKER MARKETCAP] Token supply data is null - cannot calculate marketcap`);
+        }
       }
 
       const result = { marketCap, totalSupply, tokenPriceUsd };
@@ -359,14 +384,22 @@ class TransactionTracker {
         };
 
         // Get decimals from token supply if available
+        // For PumpFun/PumpAmm, use 6 decimals directly
         if (tokenAddress) {
-          console.log(`🔍 [TRACKER WALLET] Fetching decimals for token ${tokenAddress.substring(0, 8)}...`);
-          const supplyData = await this.getTokenTotalSupply(tokenAddress);
-          if (supplyData) {
-            marketData.decimals = supplyData.decimals;
-            console.log(`🔍 [TRACKER WALLET] Set decimals to ${supplyData.decimals}`);
+          const isPumpFunOrPumpAmm = result.platform === "PumpFun" || result.platform === "PumpFun Amm";
+          
+          if (isPumpFunOrPumpAmm) {
+            marketData.decimals = 6; // PumpFun tokens use 6 decimals
+            console.log(`🔍 [TRACKER WALLET] PumpFun/PumpAmm token - using fixed decimals: 6`);
           } else {
-            console.warn(`⚠️ [TRACKER WALLET] Could not fetch decimals for token ${tokenAddress.substring(0, 8)}...`);
+            console.log(`🔍 [TRACKER WALLET] Fetching decimals for token ${tokenAddress.substring(0, 8)}...`);
+            const supplyData = await this.getTokenTotalSupply(tokenAddress);
+            if (supplyData) {
+              marketData.decimals = supplyData.decimals;
+              console.log(`🔍 [TRACKER WALLET] Set decimals to ${supplyData.decimals}`);
+            } else {
+              console.warn(`⚠️ [TRACKER WALLET] Could not fetch decimals for token ${tokenAddress.substring(0, 8)}...`);
+            }
           }
         }
         
