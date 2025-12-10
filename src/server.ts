@@ -9,6 +9,7 @@ import crypto from "crypto";
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { setupFileLogging } from "./utils/logger";
 import { dbService } from "./database";
+import { redisService } from "./services/redisService";
 import { tracker } from "./tracker";
 import { tokenService } from "./services/tokenService";
 import { bitqueryService } from "./services";
@@ -22,6 +23,9 @@ declare module "express-session" {
 
 // Setup file logging (must be done early, before any console.log calls)
 setupFileLogging();
+
+// Initialize Redis service
+redisService.initialize();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -2552,7 +2556,7 @@ app.delete("/api/dashboard-filter-presets/:name", requireAuth, async (req, res) 
  */
 app.get("/api/sol-price", requireAuth, async (req, res) => {
   try {
-    const price = await dbService.getLatestSolPrice();
+    const price = await redisService.getLatestSolPrice();
     if (price === null) {
       return res.status(404).json({ success: false, error: 'SOL price not available' });
     }

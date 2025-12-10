@@ -9,6 +9,7 @@ import { SubscribeRequest } from "@triton-one/yellowstone-grpc/dist/types/grpc/g
 import { BorshAccountsCoder } from "@coral-xyz/anchor";
 import { PublicKey, Connection } from "@solana/web3.js";
 import { dbService } from '../database';
+import { redisService } from './redisService';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isObject } from "lodash";
@@ -167,10 +168,10 @@ class LiquidityPoolMonitor {
     decodedData: any
   ): Promise<{ priceSol: number; priceUsd: number; marketCap: number } | null> {
     try {
-      // Get SOL price from database
-      const solPriceUsd = await dbService.getLatestSolPrice();
+      // Get SOL price from Redis
+      const solPriceUsd = await redisService.getLatestSolPrice();
       if (!solPriceUsd) {
-        console.log('⚠️ Failed to fetch SOL price for pool monitoring');
+        console.log('⚠️ Failed to fetch SOL price from Redis for pool monitoring');
         return null;
       }
 
@@ -307,10 +308,10 @@ class LiquidityPoolMonitor {
       // Get pool address from result if available
       const poolAddress = result.pool || null;
 
-      // Get SOL price from database to calculate USD price and market cap
-      const solPriceUsd = await dbService.getLatestSolPrice();
+      // Get SOL price from Redis to calculate USD price and market cap
+      const solPriceUsd = await redisService.getLatestSolPrice();
       if (!solPriceUsd) {
-        console.log('⚠️ Failed to fetch SOL price for pool monitoring');
+        console.log('⚠️ Failed to fetch SOL price from Redis for pool monitoring');
         return;
       }
 

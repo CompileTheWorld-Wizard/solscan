@@ -85,7 +85,7 @@ class DatabaseService {
 
     try {
       const createTableQuery = `
-        CREATE TABLE IF NOT EXISTS transactions (
+        CREATE TABLE IF NOT EXISTS tbl_solscan_transactions (
           id SERIAL PRIMARY KEY,
           transaction_id VARCHAR(100) UNIQUE NOT NULL,
           platform VARCHAR(50) NOT NULL,
@@ -110,20 +110,20 @@ class DatabaseService {
         BEGIN
           IF NOT EXISTS (
             SELECT 1 FROM information_schema.columns 
-            WHERE table_name = 'transactions' AND column_name = 'dev_still_holding'
+            WHERE table_name = 'tbl_solscan_transactions' AND column_name = 'dev_still_holding'
           ) THEN
-            ALTER TABLE transactions ADD COLUMN dev_still_holding BOOLEAN;
+            ALTER TABLE tbl_solscan_transactions ADD COLUMN dev_still_holding BOOLEAN;
           END IF;
         END $$;
 
-        CREATE INDEX IF NOT EXISTS idx_transaction_id ON transactions(transaction_id);
-        CREATE INDEX IF NOT EXISTS idx_platform ON transactions(platform);
-        CREATE INDEX IF NOT EXISTS idx_created_at ON transactions(created_at);
-        CREATE INDEX IF NOT EXISTS idx_fee_payer ON transactions(fee_payer);
-        CREATE INDEX IF NOT EXISTS idx_block_number ON transactions(block_number);
-        CREATE INDEX IF NOT EXISTS idx_block_timestamp ON transactions(block_timestamp);
+        CREATE INDEX IF NOT EXISTS idx_transaction_id ON tbl_solscan_transactions(transaction_id);
+        CREATE INDEX IF NOT EXISTS idx_platform ON tbl_solscan_transactions(platform);
+        CREATE INDEX IF NOT EXISTS idx_created_at ON tbl_solscan_transactions(created_at);
+        CREATE INDEX IF NOT EXISTS idx_fee_payer ON tbl_solscan_transactions(fee_payer);
+        CREATE INDEX IF NOT EXISTS idx_block_number ON tbl_solscan_transactions(block_number);
+        CREATE INDEX IF NOT EXISTS idx_block_timestamp ON tbl_solscan_transactions(block_timestamp);
 
-        CREATE TABLE IF NOT EXISTS tokens (
+        CREATE TABLE IF NOT EXISTS tbl_solscan_tokens (
           id SERIAL PRIMARY KEY,
           mint_address VARCHAR(100) UNIQUE NOT NULL,
           creator VARCHAR(100),
@@ -151,19 +151,19 @@ class DatabaseService {
         BEGIN
           IF NOT EXISTS (
             SELECT 1 FROM information_schema.columns 
-            WHERE table_name = 'tokens' AND column_name = 'creator_token_count'
+            WHERE table_name = 'tbl_solscan_tokens' AND column_name = 'creator_token_count'
           ) THEN
-            ALTER TABLE tokens ADD COLUMN creator_token_count INTEGER;
+            ALTER TABLE tbl_solscan_tokens ADD COLUMN creator_token_count INTEGER;
           END IF;
         END $$;
 
-        CREATE INDEX IF NOT EXISTS idx_mint_address ON tokens(mint_address);
-        CREATE INDEX IF NOT EXISTS idx_creator ON tokens(creator);
-        CREATE INDEX IF NOT EXISTS idx_tokens_created_at ON tokens(created_at);
-        CREATE INDEX IF NOT EXISTS idx_dev_buy_timestamp ON tokens(dev_buy_timestamp);
-        CREATE INDEX IF NOT EXISTS idx_dev_buy_block_number ON tokens(dev_buy_block_number);
+        CREATE INDEX IF NOT EXISTS idx_mint_address ON tbl_solscan_tokens(mint_address);
+        CREATE INDEX IF NOT EXISTS idx_creator ON tbl_solscan_tokens(creator);
+        CREATE INDEX IF NOT EXISTS idx_tokens_created_at ON tbl_solscan_tokens(created_at);
+        CREATE INDEX IF NOT EXISTS idx_dev_buy_timestamp ON tbl_solscan_tokens(dev_buy_timestamp);
+        CREATE INDEX IF NOT EXISTS idx_dev_buy_block_number ON tbl_solscan_tokens(dev_buy_block_number);
 
-        CREATE TABLE IF NOT EXISTS skip_tokens (
+        CREATE TABLE IF NOT EXISTS tbl_solscan_skip_tokens (
           id SERIAL PRIMARY KEY,
           mint_address VARCHAR(100) UNIQUE NOT NULL,
           symbol VARCHAR(50),
@@ -171,9 +171,9 @@ class DatabaseService {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
-        CREATE INDEX IF NOT EXISTS idx_skip_mint_address ON skip_tokens(mint_address);
+        CREATE INDEX IF NOT EXISTS idx_skip_mint_address ON tbl_solscan_skip_tokens(mint_address);
 
-        CREATE TABLE IF NOT EXISTS wallets (
+        CREATE TABLE IF NOT EXISTS tbl_solscan_wallets (
           id SERIAL PRIMARY KEY,
           wallet_address VARCHAR(100) NOT NULL,
           token_address VARCHAR(100) NOT NULL,
@@ -192,11 +192,11 @@ class DatabaseService {
           UNIQUE(wallet_address, token_address)
         );
 
-        CREATE INDEX IF NOT EXISTS idx_wallet_address ON wallets(wallet_address);
-        CREATE INDEX IF NOT EXISTS idx_token_address ON wallets(token_address);
-        CREATE INDEX IF NOT EXISTS idx_wallet_token ON wallets(wallet_address, token_address);
-        CREATE INDEX IF NOT EXISTS idx_wallets_first_buy ON wallets(first_buy_timestamp);
-        CREATE INDEX IF NOT EXISTS idx_wallets_first_sell ON wallets(first_sell_timestamp);
+        CREATE INDEX IF NOT EXISTS idx_wallet_address ON tbl_solscan_wallets(wallet_address);
+        CREATE INDEX IF NOT EXISTS idx_token_address ON tbl_solscan_wallets(token_address);
+        CREATE INDEX IF NOT EXISTS idx_wallet_token ON tbl_solscan_wallets(wallet_address, token_address);
+        CREATE INDEX IF NOT EXISTS idx_wallets_first_buy ON tbl_solscan_wallets(first_buy_timestamp);
+        CREATE INDEX IF NOT EXISTS idx_wallets_first_sell ON tbl_solscan_wallets(first_sell_timestamp);
 
         -- Drop wallet_stats table if it exists (no longer used)
         DROP TABLE IF EXISTS wallet_stats;
@@ -208,7 +208,7 @@ class DatabaseService {
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
-        CREATE TABLE IF NOT EXISTS dashboard_filter_presets (
+        CREATE TABLE IF NOT EXISTS tbl_solscan_dashboard_filter_presets (
           id SERIAL PRIMARY KEY,
           name VARCHAR(255) UNIQUE NOT NULL,
           filters_json JSONB NOT NULL,
@@ -216,7 +216,7 @@ class DatabaseService {
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
-        CREATE INDEX IF NOT EXISTS idx_filter_preset_name ON dashboard_filter_presets(name);
+        CREATE INDEX IF NOT EXISTS idx_filter_preset_name ON tbl_solscan_dashboard_filter_presets(name);
         
         -- Migration: Convert old format to new format and remove old columns
         DO $$ 
@@ -224,13 +224,13 @@ class DatabaseService {
           -- Add filters_json column if it doesn't exist
           IF NOT EXISTS (
             SELECT 1 FROM information_schema.columns 
-            WHERE table_name = 'dashboard_filter_presets' 
+            WHERE table_name = 'tbl_solscan_dashboard_filter_presets' 
             AND column_name = 'filters_json'
           ) THEN
-            ALTER TABLE dashboard_filter_presets ADD COLUMN filters_json JSONB;
+            ALTER TABLE tbl_solscan_dashboard_filter_presets ADD COLUMN filters_json JSONB;
             
             -- Migrate old format data to new format
-            UPDATE dashboard_filter_presets
+            UPDATE tbl_solscan_dashboard_filter_presets
             SET filters_json = jsonb_build_array(
               CASE 
                 WHEN dev_buy_size_min IS NOT NULL OR dev_buy_size_max IS NOT NULL THEN
@@ -275,7 +275,7 @@ class DatabaseService {
             WHERE filters_json IS NULL;
             
             -- Remove NULL entries from array
-            UPDATE dashboard_filter_presets
+            UPDATE tbl_solscan_dashboard_filter_presets
             SET filters_json = (
               SELECT jsonb_agg(elem)
               FROM jsonb_array_elements(filters_json) elem
@@ -287,15 +287,15 @@ class DatabaseService {
           -- Remove old columns if they exist (for existing databases)
           IF EXISTS (
             SELECT 1 FROM information_schema.columns 
-            WHERE table_name = 'dashboard_filter_presets' 
+            WHERE table_name = 'tbl_solscan_dashboard_filter_presets' 
             AND column_name = 'dev_buy_size_min'
           ) THEN
-            ALTER TABLE dashboard_filter_presets DROP COLUMN IF EXISTS dev_buy_size_min;
-            ALTER TABLE dashboard_filter_presets DROP COLUMN IF EXISTS dev_buy_size_max;
-            ALTER TABLE dashboard_filter_presets DROP COLUMN IF EXISTS buy_size_min;
-            ALTER TABLE dashboard_filter_presets DROP COLUMN IF EXISTS buy_size_max;
-            ALTER TABLE dashboard_filter_presets DROP COLUMN IF EXISTS pnl_min;
-            ALTER TABLE dashboard_filter_presets DROP COLUMN IF EXISTS pnl_max;
+            ALTER TABLE tbl_solscan_dashboard_filter_presets DROP COLUMN IF EXISTS dev_buy_size_min;
+            ALTER TABLE tbl_solscan_dashboard_filter_presets DROP COLUMN IF EXISTS dev_buy_size_max;
+            ALTER TABLE tbl_solscan_dashboard_filter_presets DROP COLUMN IF EXISTS buy_size_min;
+            ALTER TABLE tbl_solscan_dashboard_filter_presets DROP COLUMN IF EXISTS buy_size_max;
+            ALTER TABLE tbl_solscan_dashboard_filter_presets DROP COLUMN IF EXISTS pnl_min;
+            ALTER TABLE tbl_solscan_dashboard_filter_presets DROP COLUMN IF EXISTS pnl_max;
           END IF;
         END $$;
       `;
@@ -304,13 +304,13 @@ class DatabaseService {
 
       // Migration: Add total_supply column if it doesn't exist (for existing databases)
       try {
-        const hasTotalSupply = await this.columnExists('transactions', 'total_supply');
+        const hasTotalSupply = await this.columnExists('tbl_solscan_transactions', 'total_supply');
         if (!hasTotalSupply) {
           await this.pool.query(`
-            ALTER TABLE transactions 
+            ALTER TABLE tbl_solscan_transactions 
             ADD COLUMN total_supply NUMERIC(40, 0)
           `);
-          console.log('✅ Added total_supply column to transactions table');
+          console.log('✅ Added total_supply column to tbl_solscan_transactions table');
         }
       } catch (error) {
         console.warn('⚠️ Failed to add total_supply column (may already exist):', error);
@@ -318,26 +318,26 @@ class DatabaseService {
 
       // Migration: Add token_price_sol and token_price_usd columns if they don't exist
       try {
-        const hasTokenPriceSol = await this.columnExists('transactions', 'token_price_sol');
+        const hasTokenPriceSol = await this.columnExists('tbl_solscan_transactions', 'token_price_sol');
         if (!hasTokenPriceSol) {
           await this.pool.query(`
-            ALTER TABLE transactions 
+            ALTER TABLE tbl_solscan_transactions 
             ADD COLUMN token_price_sol NUMERIC(20, 9)
           `);
-          console.log('✅ Added token_price_sol column to transactions table');
+          console.log('✅ Added token_price_sol column to tbl_solscan_transactions table');
         }
       } catch (error) {
         console.warn('⚠️ Failed to add token_price_sol column (may already exist):', error);
       }
 
       try {
-        const hasTokenPriceUsd = await this.columnExists('transactions', 'token_price_usd');
+        const hasTokenPriceUsd = await this.columnExists('tbl_solscan_transactions', 'token_price_usd');
         if (!hasTokenPriceUsd) {
           await this.pool.query(`
-            ALTER TABLE transactions 
+            ALTER TABLE tbl_solscan_transactions 
             ADD COLUMN token_price_usd NUMERIC(20, 9)
           `);
-          console.log('✅ Added token_price_usd column to transactions table');
+          console.log('✅ Added token_price_usd column to tbl_solscan_transactions table');
         }
       } catch (error) {
         console.warn('⚠️ Failed to add token_price_usd column (may already exist):', error);
@@ -345,10 +345,10 @@ class DatabaseService {
 
       // Migration: Add peak price columns to wallets table
       try {
-        const hasPeakBuyToSellPriceSol = await this.columnExists('wallets', 'peak_buy_to_sell_price_sol');
+        const hasPeakBuyToSellPriceSol = await this.columnExists('tbl_solscan_wallets', 'peak_buy_to_sell_price_sol');
         if (!hasPeakBuyToSellPriceSol) {
           await this.pool.query(`
-            ALTER TABLE wallets 
+            ALTER TABLE tbl_solscan_wallets 
             ADD COLUMN peak_buy_to_sell_price_sol NUMERIC(20, 9),
             ADD COLUMN peak_buy_to_sell_price_usd NUMERIC(20, 9),
             ADD COLUMN peak_buy_to_sell_mcap NUMERIC(20, 2),
@@ -356,7 +356,7 @@ class DatabaseService {
             ADD COLUMN peak_sell_to_end_price_usd NUMERIC(20, 9),
             ADD COLUMN peak_sell_to_end_mcap NUMERIC(20, 2)
           `);
-          console.log('✅ Added peak price columns to wallets table');
+          console.log('✅ Added peak price columns to tbl_solscan_wallets table');
         }
       } catch (error) {
         console.warn('⚠️ Failed to add peak price columns (may already exist):', error);
@@ -364,13 +364,13 @@ class DatabaseService {
 
       // Migration: Add open_position_count column to wallets table if it doesn't exist
       try {
-        const hasOpenPositionCount = await this.columnExists('wallets', 'open_position_count');
+        const hasOpenPositionCount = await this.columnExists('tbl_solscan_wallets', 'open_position_count');
         if (!hasOpenPositionCount) {
           await this.pool.query(`
-            ALTER TABLE wallets 
+            ALTER TABLE tbl_solscan_wallets 
             ADD COLUMN open_position_count INTEGER
           `);
-          console.log('✅ Added open_position_count column to wallets table');
+          console.log('✅ Added open_position_count column to tbl_solscan_wallets table');
         }
       } catch (error) {
         console.warn('⚠️ Failed to add open_position_count column (may already exist):', error);
@@ -378,13 +378,13 @@ class DatabaseService {
 
       // Migration: Add price_timeseries JSONB column to wallets table if it doesn't exist
       try {
-        const hasPriceTimeseries = await this.columnExists('wallets', 'price_timeseries');
+        const hasPriceTimeseries = await this.columnExists('tbl_solscan_wallets', 'price_timeseries');
         if (!hasPriceTimeseries) {
           await this.pool.query(`
-            ALTER TABLE wallets 
+            ALTER TABLE tbl_solscan_wallets 
             ADD COLUMN price_timeseries JSONB DEFAULT '[]'::jsonb
           `);
-          console.log('✅ Added price_timeseries JSONB column to wallets table');
+          console.log('✅ Added price_timeseries JSONB column to tbl_solscan_wallets table');
         }
       } catch (error) {
         console.warn('⚠️ Failed to add price_timeseries column (may already exist):', error);
@@ -392,14 +392,14 @@ class DatabaseService {
 
       // Migration: Add buy count columns to wallets table if they don't exist
       try {
-        const hasBuysBeforeFirstSell = await this.columnExists('wallets', 'buys_before_first_sell');
+        const hasBuysBeforeFirstSell = await this.columnExists('tbl_solscan_wallets', 'buys_before_first_sell');
         if (!hasBuysBeforeFirstSell) {
           await this.pool.query(`
-            ALTER TABLE wallets 
+            ALTER TABLE tbl_solscan_wallets 
             ADD COLUMN buys_before_first_sell INTEGER DEFAULT 0,
             ADD COLUMN buys_after_first_sell INTEGER DEFAULT 0
           `);
-          console.log('✅ Added buy count columns (buys_before_first_sell, buys_after_first_sell) to wallets table');
+          console.log('✅ Added buy count columns (buys_before_first_sell, buys_after_first_sell) to tbl_solscan_wallets table');
         }
       } catch (error) {
         console.warn('⚠️ Failed to add buy count columns (may already exist):', error);
@@ -430,7 +430,7 @@ class DatabaseService {
         : null;
 
       const query = `
-        INSERT INTO transactions (
+        INSERT INTO tbl_solscan_transactions (
           transaction_id,
           platform,
           type,
@@ -492,7 +492,7 @@ class DatabaseService {
   ): Promise<void> {
     try {
       const query = `
-        UPDATE transactions
+        UPDATE tbl_solscan_transactions
         SET market_cap = $2, 
             total_supply = $3,
             token_price_sol = $4,
@@ -521,7 +521,7 @@ class DatabaseService {
   ): Promise<void> {
     try {
       const query = `
-        UPDATE transactions
+        UPDATE tbl_solscan_transactions
         SET dev_still_holding = $2
         WHERE transaction_id = $1
       `;
@@ -607,9 +607,9 @@ class DatabaseService {
           token_to.token_name as "mint_to_name",
           token_to.image as "mint_to_image",
           token_to.symbol as "mint_to_symbol"
-        FROM transactions t
-        LEFT JOIN tokens token_from ON t.mint_from = token_from.mint_address
-        LEFT JOIN tokens token_to ON t.mint_to = token_to.mint_address
+        FROM tbl_solscan_transactions t
+        LEFT JOIN tbl_solscan_tokens token_from ON t.mint_from = token_from.mint_address
+        LEFT JOIN tbl_solscan_tokens token_to ON t.mint_to = token_to.mint_address
       `;
 
       const params: any[] = [];
@@ -669,7 +669,7 @@ class DatabaseService {
    */
   async getTransactionCount(fromDate?: string, toDate?: string, walletAddresses?: string[] | null): Promise<number> {
     try {
-      let query = 'SELECT COUNT(*) as count FROM transactions t';
+      let query = 'SELECT COUNT(*) as count FROM tbl_solscan_transactions t';
       const params: any[] = [];
       const conditions: string[] = [];
       let paramCount = 0;
@@ -774,7 +774,7 @@ class DatabaseService {
             ELSE 0 
           END), 0) as total_sell_amount_sol,
           COALESCE(SUM(COALESCE(tip_amount, 0) + COALESCE(fee_amount, 0)), 0) as total_gas_fees
-        FROM transactions
+        FROM tbl_solscan_transactions
         WHERE fee_payer = $1
         GROUP BY ${groupBy}
         ORDER BY period ASC
@@ -848,7 +848,7 @@ class DatabaseService {
         SELECT 
           type,
           COUNT(*) as count
-        FROM transactions
+        FROM tbl_solscan_transactions
         WHERE fee_payer = $1 AND (LOWER(type) = 'buy' OR LOWER(type) = 'sell')
         GROUP BY type
       `;
@@ -886,7 +886,7 @@ class DatabaseService {
       const query = `
         SELECT 
           AVG(open_position_count) as avg_open_position
-        FROM wallets
+        FROM tbl_solscan_wallets
         WHERE wallet_address = $1
           AND open_position_count IS NOT NULL
       `;
@@ -910,7 +910,7 @@ class DatabaseService {
     try {
       const query = `
         SELECT created_at
-        FROM transactions
+        FROM tbl_solscan_transactions
         WHERE fee_payer = $1
         ORDER BY created_at ASC
         LIMIT 1
@@ -951,7 +951,7 @@ class DatabaseService {
           t.block_timestamp as "blockTimestamp",
           t.dev_still_holding as "devStillHolding",
           t.created_at
-        FROM transactions t
+        FROM tbl_solscan_transactions t
         WHERE t.fee_payer = $1
           AND (
             (t.mint_from = $2 AND t.mint_to = $3) OR
@@ -974,10 +974,10 @@ class DatabaseService {
   async saveToken(tokenData: TokenData): Promise<void> {
     try {
       // Check if social link columns exist
-      const hasTwitter = await this.columnExists('tokens', 'twitter');
-      const hasWebsite = await this.columnExists('tokens', 'website');
-      const hasDiscord = await this.columnExists('tokens', 'discord');
-      const hasTelegram = await this.columnExists('tokens', 'telegram');
+      const hasTwitter = await this.columnExists('tbl_solscan_tokens', 'twitter');
+      const hasWebsite = await this.columnExists('tbl_solscan_tokens', 'website');
+      const hasDiscord = await this.columnExists('tbl_solscan_tokens', 'discord');
+      const hasTelegram = await this.columnExists('tbl_solscan_tokens', 'telegram');
 
       // Build columns and values dynamically
       const columns: string[] = [
@@ -1046,36 +1046,36 @@ class DatabaseService {
 
       // Build UPDATE clause
       const updateClauses: string[] = [
-        'creator = COALESCE(EXCLUDED.creator, tokens.creator)',
-        'dev_buy_amount = COALESCE(EXCLUDED.dev_buy_amount, tokens.dev_buy_amount)',
-        'dev_buy_amount_decimal = COALESCE(EXCLUDED.dev_buy_amount_decimal, tokens.dev_buy_amount_decimal)',
-        'dev_buy_used_token = COALESCE(EXCLUDED.dev_buy_used_token, tokens.dev_buy_used_token)',
-        'dev_buy_token_amount = COALESCE(EXCLUDED.dev_buy_token_amount, tokens.dev_buy_token_amount)',
-        'dev_buy_token_amount_decimal = COALESCE(EXCLUDED.dev_buy_token_amount_decimal, tokens.dev_buy_token_amount_decimal)',
-        'dev_buy_timestamp = COALESCE(EXCLUDED.dev_buy_timestamp, tokens.dev_buy_timestamp)',
-        'dev_buy_block_number = COALESCE(EXCLUDED.dev_buy_block_number, tokens.dev_buy_block_number)',
-        'token_name = COALESCE(EXCLUDED.token_name, tokens.token_name)',
-        'symbol = COALESCE(EXCLUDED.symbol, tokens.symbol)',
-        'image = COALESCE(EXCLUDED.image, tokens.image)',
+        'creator = COALESCE(EXCLUDED.creator, tbl_solscan_tokens.creator)',
+        'dev_buy_amount = COALESCE(EXCLUDED.dev_buy_amount, tbl_solscan_tokens.dev_buy_amount)',
+        'dev_buy_amount_decimal = COALESCE(EXCLUDED.dev_buy_amount_decimal, tbl_solscan_tokens.dev_buy_amount_decimal)',
+        'dev_buy_used_token = COALESCE(EXCLUDED.dev_buy_used_token, tbl_solscan_tokens.dev_buy_used_token)',
+        'dev_buy_token_amount = COALESCE(EXCLUDED.dev_buy_token_amount, tbl_solscan_tokens.dev_buy_token_amount)',
+        'dev_buy_token_amount_decimal = COALESCE(EXCLUDED.dev_buy_token_amount_decimal, tbl_solscan_tokens.dev_buy_token_amount_decimal)',
+        'dev_buy_timestamp = COALESCE(EXCLUDED.dev_buy_timestamp, tbl_solscan_tokens.dev_buy_timestamp)',
+        'dev_buy_block_number = COALESCE(EXCLUDED.dev_buy_block_number, tbl_solscan_tokens.dev_buy_block_number)',
+        'token_name = COALESCE(EXCLUDED.token_name, tbl_solscan_tokens.token_name)',
+        'symbol = COALESCE(EXCLUDED.symbol, tbl_solscan_tokens.symbol)',
+        'image = COALESCE(EXCLUDED.image, tbl_solscan_tokens.image)',
       ];
 
       if (hasTwitter) {
-        updateClauses.push('twitter = COALESCE(EXCLUDED.twitter, tokens.twitter)');
+        updateClauses.push('twitter = COALESCE(EXCLUDED.twitter, tbl_solscan_tokens.twitter)');
       }
       if (hasWebsite) {
-        updateClauses.push('website = COALESCE(EXCLUDED.website, tokens.website)');
+        updateClauses.push('website = COALESCE(EXCLUDED.website, tbl_solscan_tokens.website)');
       }
       if (hasDiscord) {
-        updateClauses.push('discord = COALESCE(EXCLUDED.discord, tokens.discord)');
+        updateClauses.push('discord = COALESCE(EXCLUDED.discord, tbl_solscan_tokens.discord)');
       }
       if (hasTelegram) {
-        updateClauses.push('telegram = COALESCE(EXCLUDED.telegram, tokens.telegram)');
+        updateClauses.push('telegram = COALESCE(EXCLUDED.telegram, tbl_solscan_tokens.telegram)');
       }
 
       updateClauses.push('updated_at = CURRENT_TIMESTAMP');
 
       const query = `
-        INSERT INTO tokens (
+        INSERT INTO tbl_solscan_tokens (
           ${columns.join(', ')}
         ) VALUES (${placeholders})
         ON CONFLICT (mint_address) 
@@ -1097,7 +1097,7 @@ class DatabaseService {
   async updateCreatorTokenCount(tokenAddress: string, creatorAddress: string, tokenCount: number): Promise<void> {
     try {
       // Check if creator_token_count column exists
-      const hasCreatorTokenCount = await this.columnExists('tokens', 'creator_token_count');
+      const hasCreatorTokenCount = await this.columnExists('tbl_solscan_tokens', 'creator_token_count');
       
       if (!hasCreatorTokenCount) {
         console.log(`⚠️ creator_token_count column does not exist, skipping update`);
@@ -1107,7 +1107,7 @@ class DatabaseService {
       // Update the token's creator_token_count by mint_address only
       // Also update creator if it's not set or different
       const query = `
-        UPDATE tokens
+        UPDATE tbl_solscan_tokens
         SET 
           creator_token_count = $1,
           creator = COALESCE(creator, $3),
@@ -1154,7 +1154,7 @@ class DatabaseService {
           creator_token_count,
           created_at,
           updated_at
-        FROM tokens
+        FROM tbl_solscan_tokens
         WHERE mint_address = $1
       `;
 
@@ -1201,7 +1201,7 @@ class DatabaseService {
           creator_token_count,
           created_at,
           updated_at
-        FROM tokens
+        FROM tbl_solscan_tokens
         WHERE mint_address = ANY($1)
       `;
 
@@ -1229,7 +1229,7 @@ class DatabaseService {
           dev_buy_token_amount_decimal,
           created_at,
           updated_at
-        FROM tokens
+        FROM tbl_solscan_tokens
         ORDER BY created_at DESC
         LIMIT $1 OFFSET $2
       `;
@@ -1248,7 +1248,7 @@ class DatabaseService {
   async addSkipToken(skipToken: SkipToken): Promise<void> {
     try {
       const query = `
-        INSERT INTO skip_tokens (mint_address, symbol, description)
+        INSERT INTO tbl_solscan_skip_tokens (mint_address, symbol, description)
         VALUES ($1, $2, $3)
         ON CONFLICT (mint_address) DO NOTHING
       `;
@@ -1272,7 +1272,7 @@ class DatabaseService {
    */
   async removeSkipToken(mintAddress: string): Promise<void> {
     try {
-      const query = `DELETE FROM skip_tokens WHERE mint_address = $1`;
+      const query = `DELETE FROM tbl_solscan_skip_tokens WHERE mint_address = $1`;
       await this.pool.query(query, [mintAddress]);
       console.log(`🗑️ Skip token removed: ${mintAddress}`);
     } catch (error: any) {
@@ -1288,7 +1288,7 @@ class DatabaseService {
     try {
       const query = `
         SELECT id, mint_address, symbol, description, created_at
-        FROM skip_tokens
+        FROM tbl_solscan_skip_tokens
         ORDER BY created_at DESC
       `;
 
@@ -1305,7 +1305,7 @@ class DatabaseService {
    */
   async isSkipToken(mintAddress: string): Promise<boolean> {
     try {
-      const query = `SELECT 1 FROM skip_tokens WHERE mint_address = $1`;
+      const query = `SELECT 1 FROM tbl_solscan_skip_tokens WHERE mint_address = $1`;
       const result = await this.pool.query(query, [mintAddress]);
       return result.rows.length > 0;
     } catch (error) {
@@ -1440,7 +1440,7 @@ class DatabaseService {
           // Insert or update first buy info (only if first_buy_timestamp is NULL)
           // Also record open_position_count for this buy event
           const query = `
-            INSERT INTO wallets (
+            INSERT INTO tbl_solscan_wallets (
               wallet_address,
               token_address,
               first_buy_timestamp,
@@ -1452,11 +1452,11 @@ class DatabaseService {
             ) VALUES ($1, $2, CURRENT_TIMESTAMP, $3, $4, $5, $6, $7)
             ON CONFLICT (wallet_address, token_address) 
             DO UPDATE SET
-              first_buy_timestamp = COALESCE(wallets.first_buy_timestamp, CURRENT_TIMESTAMP),
-              first_buy_amount = COALESCE(wallets.first_buy_amount, $3),
-              first_buy_mcap = COALESCE(wallets.first_buy_mcap, $4),
-              first_buy_supply = COALESCE(wallets.first_buy_supply, $5),
-              first_buy_price = COALESCE(wallets.first_buy_price, $6),
+              first_buy_timestamp = COALESCE(tbl_solscan_wallets.first_buy_timestamp, CURRENT_TIMESTAMP),
+              first_buy_amount = COALESCE(tbl_solscan_wallets.first_buy_amount, $3),
+              first_buy_mcap = COALESCE(tbl_solscan_wallets.first_buy_mcap, $4),
+              first_buy_supply = COALESCE(tbl_solscan_wallets.first_buy_supply, $5),
+              first_buy_price = COALESCE(tbl_solscan_wallets.first_buy_price, $6),
               open_position_count = $7
           `;
           await this.pool.query(query, [
@@ -1473,7 +1473,7 @@ class DatabaseService {
         } else if (transactionType === 'SELL') {
           // Insert or update first sell info (only if first_sell_timestamp is NULL)
           const query = `
-            INSERT INTO wallets (
+            INSERT INTO tbl_solscan_wallets (
               wallet_address,
               token_address,
               first_sell_timestamp,
@@ -1484,11 +1484,11 @@ class DatabaseService {
             ) VALUES ($1, $2, CURRENT_TIMESTAMP, $3, $4, $5, $6)
             ON CONFLICT (wallet_address, token_address) 
             DO UPDATE SET
-              first_sell_timestamp = COALESCE(wallets.first_sell_timestamp, CURRENT_TIMESTAMP),
-              first_sell_amount = COALESCE(wallets.first_sell_amount, $3),
-              first_sell_mcap = COALESCE(wallets.first_sell_mcap, $4),
-              first_sell_supply = COALESCE(wallets.first_sell_supply, $5),
-              first_sell_price = COALESCE(wallets.first_sell_price, $6)
+              first_sell_timestamp = COALESCE(tbl_solscan_wallets.first_sell_timestamp, CURRENT_TIMESTAMP),
+              first_sell_amount = COALESCE(tbl_solscan_wallets.first_sell_amount, $3),
+              first_sell_mcap = COALESCE(tbl_solscan_wallets.first_sell_mcap, $4),
+              first_sell_supply = COALESCE(tbl_solscan_wallets.first_sell_supply, $5),
+              first_sell_price = COALESCE(tbl_solscan_wallets.first_sell_price, $6)
           `;
           await this.pool.query(query, [
             walletAddress,
@@ -1529,11 +1529,11 @@ class DatabaseService {
     try {
       if (transactionType === 'BUY') {
         const query = `
-          UPDATE wallets
+          UPDATE tbl_solscan_wallets
           SET 
-            first_buy_mcap = COALESCE(wallets.first_buy_mcap, $1),
-            first_buy_supply = COALESCE(wallets.first_buy_supply, $2),
-            first_buy_price = COALESCE(wallets.first_buy_price, $3)
+            first_buy_mcap = COALESCE(tbl_solscan_wallets.first_buy_mcap, $1),
+            first_buy_supply = COALESCE(tbl_solscan_wallets.first_buy_supply, $2),
+            first_buy_price = COALESCE(tbl_solscan_wallets.first_buy_price, $3)
           WHERE wallet_address = $4 AND token_address = $5
         `;
         await this.pool.query(query, [
@@ -1546,11 +1546,11 @@ class DatabaseService {
         console.log(`✅ Updated BUY market data for ${walletAddress.substring(0, 8)}... - ${tokenAddress.substring(0, 8)}...`);
       } else if (transactionType === 'SELL') {
         const query = `
-          UPDATE wallets
+          UPDATE tbl_solscan_wallets
           SET 
-            first_sell_mcap = COALESCE(wallets.first_sell_mcap, $1),
-            first_sell_supply = COALESCE(wallets.first_sell_supply, $2),
-            first_sell_price = COALESCE(wallets.first_sell_price, $3)
+            first_sell_mcap = COALESCE(tbl_solscan_wallets.first_sell_mcap, $1),
+            first_sell_supply = COALESCE(tbl_solscan_wallets.first_sell_supply, $2),
+            first_sell_price = COALESCE(tbl_solscan_wallets.first_sell_price, $3)
           WHERE wallet_address = $4 AND token_address = $5
         `;
         await this.pool.query(query, [
@@ -1575,7 +1575,7 @@ class DatabaseService {
       // Get total count
       const countQuery = `
         SELECT COUNT(*) as count
-        FROM wallets
+        FROM tbl_solscan_wallets
         WHERE wallet_address = $1
       `;
       const countResult = await this.pool.query(countQuery, [walletAddress]);
@@ -1606,7 +1606,7 @@ class DatabaseService {
           buys_before_first_sell,
           buys_after_first_sell,
           created_at
-        FROM wallets
+        FROM tbl_solscan_wallets
         WHERE wallet_address = $1
         ORDER BY created_at DESC
       `;
@@ -1639,7 +1639,7 @@ class DatabaseService {
       // Cast NUMERIC to ensure proper aggregation
       const query = `
         SELECT COALESCE(SUM(out_amount::NUMERIC), 0)::TEXT as total_amount
-        FROM transactions
+        FROM tbl_solscan_transactions
         WHERE fee_payer = $1
           AND UPPER(TRIM(type)) = 'SELL'
           AND mint_from = $2
@@ -1672,7 +1672,7 @@ class DatabaseService {
       // Cast NUMERIC to ensure proper aggregation
       const query = `
         SELECT COALESCE(SUM(in_amount::NUMERIC), 0)::TEXT as total_amount
-        FROM transactions
+        FROM tbl_solscan_transactions
         WHERE fee_payer = $1
           AND UPPER(TRIM(type)) = 'BUY'
           AND mint_from = $2
@@ -1704,7 +1704,7 @@ class DatabaseService {
       // Cast NUMERIC to ensure proper aggregation
       const query = `
         SELECT COALESCE(SUM(out_amount::NUMERIC), 0)::TEXT as total_amount
-        FROM transactions
+        FROM tbl_solscan_transactions
         WHERE fee_payer = $1
           AND UPPER(TRIM(type)) = 'BUY'
           AND mint_from = $2
@@ -1715,12 +1715,12 @@ class DatabaseService {
       const totalAmountRaw = result.rows[0]?.total_amount || '0';
 
       // Get token decimals if not provided or invalid
-      // Priority: dev_buy_token_amount_decimal (from tokens table) > default 9
+      // Priority: dev_buy_token_amount_decimal (from tbl_solscan_tokens table) > default 9
       let decimals = tokenDecimals;
       if (decimals === null || decimals === undefined || isNaN(decimals)) {
-        // Try to get dev_buy_token_amount_decimal from tokens table (most accurate for token decimals)
+        // Try to get dev_buy_token_amount_decimal from tbl_solscan_tokens table (most accurate for token decimals)
         const tokenQuery = `
-          SELECT dev_buy_token_amount_decimal FROM tokens WHERE mint_address = $1
+          SELECT dev_buy_token_amount_decimal FROM tbl_solscan_tokens WHERE mint_address = $1
         `;
         const tokenResult = await this.pool.query(tokenQuery, [tokenAddress]);
         const devBuyTokenDecimals = tokenResult.rows[0]?.dev_buy_token_amount_decimal;
@@ -1766,7 +1766,7 @@ class DatabaseService {
       const SOL_MINT = 'So11111111111111111111111111111111111111112';
       const buyQuery = `
         SELECT COUNT(*) as count
-        FROM transactions
+        FROM tbl_solscan_transactions
         WHERE fee_payer = $1
           AND UPPER(TRIM(type)) = 'BUY'
           AND mint_from = $2
@@ -1788,7 +1788,7 @@ class DatabaseService {
       const SOL_MINT = 'So11111111111111111111111111111111111111112';
       const sellQuery = `
         SELECT COUNT(*) as count
-        FROM transactions
+        FROM tbl_solscan_transactions
         WHERE fee_payer = $1
           AND UPPER(TRIM(type)) = 'SELL'
           AND mint_from = $2
@@ -1822,7 +1822,7 @@ class DatabaseService {
           first_sell_supply,
           first_sell_price,
           created_at
-        FROM wallets
+        FROM tbl_solscan_wallets
         WHERE token_address = $1
         ORDER BY created_at DESC
         LIMIT $2
@@ -1843,7 +1843,7 @@ class DatabaseService {
     try {
       const query = `
         SELECT DISTINCT fee_payer as wallet_address
-        FROM transactions
+        FROM tbl_solscan_transactions
         ORDER BY fee_payer ASC
       `;
 
@@ -1875,7 +1875,7 @@ class DatabaseService {
           first_sell_supply,
           first_sell_price,
           created_at
-        FROM wallets
+        FROM tbl_solscan_wallets
         ORDER BY created_at DESC
         LIMIT $1 OFFSET $2
       `;
@@ -2080,7 +2080,7 @@ class DatabaseService {
       const filtersJson = JSON.stringify(presetData);
 
       const query = `
-        INSERT INTO dashboard_filter_presets (
+        INSERT INTO tbl_solscan_dashboard_filter_presets (
           name,
           filters_json
         ) VALUES ($1, $2)
@@ -2110,7 +2110,7 @@ class DatabaseService {
           filters_json as "filtersJson",
           created_at,
           updated_at
-        FROM dashboard_filter_presets
+        FROM tbl_solscan_dashboard_filter_presets
         ORDER BY updated_at DESC
       `;
 
@@ -2166,7 +2166,7 @@ class DatabaseService {
           filters_json as "filtersJson",
           created_at,
           updated_at
-        FROM dashboard_filter_presets
+        FROM tbl_solscan_dashboard_filter_presets
         WHERE name = $1
         LIMIT 1
       `;
@@ -2220,7 +2220,7 @@ class DatabaseService {
    */
   async deleteDashboardFilterPreset(name: string): Promise<void> {
     try {
-      const query = `DELETE FROM dashboard_filter_presets WHERE name = $1`;
+      const query = `DELETE FROM tbl_solscan_dashboard_filter_presets WHERE name = $1`;
       await this.pool.query(query, [name]);
       console.log(`🗑️ Filter preset deleted: ${name}`);
     } catch (error: any) {
@@ -2246,7 +2246,7 @@ class DatabaseService {
   ): Promise<void> {
     try {
       const query = `
-        UPDATE wallets
+        UPDATE tbl_solscan_wallets
         SET peak_buy_to_sell_price_sol = $3,
             peak_buy_to_sell_price_usd = $4,
             peak_buy_to_sell_mcap = $5,
@@ -2302,7 +2302,7 @@ class DatabaseService {
         };
 
         const query = `
-          UPDATE wallets
+          UPDATE tbl_solscan_wallets
           SET price_timeseries = COALESCE(price_timeseries, '[]'::jsonb) || $1::jsonb
           WHERE wallet_address = $2 AND token_address = $3
         `;
@@ -2341,7 +2341,7 @@ class DatabaseService {
 
     try {
       const query = `
-        UPDATE wallets
+        UPDATE tbl_solscan_wallets
         SET price_timeseries = COALESCE(price_timeseries, '[]'::jsonb) || $1::jsonb
         WHERE wallet_address = $2 AND token_address = $3
       `;
@@ -2364,7 +2364,7 @@ class DatabaseService {
     try {
       const query = `
         SELECT first_buy_timestamp
-        FROM wallets
+        FROM tbl_solscan_wallets
         WHERE wallet_address = $1 AND token_address = $2
       `;
       const result = await this.pool.query(query, [walletAddress, tokenAddress]);
@@ -2390,7 +2390,7 @@ class DatabaseService {
     try {
       const query = `
         SELECT price_timeseries
-        FROM wallets
+        FROM tbl_solscan_wallets
         WHERE wallet_address = $1 AND token_address = $2
       `;
       const result = await this.pool.query(query, [walletAddress, tokenAddress]);
@@ -2447,7 +2447,7 @@ class DatabaseService {
     try {
       // Delete transactions for this wallet
       const deleteTransactionsQuery = `
-        DELETE FROM transactions
+        DELETE FROM tbl_solscan_transactions
         WHERE fee_payer = $1
       `;
       const transactionsResult = await this.pool.query(deleteTransactionsQuery, [walletAddress]);
@@ -2455,7 +2455,7 @@ class DatabaseService {
 
       // Delete wallet entries for this wallet
       const deleteWalletsQuery = `
-        DELETE FROM wallets
+        DELETE FROM tbl_solscan_wallets
         WHERE wallet_address = $1
       `;
       const walletsResult = await this.pool.query(deleteWalletsQuery, [walletAddress]);

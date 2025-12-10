@@ -11,6 +11,7 @@
 
 import { Connection, PublicKey } from '@solana/web3.js';
 import { dbService } from '../database';
+import { redisService } from './redisService';
 import { PoolMonitoringService } from './poolMonitoringService';
 
 interface MarketCapResult {
@@ -136,7 +137,7 @@ export class WalletTrackingService {
             if (marketCapResult && marketCapResult.price !== undefined && marketCapResult.marketCap !== undefined) {
               // Get SOL price to calculate price in SOL (non-blocking, but we'll start monitoring even if this fails)
               try {
-                const solPriceUsd = await dbService.getLatestSolPrice();
+                const solPriceUsd = await redisService.getLatestSolPrice();
                 if (solPriceUsd && solPriceUsd > 0) {
                   const priceSol = marketCapResult.price / solPriceUsd;
                   initialPriceData = {
@@ -174,7 +175,7 @@ export class WalletTrackingService {
         let sellPriceData: { priceUsd: number; priceSol: number; marketCap: number } | undefined;
         if (marketCapResult && marketCapResult.price !== undefined && marketCapResult.marketCap !== undefined) {
           // Get SOL price to calculate price in SOL
-          const solPriceUsd = await dbService.getLatestSolPrice();
+          const solPriceUsd = await redisService.getLatestSolPrice();
           if (solPriceUsd && solPriceUsd > 0) {
             const priceSol = marketCapResult.price / solPriceUsd;
             sellPriceData = {

@@ -6,6 +6,7 @@ import { PoolMonitoringService } from "../services/poolMonitoringService";
 import { ladybugStreamerService } from "../services/ladybugStreamerService";
 import { convertLadybugEventToTrackerFormat } from "../services/ladybugEventConverter";
 import { LadybugEvent, LadybugTransaction } from "../services/ladybugTypes";
+import { redisService } from "../services/redisService";
 
 class TransactionTracker {
   private isRunning: boolean = false;
@@ -37,6 +38,9 @@ class TransactionTracker {
     const shyftApiKey = process.env.X_TOKEN;
     const rpcUrl = `https://dillwifit.shyft.to/${shyftApiKey}`;
     this.solanaConnection = new Connection(rpcUrl, "confirmed");
+
+    // Initialize Redis service for SOL price
+    redisService.initialize();
 
     // Initialize pool monitoring service
     PoolMonitoringService.getInstance(this.solanaConnection).then(service => {
@@ -216,10 +220,10 @@ class TransactionTracker {
     tokenAddress: string
   ): Promise<{ marketCap: number | null; totalSupply: number | null; tokenPriceUsd: number | null } | null> {
     try {
-      // Get SOL price from database
-      const solPriceUsd = await dbService.getLatestSolPrice();
+      // Get SOL price from Redis
+      const solPriceUsd = await redisService.getLatestSolPrice();
       if (!solPriceUsd) {
-        console.error(`Failed to fetch SOL price from database`);
+        console.error(`Failed to fetch SOL price from Redis`);
         return null;
       }
 
@@ -465,7 +469,7 @@ class TransactionTracker {
           } else if (marketCapData && marketCapData.tokenPriceUsd && marketCapData.marketCap) {
             // Try to get SOL price if we have USD price
             try {
-              const solPriceUsd = await dbService.getLatestSolPrice();
+              const solPriceUsd = await redisService.getLatestSolPrice();
               if (solPriceUsd && solPriceUsd > 0) {
                 const priceSol = marketCapData.tokenPriceUsd / solPriceUsd;
                 initialPriceData = {
@@ -503,7 +507,7 @@ class TransactionTracker {
         } else if (marketCapData && marketCapData.tokenPriceUsd && marketCapData.marketCap) {
           // Try to get SOL price
           try {
-            const solPriceUsd = await dbService.getLatestSolPrice();
+            const solPriceUsd = await redisService.getLatestSolPrice();
             if (solPriceUsd && solPriceUsd > 0) {
               const priceSol = marketCapData.tokenPriceUsd / solPriceUsd;
               sellPriceData = {
