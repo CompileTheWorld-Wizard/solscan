@@ -1,6 +1,6 @@
 /**
  * Pool Monitoring Service
- * Monitors pool transactions using ladybug streaming
+ * Monitors pool transactions using streaming
  * Tracks price and market cap changes and calculates peak values
  */
 
@@ -11,8 +11,8 @@ import { redisService } from './redisService';
 import { Parser, TransactionStreamer } from "@shyft-to/ladybug-sdk";
 import { Idl } from "@coral-xyz/anchor";
 import { Idl as SerumIdl } from "@project-serum/anchor";
-import { convertLadybugEventToTrackerFormat } from './ladybugEventConverter';
-import { LadybugEvent, LadybugTransaction } from './ladybugTypes';
+import { convertEventToTrackerFormat } from './eventConverter';
+import { ParsedEvent, ParsedTransaction } from './type';
 import pumpIdl from "./idls/pumpfun/pump_0.1.0.json";
 import pumpAmmIdl from "./idls/pumpAmm/pump_amm_0.1.0.json";
 import * as fs from 'fs';
@@ -102,11 +102,11 @@ class LiquidityPoolMonitor {
     this.grpcUrl = process.env.GRPC_URL;
     this.xToken = process.env.X_TOKEN;
 
-    // Initialize ladybug parser
+    // Initialize parser
     this.parser = new Parser();
     this.initializeParser();
 
-    // Initialize ladybug streamer
+    // Initialize streamer
     this.initializeStreamer();
 
     // Load IDL files for account decoding
@@ -143,16 +143,16 @@ class LiquidityPoolMonitor {
   }
 
   /**
-   * Initialize the ladybug streamer
+   * Initialize the streamer
    */
   private initializeStreamer(): void {
     try {
       this.streamer = new TransactionStreamer(this.grpcUrl, this.xToken);
       this.streamer.addParser(this.parser);
       
-      // Set up callback for ladybug events
-      this.streamer.onData((tx: LadybugTransaction) => {
-        this.handleLadybugTransaction(tx);
+      // Set up callback for events
+      this.streamer.onData((tx: ParsedTransaction) => {
+        this.handleTransaction(tx);
       });
       
       // Set up error callback for manual reconnection
@@ -167,9 +167,9 @@ class LiquidityPoolMonitor {
         PUMP_AMM_PROGRAM_ID
       ]);
       
-      console.log("✅ Pool monitoring ladybug streamer initialized");
+      console.log("✅ Pool monitoring streamer initialized");
     } catch (error: any) {
-      console.error('Failed to initialize pool monitoring ladybug streamer:', error?.message || error);
+      console.error('Failed to initialize pool monitoring streamer:', error?.message || error);
     }
   }
 
@@ -226,9 +226,9 @@ class LiquidityPoolMonitor {
   }
 
   /**
-   * Handle transactions from ladybug streamer
+   * Handle transactions from streamer
    */
-  private handleLadybugTransaction(tx: LadybugTransaction): void {
+  private handleTransaction(tx: ParsedTransaction): void {
     try {
       // Update lastSlot from transaction
       if (tx?.transaction?.slot) {
@@ -257,8 +257,8 @@ class LiquidityPoolMonitor {
         }
 
         // Convert event to tracker format
-        const result = convertLadybugEventToTrackerFormat(
-          event as LadybugEvent,
+        const result = convertEventToTrackerFormat(
+          event as ParsedEvent,
           signature,
           slot,
           createdAt
@@ -314,7 +314,7 @@ class LiquidityPoolMonitor {
         this.handlePoolUpdate(result, tokenAddress, signature || null, createdAt || null);
       }
     } catch (error: any) {
-      console.error(`❌ Error handling ladybug transaction in pool monitoring:`, error?.message || error);
+      console.error(`❌ Error handling transaction in pool monitoring:`, error?.message || error);
     }
   }
 
@@ -443,7 +443,7 @@ class LiquidityPoolMonitor {
   }
 
   /**
-   * Handle pool updates from ladybug streamer
+   * Handle pool updates from streamer
    */
   async handlePoolUpdate(
     result: any,
@@ -667,7 +667,7 @@ class LiquidityPoolMonitor {
   }
 
   /**
-   * Start the ladybug streamer if not already running
+   * Start the streamer if not already running
    */
   private startStreamerIfNeeded(): void {
     if (!this.streamer) {
@@ -686,7 +686,7 @@ class LiquidityPoolMonitor {
         
         this.streamer.start();
         this.isStreaming = true;
-        console.log('✅ Started pool monitoring ladybug streamer');
+        console.log('✅ Started pool monitoring streamer');
       } catch (error: any) {
         console.error('Failed to start pool monitoring streamer:', error?.message || error);
       }
@@ -694,14 +694,14 @@ class LiquidityPoolMonitor {
   }
 
   /**
-   * Stop the ladybug streamer
+   * Stop the streamer
    */
   private stopStreamer(): void {
     if (this.streamer && this.isStreaming) {
       try {
         this.streamer.stop();
         this.isStreaming = false;
-        console.log('✅ Stopped pool monitoring ladybug streamer');
+        console.log('✅ Stopped pool monitoring streamer');
       } catch (error: any) {
         console.error('Failed to stop pool monitoring streamer:', error?.message || error);
       }
@@ -812,7 +812,7 @@ class LiquidityPoolMonitor {
     }
     this.tokenToSessions.get(tokenAddress)!.add(sessionKey);
 
-    // Token is now being monitored (updates will come from ladybug streamer)
+    // Token is now being monitored (updates will come from streamer)
     // Start streamer if needed
     this.updateStreamerAddresses();
 
@@ -1338,11 +1338,11 @@ export class PoolMonitoringService {
     if (!PoolMonitoringService.instance) {
       PoolMonitoringService.instance = new PoolMonitoringService();
       
-      // Create pool monitor (uses ladybug streaming)
+      // Create pool monitor (uses streaming)
       poolMonitor = new LiquidityPoolMonitor(solanaConnection);
       PoolMonitoringService.instance.monitor = poolMonitor;
       
-      console.log('✅ Pool monitoring service initialized (using ladybug streaming)');
+      console.log('✅ Pool monitoring service initialized (using streaming)');
     }
 
     return PoolMonitoringService.instance;

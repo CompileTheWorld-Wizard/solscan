@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import { ladybugStreamerService } from "./src/services/ladybugStreamerService";
+import { streamerService } from "./src/services/streamerService";
 
 // Load environment variables
 dotenv.config();
@@ -26,7 +26,7 @@ async function testLadybugStreamer() {
   try {
     // Initialize the streamer
     console.log("1️⃣  Initializing streamer...");
-    ladybugStreamerService.initialize(grpcUrl, xToken);
+    streamerService.initialize(grpcUrl, xToken);
     console.log("   ✅ Streamer initialized\n");
 
     // Test: Add addresses using array variable
@@ -47,12 +47,12 @@ async function testLadybugStreamer() {
       "goonERTdGsjnkZqWuVjs73BZ3Pb9qoCUdBUL17BnS5j", // Goonfi program
     ];
 
-    ladybugStreamerService.addAddresses(addressesToAdd);
+    streamerService.addAddresses(addressesToAdd);
     console.log(`   ✅ Added addresses: ${addressesToAdd.join(", ")}\n`);
 
     // Test: Get tracked addresses
     console.log("3️⃣  Testing getTrackedAddresses()...");
-    const tracked = ladybugStreamerService.getTrackedAddresses();
+    const tracked = streamerService.getTrackedAddresses();
     console.log(`   ✅ Currently tracking ${tracked.length} address(es):`);
     tracked.forEach((addr, index) => {
       console.log(`      ${index + 1}. ${addr}`);
@@ -67,7 +67,7 @@ async function testLadybugStreamer() {
     ];
 
     if (additionalAddresses.length > 0) {
-      ladybugStreamerService.addAddresses(additionalAddresses);
+      streamerService.addAddresses(additionalAddresses);
       console.log(`   ✅ Added ${additionalAddresses.length} more address(es)\n`);
     } else {
       console.log("   ⚠️  No additional addresses to add\n");
@@ -81,7 +81,7 @@ async function testLadybugStreamer() {
     ];
 
     if (addressesToRemove.length > 0) {
-      ladybugStreamerService.removeAddresses(addressesToRemove);
+      streamerService.removeAddresses(addressesToRemove);
       console.log(`   ✅ Removed ${addressesToRemove.length} address(es)\n`);
     } else {
       console.log("   ⚠️  No addresses to remove (uncomment addressesToRemove to test)\n");
@@ -89,7 +89,7 @@ async function testLadybugStreamer() {
 
     // Test: Set data callback
     console.log("6️⃣  Testing onData() callback...");
-    ladybugStreamerService.onData((tx: any) => {
+    streamerService.onData((tx: any) => {
       console.log("\n📥 Received transaction:");
       if (tx?.transaction?.message?.events?.length > 0) {
         console.log(tx?.transaction?.signatures?.[0])
@@ -105,17 +105,17 @@ async function testLadybugStreamer() {
 
     // Test: Start streaming
     console.log("7️⃣  Testing start()...");
-    const trackedBeforeStart = ladybugStreamerService.getTrackedAddresses();
+    const trackedBeforeStart = streamerService.getTrackedAddresses();
     if (trackedBeforeStart.length === 0) {
       console.log("   ⚠️  No addresses tracked. Cannot start streaming.");
       console.log("   💡 Add addresses first using addAddresses()\n");
     } else {
-      ladybugStreamerService.start();
+      streamerService.start();
       console.log(`   ✅ Started streaming for ${trackedBeforeStart.length} address(es)\n`);
 
       // Check streaming status
       console.log("8️⃣  Checking streaming status...");
-      const isStreaming = ladybugStreamerService.getIsStreaming();
+      const isStreaming = streamerService.getIsStreaming();
       console.log(`   ✅ Streaming status: ${isStreaming ? "🟢 Active" : "🔴 Inactive"}\n`);
 
       // Keep the process running for a bit to receive transactions
@@ -126,14 +126,14 @@ async function testLadybugStreamer() {
 
       // Test: Stop streaming
       console.log("\n9️⃣  Testing stop()...");
-      ladybugStreamerService.stop();
+      streamerService.stop();
       console.log("   ✅ Stopped streaming\n");
     }
 
     // Final status
     console.log("📊 Final Status:");
-    console.log(`   Tracked addresses: ${ladybugStreamerService.getTrackedAddresses().length}`);
-    console.log(`   Streaming: ${ladybugStreamerService.getIsStreaming() ? "Yes" : "No"}`);
+    console.log(`   Tracked addresses: ${streamerService.getTrackedAddresses().length}`);
+    console.log(`   Streaming: ${streamerService.getIsStreaming() ? "Yes" : "No"}`);
     console.log("\n✅ All tests completed!");
 
   } catch (error: any) {

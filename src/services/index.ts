@@ -6,6 +6,6 @@
 export { tokenService } from './tokenService';
 export { tokenQueueService } from './tokenQueueService';
 export { bitqueryService } from './bitqueryService';
-export { ladybugStreamerService } from './ladybugStreamerService';
+export { streamerService } from './streamerService';
 // walletTrackingService removed - functionality moved to tracker.ts
 

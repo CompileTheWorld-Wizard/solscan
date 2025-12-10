@@ -133,16 +133,16 @@ export type PumpAmmEvent = PumpAmmBuyEvent | PumpAmmSellEvent;
 /**
  * Union type for all supported ladybug events
  */
-export type LadybugEvent = PumpFunEvent | PumpAmmEvent;
+export type ParsedEvent = PumpFunEvent | PumpAmmEvent;
 
 /**
  * Ladybug transaction structure (as received from streamer)
  */
-export interface LadybugTransaction {
+export interface ParsedTransaction {
   transaction: {
     signatures?: string[];
     message?: {
-      events?: LadybugEvent[];
+      events?: ParsedEvent[];
     };
     slot?: number;
     blockTime?: number;

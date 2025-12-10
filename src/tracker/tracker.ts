@@ -3,9 +3,9 @@ import { dbService } from "../database";
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { tokenQueueService } from "../services/tokenQueueService";
 import { PoolMonitoringService } from "../services/poolMonitoringService";
-import { ladybugStreamerService } from "../services/ladybugStreamerService";
-import { convertLadybugEventToTrackerFormat } from "../services/ladybugEventConverter";
-import { LadybugEvent, LadybugTransaction } from "../services/ladybugTypes";
+import { streamerService } from "../services/streamerService";
+import { convertEventToTrackerFormat } from "../services/eventConverter";
+import { ParsedEvent, ParsedTransaction } from "../services/type";
 import { redisService } from "../services/redisService";
 
 class TransactionTracker {
@@ -13,18 +13,14 @@ class TransactionTracker {
   private addresses: string[] = [];
   private solanaConnection: Connection | null = null;
   private poolMonitoringService: PoolMonitoringService | null = null;
-  private ladybugInitialized: boolean = false;
-  
-  // PumpFun and PumpAmm program addresses for ladybug streaming
-  private readonly PUMP_FUN_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
-  private readonly PUMP_AMM_PROGRAM_ID = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
+  private streamerInitialized: boolean = false;
 
   constructor() {
     // Initialize with empty addresses
   }
 
   /**
-   * Initialize the tracker with ladybug streamer
+   * Initialize the tracker with streamer
    */
   initialize() {
     if (!process.env.GRPC_URL || !process.env.X_TOKEN) {
@@ -49,20 +45,20 @@ class TransactionTracker {
       console.error('Failed to initialize pool monitoring service:', error);
     });
 
-    // Initialize ladybug streamer for PumpFun and PumpAmm
+    // Initialize streamer for PumpFun and PumpAmm
     try {
-      ladybugStreamerService.initialize(grpcUrl, xToken);
-      this.ladybugInitialized = true;
+      streamerService.initialize(grpcUrl, xToken);
+      this.streamerInitialized = true;
       
-      // Set up callback for ladybug events
-      ladybugStreamerService.onData((tx: LadybugTransaction) => {
-        this.handleLadybugTransaction(tx);
+      // Set up callback for events
+      streamerService.onData((tx: ParsedTransaction) => {
+        this.handleTransaction(tx);
       });
       
-      console.log("✅ Ladybug streamer initialized (will track wallet addresses when set)");
+      console.log("✅ Streamer initialized (will track wallet addresses when set)");
     } catch (error: any) {
-      console.error('Failed to initialize ladybug streamer:', error?.message || error);
-      this.ladybugInitialized = false;
+      console.error('Failed to initialize streamer:', error?.message || error);
+      this.streamerInitialized = false;
     }
 
     console.log("✅ Tracker initialized");
@@ -75,17 +71,17 @@ class TransactionTracker {
     const newAddresses = addresses.filter(addr => addr.trim().length > 0);
     
     // If streamer is initialized and running, update tracked addresses
-    if (this.ladybugInitialized) {
+    if (this.streamerInitialized) {
       // Remove old addresses that are not in new list
       const addressesToRemove = this.addresses.filter(addr => !newAddresses.includes(addr));
       if (addressesToRemove.length > 0) {
-        ladybugStreamerService.removeAddresses(addressesToRemove);
+        streamerService.removeAddresses(addressesToRemove);
       }
       
       // Add new addresses that are not already tracked
       const addressesToAdd = newAddresses.filter(addr => !this.addresses.includes(addr));
       if (addressesToAdd.length > 0) {
-        ladybugStreamerService.addAddresses(addressesToAdd);
+        streamerService.addAddresses(addressesToAdd);
       }
     }
     
@@ -917,14 +913,16 @@ class TransactionTracker {
   }
 
   /**
-   * Handle transactions from ladybug streamer (PumpFun and PumpAmm only)
+   * Handle transactions from streamer (PumpFun and PumpAmm only)
    */
-  private handleLadybugTransaction(tx: LadybugTransaction): void {
+  private handleTransaction(tx: ParsedTransaction): void {
     try {
       // Check if tracker is running
       if (!this.isRunning) {
         return;
       }
+
+      console.log(JSON.stringify(tx))
 
       const events = tx?.transaction?.message?.events;
       if (!events || events.length === 0) {
@@ -943,8 +941,8 @@ class TransactionTracker {
         }
 
         // Convert event to tracker format
-        const result = convertLadybugEventToTrackerFormat(
-          event as LadybugEvent,
+        const result = convertEventToTrackerFormat(
+          event as ParsedEvent,
           signature,
           slot,
           createdAt
@@ -988,7 +986,7 @@ class TransactionTracker {
               }
               
               // Process the transaction with the updated token address
-              this.processLadybugEvent(result, signature || '', slot, createdAt);
+              this.processEvent(result, signature || '', slot, createdAt);
             } else {
               console.log(`⚠️ Could not extract token address from PumpAmm pool: ${result.pool}`);
             }
@@ -1001,17 +999,17 @@ class TransactionTracker {
         }
 
         // Process the event
-        this.processLadybugEvent(result, signature || '', slot, createdAt);
+        this.processEvent(result, signature || '', slot, createdAt);
       }
     } catch (error: any) {
-      console.error(`❌ Error handling ladybug transaction:`, error?.message || error);
+      console.error(`❌ Error handling transaction:`, error?.message || error);
     }
   }
 
   /**
-   * Process a ladybug event (helper method)
+   * Process an event (helper method)
    */
-  private processLadybugEvent(
+  private processEvent(
     result: any,
     signature: string,
     slot: number | undefined,
@@ -1027,7 +1025,7 @@ class TransactionTracker {
       return;
     }
 
-    console.log(`📥 Ladybug ${result.platform} ${result.type} transaction: ${signature?.substring(0, 8)}...`);
+    console.log(`📥 Streamer ${result.platform} ${result.type} transaction: ${signature?.substring(0, 8)}...`);
 
     // Process transaction asynchronously (non-blocking)
     // Run transaction processing and pool monitoring in parallel
@@ -1061,21 +1059,21 @@ class TransactionTracker {
     }
 
     // Initialize if not already initialized
-    if (!this.ladybugInitialized) {
+    if (!this.streamerInitialized) {
       this.initialize();
     }
 
-    if (!this.ladybugInitialized) {
-      return { success: false, message: "Failed to initialize ladybug streamer" };
+    if (!this.streamerInitialized) {
+      return { success: false, message: "Failed to initialize streamer" };
     }
 
-    // Ensure addresses are added to ladybug streamer
+    // Ensure addresses are added to streamer
     try {
-      const currentTracked = ladybugStreamerService.getTrackedAddresses();
+      const currentTracked = streamerService.getTrackedAddresses();
       const addressesToAdd = this.addresses.filter(addr => !currentTracked.includes(addr));
       
       if (addressesToAdd.length > 0) {
-        ladybugStreamerService.addAddresses(addressesToAdd);
+        streamerService.addAddresses(addressesToAdd);
       }
     } catch (error: any) {
       console.error('Failed to add addresses to streamer:', error?.message || error);
@@ -1086,12 +1084,12 @@ class TransactionTracker {
     // Start token queue processor
     tokenQueueService.start();
 
-    // Start ladybug streamer for PumpFun and PumpAmm
+    // Start streamer for PumpFun and PumpAmm
     try {
-      ladybugStreamerService.start();
-      console.log("✅ Started ladybug streamer");
+      streamerService.start();
+      console.log("✅ Started streamer");
     } catch (error: any) {
-      console.error('Failed to start ladybug streamer:', error?.message || error);
+      console.error('Failed to start streamer:', error?.message || error);
       this.isRunning = false;
       return { success: false, message: `Failed to start streamer: ${error?.message || error}` };
     }
@@ -1128,13 +1126,13 @@ class TransactionTracker {
       return { success: false, message: "Tracker is not running" };
     }
 
-    // Stop ladybug streamer
-    if (this.ladybugInitialized) {
+    // Stop streamer
+    if (this.streamerInitialized) {
       try {
-        ladybugStreamerService.stop();
-        console.log("✅ Stopped ladybug streamer");
+        streamerService.stop();
+        console.log("✅ Stopped streamer");
       } catch (error: any) {
-        console.error('Failed to stop ladybug streamer:', error?.message || error);
+        console.error('Failed to stop streamer:', error?.message || error);
       }
     }
 

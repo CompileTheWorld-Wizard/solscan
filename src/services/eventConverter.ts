@@ -2,8 +2,8 @@ import {
   PumpFunTradeEvent,
   PumpAmmBuyEvent,
   PumpAmmSellEvent,
-  LadybugEvent,
-} from "./ladybugTypes";
+  ParsedEvent,
+} from "./type";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -96,8 +96,8 @@ function convertPumpAmmSellEvent(event: PumpAmmSellEvent): any {
  * Convert ladybug event to tracker format
  * Returns null if event is not supported or cannot be converted
  */
-export function convertLadybugEventToTrackerFormat(
-  event: LadybugEvent,
+export function convertEventToTrackerFormat(
+  event: ParsedEvent,
   transactionSignature?: string,
   slot?: number,
   createdAt?: string

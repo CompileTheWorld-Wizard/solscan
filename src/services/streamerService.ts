@@ -35,7 +35,7 @@ const GOONFI_PROGRAM_ID = new PublicKey("goonERTdGsjnkZqWuVjs73BZ3Pb9qoCUdBUL17B
  * A new streamer model using ladybug-sdk for transaction streaming
  * Keeps track of addresses using an array variable
  */
-class LadybugStreamerService {
+class StreamerService {
   private parser: Parser;
   private streamer: TransactionStreamer | null = null;
   private trackedAddresses: string[] = []; // Array to track addresses
@@ -225,4 +225,4 @@ class LadybugStreamerService {
 }
 
 // Export singleton instance
-export const ladybugStreamerService = new LadybugStreamerService();
+export const streamerService = new StreamerService();
