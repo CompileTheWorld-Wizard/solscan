@@ -54,18 +54,12 @@ class TransactionTracker {
       ladybugStreamerService.initialize(grpcUrl, xToken);
       this.ladybugInitialized = true;
       
-      // Add PumpFun and PumpAmm program addresses to ladybug streamer
-      ladybugStreamerService.addAddresses([
-        this.PUMP_FUN_PROGRAM_ID,
-        this.PUMP_AMM_PROGRAM_ID
-      ]);
-      
       // Set up callback for ladybug events
       ladybugStreamerService.onData((tx: LadybugTransaction) => {
         this.handleLadybugTransaction(tx);
       });
       
-      console.log("✅ Ladybug streamer initialized for PumpFun and PumpAmm");
+      console.log("✅ Ladybug streamer initialized (will track wallet addresses when set)");
     } catch (error: any) {
       console.error('Failed to initialize ladybug streamer:', error?.message || error);
       this.ladybugInitialized = false;
@@ -75,12 +69,31 @@ class TransactionTracker {
   }
 
   /**
-   * Set addresses to track (kept for API compatibility, but not used for streaming)
-   * Note: We now track program addresses (PumpFun/PumpAmm) via ladybug streamer, not wallet addresses
+   * Set addresses to track (wallet addresses for PumpFun and PumpAmm transactions)
    */
   setAddresses(addresses: string[]) {
-    this.addresses = addresses.filter(addr => addr.trim().length > 0);
-    console.log('📍 Addresses set (for API compatibility):', this.addresses.length);
+    const newAddresses = addresses.filter(addr => addr.trim().length > 0);
+    
+    // If streamer is initialized and running, update tracked addresses
+    if (this.ladybugInitialized) {
+      // Remove old addresses that are not in new list
+      const addressesToRemove = this.addresses.filter(addr => !newAddresses.includes(addr));
+      if (addressesToRemove.length > 0) {
+        ladybugStreamerService.removeAddresses(addressesToRemove);
+      }
+      
+      // Add new addresses that are not already tracked
+      const addressesToAdd = newAddresses.filter(addr => !this.addresses.includes(addr));
+      if (addressesToAdd.length > 0) {
+        ladybugStreamerService.addAddresses(addressesToAdd);
+      }
+    }
+    
+    this.addresses = newAddresses;
+    console.log('📍 Addresses set:', this.addresses.length);
+    this.addresses.forEach((addr, index) => {
+      console.log(`   ${index + 1}. ${addr}`);
+    });
   }
 
   /**
@@ -825,6 +838,18 @@ class TransactionTracker {
           continue;
         }
 
+        // Filter: Only process transactions for tracked wallet addresses
+        // Check if the feePayer (user wallet) is in our tracked addresses
+        if (this.addresses.length > 0 && result.feePayer) {
+          if (!this.addresses.includes(result.feePayer)) {
+            // Skip this transaction - wallet not being tracked
+            continue;
+          }
+        } else if (this.addresses.length === 0) {
+          // No addresses set, skip all transactions
+          continue;
+        }
+
         // Extract token address for buy/sell events
         let tokenAddress = (result.type?.toUpperCase() === 'BUY' || result.type?.toUpperCase() === 'SELL')
           ? this.extractTokenAddress(result)
@@ -915,6 +940,10 @@ class TransactionTracker {
       return { success: false, message: "Tracker is already running" };
     }
 
+    if (this.addresses.length === 0) {
+      return { success: false, message: "No addresses to track. Add addresses before starting." };
+    }
+
     // Initialize if not already initialized
     if (!this.ladybugInitialized) {
       this.initialize();
@@ -922,6 +951,18 @@ class TransactionTracker {
 
     if (!this.ladybugInitialized) {
       return { success: false, message: "Failed to initialize ladybug streamer" };
+    }
+
+    // Ensure addresses are added to ladybug streamer
+    try {
+      const currentTracked = ladybugStreamerService.getTrackedAddresses();
+      const addressesToAdd = this.addresses.filter(addr => !currentTracked.includes(addr));
+      
+      if (addressesToAdd.length > 0) {
+        ladybugStreamerService.addAddresses(addressesToAdd);
+      }
+    } catch (error: any) {
+      console.error('Failed to add addresses to streamer:', error?.message || error);
     }
 
     this.isRunning = true;
@@ -932,7 +973,7 @@ class TransactionTracker {
     // Start ladybug streamer for PumpFun and PumpAmm
     try {
       ladybugStreamerService.start();
-      console.log("✅ Started ladybug streamer for PumpFun and PumpAmm");
+      console.log("✅ Started ladybug streamer");
     } catch (error: any) {
       console.error('Failed to start ladybug streamer:', error?.message || error);
       this.isRunning = false;
@@ -941,7 +982,10 @@ class TransactionTracker {
 
     console.log('🚀 '.repeat(30));
     console.log('STARTING TRANSACTION TRACKING');
-    console.log('Tracking PumpFun and PumpAmm transactions via ladybug streamer');
+    console.log('Tracking PumpFun and PumpAmm transactions for wallets:');
+    this.addresses.forEach((addr, index) => {
+      console.log(`   ${index + 1}. ${addr}`);
+    });
     console.log('🚀 '.repeat(30) + '\n');
 
     return { success: true, message: "Tracker started successfully" };
