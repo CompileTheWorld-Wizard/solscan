@@ -53,6 +53,8 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
         continue;
       }
 
+      console.log('here')
+
       // Extract accounts array
       const accounts = ix.accounts;
       if (!accounts || !Array.isArray(accounts) || accounts.length < 4) {
