@@ -108,6 +108,7 @@ async function testLadybugStreamer() {
           if (bondingCurve) {
             console.log(`   ✅ Bonding Curve: ${bondingCurve}`);
           } else {
+            console.log(tx)
             console.log(`   ⚠️  No bonding curve found for this event`);
           }
           
