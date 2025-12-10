@@ -7,6 +7,7 @@ import {
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const LAMPORTS_PER_SOL = 1_000_000_000;
+const TOKEN_DECIMALS = 1_000_000; // PumpFun and PumpAmm tokens use 6 decimals
 
 /**
  * Convert PumpFun TradeEvent to tracker format
@@ -14,13 +15,14 @@ const LAMPORTS_PER_SOL = 1_000_000_000;
 function convertPumpFunEvent(event: PumpFunTradeEvent): any {
   const { data } = event;
   
-  // Calculate price: SOL amount / token amount
-  // Both amounts are in their native units (lamports for SOL, token units for tokens)
-  const solAmount = data.sol_amount / LAMPORTS_PER_SOL; // Convert lamports to SOL
-  const tokenAmount = data.token_amount; // Already in token units
+  // Calculate price using liquidity reserves (virtual reserves)
+  // virtual_sol_reserves is in lamports (1 SOL = 1,000,000,000 lamports)
+  // virtual_token_reserves is in base units with 6 decimals (1 token = 1,000,000 base units)
+  const virtualSolReserves = data.virtual_sol_reserves / LAMPORTS_PER_SOL; // Convert lamports to SOL
+  const virtualTokenReserves = data.virtual_token_reserves / TOKEN_DECIMALS; // Convert base units to human-readable tokens
   
-  // Price = SOL per token
-  const price = tokenAmount > 0 ? solAmount / tokenAmount : 0;
+  // Price = SOL per token (using liquidity reserves)
+  const price = virtualTokenReserves > 0 ? virtualSolReserves / virtualTokenReserves : 0;
   
   return {
     platform: "PumpFun",
@@ -42,13 +44,14 @@ function convertPumpFunEvent(event: PumpFunTradeEvent): any {
 function convertPumpAmmBuyEvent(event: PumpAmmBuyEvent): any {
   const { data } = event;
   
-  // For buy: quote (SOL) in, base (token) out
-  // quote_amount_in is in lamports, base_amount_out is in token units
-  const solAmount = data.quote_amount_in / LAMPORTS_PER_SOL; // Convert lamports to SOL
-  const tokenAmount = data.base_amount_out; // Already in token units
+  // Calculate price using pool liquidity reserves
+  // pool_quote_token_reserves (SOL) is in lamports (1 SOL = 1,000,000,000 lamports)
+  // pool_base_token_reserves (tokens) is in base units with 6 decimals (1 token = 1,000,000 base units)
+  const poolSolReserves = data.pool_quote_token_reserves / LAMPORTS_PER_SOL; // Convert lamports to SOL
+  const poolTokenReserves = data.pool_base_token_reserves / TOKEN_DECIMALS; // Convert base units to human-readable tokens
   
-  // Price = SOL per token
-  const price = tokenAmount > 0 ? solAmount / tokenAmount : 0;
+  // Price = SOL per token (using pool liquidity reserves)
+  const price = poolTokenReserves > 0 ? poolSolReserves / poolTokenReserves : 0;
   
   return {
     platform: "PumpFun Amm", // Note: keeping the same platform name as existing parser
@@ -70,13 +73,14 @@ function convertPumpAmmBuyEvent(event: PumpAmmBuyEvent): any {
 function convertPumpAmmSellEvent(event: PumpAmmSellEvent): any {
   const { data } = event;
   
-  // For sell: base (token) in, quote (SOL) out
-  // base_amount_in is in token units, quote_amount_out is in lamports
-  const solAmount = data.quote_amount_out / LAMPORTS_PER_SOL; // Convert lamports to SOL
-  const tokenAmount = data.base_amount_in; // Already in token units
+  // Calculate price using pool liquidity reserves
+  // pool_quote_token_reserves (SOL) is in lamports (1 SOL = 1,000,000,000 lamports)
+  // pool_base_token_reserves (tokens) is in base units with 6 decimals (1 token = 1,000,000 base units)
+  const poolSolReserves = data.pool_quote_token_reserves / LAMPORTS_PER_SOL; // Convert lamports to SOL
+  const poolTokenReserves = data.pool_base_token_reserves / TOKEN_DECIMALS; // Convert base units to human-readable tokens
   
-  // Price = SOL per token
-  const price = tokenAmount > 0 ? solAmount / tokenAmount : 0;
+  // Price = SOL per token (using pool liquidity reserves)
+  const price = poolTokenReserves > 0 ? poolSolReserves / poolTokenReserves : 0;
   
   return {
     platform: "PumpFun Amm", // Note: keeping the same platform name as existing parser

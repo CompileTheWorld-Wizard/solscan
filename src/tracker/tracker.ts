@@ -978,10 +978,9 @@ class TransactionTracker {
           ? this.extractTokenAddress(result)
           : null;
 
-        // For PumpAmm events, fetch token mint from pool account if not available
+        // For PumpAmm & pumpfun events, fetch token mint from pool account if not available
         if ((result.type?.toUpperCase() === 'BUY' || result.type?.toUpperCase() === 'SELL') && 
             !tokenAddress && 
-            result.platform === "PumpFun Amm" && 
             result.pool) {
           // Fetch token mint asynchronously
           this.fetchTokenMintFromPool(result.pool).then(mint => {
