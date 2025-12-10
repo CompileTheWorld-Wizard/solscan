@@ -23,7 +23,7 @@ export interface MintBondingCurvePair {
  */
 export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[] {
   try {
-    console.log(tx.transaction.message.compiledInstructions)
+    console.log(tx)
     // Check if compiledInstructions exists in various possible locations
     const compiledInstructions = 
       tx?.transaction?.message?.compiledInstructions ||

@@ -8,16 +8,10 @@ import { BorshAccountsCoder } from "@coral-xyz/anchor";
 import { PublicKey, Connection } from "@solana/web3.js";
 import { dbService } from '../database';
 import { redisService } from './redisService';
-import { Idl } from "@coral-xyz/anchor";
 import { convertEventToTrackerFormat } from './eventConverter';
 import { ParsedEvent, ParsedTransaction } from './type';
 import { extractBondingCurveForEvent } from './utils/transactionUtils';
 import { StreamerService } from './streamerService';
-import pumpFunIdl from './idls/pumpfun/pump_0.1.0.json';
-import pumpAmmIdl from './idls/pumpAmm/pump_amm_0.1.0.json';
-
-const PUMP_FUN_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
-const PUMP_AMM_PROGRAM_ID = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
 
 // const PUMP_PROGRAM_ID = '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P';
 
@@ -81,33 +75,6 @@ class LiquidityPoolMonitor {
 
     // Initialize streamer
     this.initializeStreamer();
-
-    // Load IDL files for account decoding using imports
-    try {
-      // Use pumpFun IDL as default (or pumpAmm if needed)
-      const programIdl = pumpFunIdl as Idl;
-      this.accountCoder = new BorshAccountsCoder(programIdl);
-      console.log('✅ Loaded IDL file for account decoding');
-    } catch (error: any) {
-      console.error('❌ Failed to initialize account coder:', error?.message || error);
-      if (error instanceof Error && error.stack) {
-        console.error('Error stack:', error.stack);
-      }
-      // Don't throw - allow pool monitoring to continue without account decoding
-      // Create a minimal valid IDL to prevent errors
-      try {
-        const dummyIdl: Idl = {
-          address: '',
-          metadata: { name: '', version: '', spec: '' },
-          instructions: [],
-          accounts: []
-        };
-        this.accountCoder = new BorshAccountsCoder(dummyIdl);
-      } catch (e) {
-        console.error('❌ Failed to create dummy account coder:', e);
-        throw error; // Re-throw original error if we can't create a dummy
-      }
-    }
   }
 
 
@@ -129,12 +96,6 @@ class LiquidityPoolMonitor {
         console.error('❌ Pool monitoring streamer error:', error);
         this.handleStreamerError(error);
       });
-      
-      // Add PumpFun and PumpAmm program addresses to track
-      this.streamerService.addAddresses([
-        PUMP_FUN_PROGRAM_ID,
-        PUMP_AMM_PROGRAM_ID
-      ]);
       
       console.log("✅ Pool monitoring streamer initialized");
     } catch (error: any) {
@@ -322,30 +283,6 @@ class LiquidityPoolMonitor {
     }
 
     return null;
-  }
-
-  getAccountName(data: string): string {
-    const accountNames = ["BondingCurve", "Global", "Pool"];
-
-    const discriminator = Buffer.from(data, 'base64').slice(0, 8);
-
-    let account;
-    accountNames.forEach((accountName) => {
-      try {
-        const accountDiscriminator = this.accountCoder.accountDiscriminator(accountName);
-        if (accountDiscriminator.equals(discriminator)) {
-          account = accountName;
-        }
-      } catch (error) {
-        // Skip if discriminator doesn't match
-      }
-    });
-
-    if (!account) {
-      return 'Unknown';
-    }
-
-    return account;
   }
 
   async calculatePriceAndMarketCap(
