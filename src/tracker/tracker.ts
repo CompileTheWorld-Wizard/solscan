@@ -204,8 +204,6 @@ class TransactionTracker {
 
         // Update transaction with market cap data
         if (marketCapData) {
-          console.log(`🔍 [TRACKER MARKETCAP] Updating transaction ${signature.substring(0, 8)}... with marketCap=${marketCapData.marketCap}, totalSupply=${marketCapData.totalSupply}, tokenPriceSol=${tokenPriceSol}, tokenPriceUsd=${marketCapData.tokenPriceUsd}`);
-          
           // Only update if we have valid data (don't save null/0 when calculation failed)
           if (marketCapData.marketCap !== null || marketCapData.totalSupply !== null || marketCapData.tokenPriceUsd !== null) {
             await dbService.updateTransactionMarketCap(
@@ -215,11 +213,7 @@ class TransactionTracker {
               tokenPriceSol,
               marketCapData.tokenPriceUsd
             );
-          } else {
-            console.warn(`⚠️ [TRACKER MARKETCAP] Skipping database update - all values are null for tx ${signature.substring(0, 8)}...`);
           }
-        } else {
-          console.warn(`⚠️ [TRACKER MARKETCAP] Market cap data is null - cannot update transaction ${signature.substring(0, 8)}...`);
         }
 
         // Process wallet tracking (check/register first_buy or first_sell)
@@ -250,29 +244,22 @@ class TransactionTracker {
     platform?: string
   ): Promise<{ marketCap: number | null; totalSupply: number | null; tokenPriceUsd: number | null } | null> {
     try {
-      console.log(`🔍 [TRACKER MARKETCAP] Starting marketcap calculation for tx ${transactionId.substring(0, 8)}...`);
-      console.log(`🔍 [TRACKER MARKETCAP] Token: ${tokenAddress.substring(0, 8)}..., Price SOL: ${tokenPriceSol}`);
-      
       // Validate tokenPriceSol
       if (!tokenPriceSol || isNaN(tokenPriceSol) || !isFinite(tokenPriceSol) || tokenPriceSol <= 0) {
-        console.warn(`⚠️ [TRACKER MARKETCAP] Invalid tokenPriceSol: ${tokenPriceSol}`);
         return null;
       }
 
       // Get SOL price from Redis
       const solPriceUsd = await redisService.getLatestSolPrice();
       if (!solPriceUsd) {
-        console.error(`❌ [TRACKER MARKETCAP] Failed to fetch SOL price from Redis`);
+        console.error(`❌ Failed to fetch SOL price from Redis`);
         return null;
       }
-      console.log(`🔍 [TRACKER MARKETCAP] SOL price USD: ${solPriceUsd}`);
 
       // Calculate token price in USD
       const tokenPriceUsd = tokenPriceSol * solPriceUsd;
-      console.log(`🔍 [TRACKER MARKETCAP] Token price USD: ${tokenPriceSol} * ${solPriceUsd} = ${tokenPriceUsd}`);
       
       if (!tokenPriceUsd || isNaN(tokenPriceUsd) || !isFinite(tokenPriceUsd) || tokenPriceUsd <= 0) {
-        console.warn(`⚠️ [TRACKER MARKETCAP] Invalid tokenPriceUsd: ${tokenPriceUsd}`);
         return null;
       }
 
@@ -287,53 +274,28 @@ class TransactionTracker {
         // PumpFun/PumpAmm tokens have fixed supply of 1 billion
         totalSupply = 1_000_000_000; // 1 billion tokens
         decimals = 6; // PumpFun tokens use 6 decimals
-        console.log(`🔍 [TRACKER MARKETCAP] PumpFun/PumpAmm token detected - using fixed supply: ${totalSupply} (decimals: ${decimals})`);
         
         // Calculate market cap = total supply * token price in USD
         marketCap = totalSupply * tokenPriceUsd;
-        console.log(`🔍 [TRACKER MARKETCAP] Calculated marketcap: ${totalSupply} * ${tokenPriceUsd} = ${marketCap}`);
-        
-        if (marketCap === 0 || isNaN(marketCap) || !isFinite(marketCap)) {
-          console.warn(`⚠️ [TRACKER MARKETCAP] Invalid marketcap result: ${marketCap}`);
-        } else {
-          console.log(`✅ [TRACKER MARKETCAP] Successfully calculated marketcap: $${marketCap.toFixed(2)}`);
-        }
       } else {
         // For other platforms, fetch token supply from RPC
-        console.log(`🔍 [TRACKER MARKETCAP] Fetching token supply from RPC for ${tokenAddress.substring(0, 8)}...`);
         const supplyData = await this.getTokenTotalSupply(tokenAddress);
 
         if (supplyData) {
           totalSupply = supplyData.supply;
           decimals = supplyData.decimals;
-          console.log(`🔍 [TRACKER MARKETCAP] Token supply: ${totalSupply}, Decimals: ${decimals}`);
           
-          if (!totalSupply || isNaN(totalSupply) || !isFinite(totalSupply) || totalSupply <= 0) {
-            console.warn(`⚠️ [TRACKER MARKETCAP] Invalid totalSupply: ${totalSupply}`);
-          } else {
+          if (totalSupply && !isNaN(totalSupply) && isFinite(totalSupply) && totalSupply > 0) {
             // Calculate market cap = total supply * token price in USD
             marketCap = totalSupply * tokenPriceUsd;
-            console.log(`🔍 [TRACKER MARKETCAP] Calculated marketcap: ${totalSupply} * ${tokenPriceUsd} = ${marketCap}`);
-            
-            if (marketCap === 0 || isNaN(marketCap) || !isFinite(marketCap)) {
-              console.warn(`⚠️ [TRACKER MARKETCAP] Invalid marketcap result: ${marketCap}`);
-            } else {
-              console.log(`✅ [TRACKER MARKETCAP] Successfully calculated marketcap: $${marketCap.toFixed(2)}`);
-            }
           }
-        } else {
-          console.warn(`⚠️ [TRACKER MARKETCAP] Token supply data is null - cannot calculate marketcap`);
         }
       }
 
       const result = { marketCap, totalSupply, tokenPriceUsd };
-      console.log(`🔍 [TRACKER MARKETCAP] Returning: marketCap=${marketCap}, totalSupply=${totalSupply}, tokenPriceUsd=${tokenPriceUsd}`);
       return result;
     } catch (error: any) {
-      console.error(`❌ [TRACKER MARKETCAP] Failed to calculate market cap data for ${transactionId}:`, error?.message || error);
-      if (error instanceof Error) {
-        console.error(`❌ [TRACKER MARKETCAP] Error stack: ${error.stack}`);
-      }
+      console.error(`❌ Failed to calculate market cap data for ${transactionId}:`, error?.message || error);
       return null;
     }
   }
@@ -379,8 +341,6 @@ class TransactionTracker {
       } | null = null;
 
       if (marketCapData) {
-        console.log(`🔍 [TRACKER WALLET] Building marketData from marketCapData: marketCap=${marketCapData.marketCap}, totalSupply=${marketCapData.totalSupply}, tokenPriceUsd=${marketCapData.tokenPriceUsd}`);
-        
         // Determine decimals based on platform
         // PumpFun and PumpAmm tokens always use 6 decimals
         const isPumpFunOrPumpAmm = result.platform === "PumpFun" || result.platform === "PumpFun Amm";
@@ -388,16 +348,11 @@ class TransactionTracker {
         
         if (isPumpFunOrPumpAmm) {
           decimals = 6; // PumpFun/PumpAmm tokens always use 6 decimals
-          console.log(`🔍 [TRACKER WALLET] PumpFun/PumpAmm token - using fixed decimals: 6`);
         } else if (tokenAddress) {
           // For other platforms, fetch decimals from token supply
-          console.log(`🔍 [TRACKER WALLET] Fetching decimals for token ${tokenAddress.substring(0, 8)}...`);
           const supplyData = await this.getTokenTotalSupply(tokenAddress);
           if (supplyData) {
             decimals = supplyData.decimals;
-            console.log(`🔍 [TRACKER WALLET] Set decimals to ${supplyData.decimals}`);
-          } else {
-            console.warn(`⚠️ [TRACKER WALLET] Could not fetch decimals for token ${tokenAddress.substring(0, 8)}...`);
           }
         }
 
@@ -407,10 +362,6 @@ class TransactionTracker {
           price: marketCapData.tokenPriceUsd,
           decimals: decimals
         };
-        
-        console.log(`🔍 [TRACKER WALLET] Final marketData: market_cap=${marketData.market_cap}, supply=${marketData.supply}, price=${marketData.price}, decimals=${marketData.decimals}`);
-      } else {
-        console.warn(`⚠️ [TRACKER WALLET] marketCapData is null - no market data will be saved`);
       }
 
       // Calculate open position count for BUY events
@@ -666,52 +617,37 @@ class TransactionTracker {
    */
   private async getTokenTotalSupply(tokenAddress: string): Promise<{ supply: number; decimals: number } | null> {
     if (!this.solanaConnection) {
-      console.error('❌ [TRACKER MARKETCAP] Solana connection not initialized');
       return null;
     }
 
     try {
-      console.log(`🔍 [TRACKER MARKETCAP] Creating PublicKey for token: ${tokenAddress}`);
       const mintPublicKey = new PublicKey(tokenAddress);
-      console.log(`🔍 [TRACKER MARKETCAP] Calling getTokenSupply for ${tokenAddress.substring(0, 8)}...`);
-      
       const tokenSupply = await this.solanaConnection.getTokenSupply(mintPublicKey);
-      console.log(`🔍 [TRACKER MARKETCAP] Token supply response:`, tokenSupply ? 'exists' : 'null', tokenSupply?.value ? 'has value' : 'no value');
 
       if (!tokenSupply || !tokenSupply.value) {
-        console.warn(`⚠️ [TRACKER MARKETCAP] Token supply is null or missing value for ${tokenAddress.substring(0, 8)}...`);
         return null;
       }
 
       const rawSupply = parseFloat(tokenSupply.value.amount);
       const decimals = tokenSupply.value.decimals;
-      console.log(`🔍 [TRACKER MARKETCAP] Raw supply: ${rawSupply}, Decimals: ${decimals}`);
       
       if (isNaN(rawSupply) || !isFinite(rawSupply) || rawSupply <= 0) {
-        console.warn(`⚠️ [TRACKER MARKETCAP] Invalid raw supply: ${rawSupply}`);
         return null;
       }
       
       if (isNaN(decimals) || decimals < 0 || decimals > 18) {
-        console.warn(`⚠️ [TRACKER MARKETCAP] Invalid decimals: ${decimals}`);
         return null;
       }
 
       const supply = rawSupply / Math.pow(10, decimals);
-      console.log(`🔍 [TRACKER MARKETCAP] Total supply (after decimals): ${rawSupply} / 10^${decimals} = ${supply}`);
 
       if (supply <= 0 || !isFinite(supply)) {
-        console.warn(`⚠️ [TRACKER MARKETCAP] Invalid calculated supply: ${supply}`);
         return null;
       }
 
-      console.log(`✅ [TRACKER MARKETCAP] Successfully fetched token supply: ${supply}`);
       return { supply, decimals };
     } catch (error: any) {
-      console.error(`❌ [TRACKER MARKETCAP] Failed to fetch token supply for ${tokenAddress.substring(0, 8)}...:`, error?.message || error);
-      if (error instanceof Error) {
-        console.error(`❌ [TRACKER MARKETCAP] Error stack: ${error.stack}`);
-      }
+      console.error(`❌ Failed to fetch token supply for ${tokenAddress.substring(0, 8)}...:`, error?.message || error);
       return null;
     }
   }

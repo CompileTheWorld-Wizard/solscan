@@ -13,9 +13,8 @@ import { convertEventToTrackerFormat } from './eventConverter';
 import { ParsedEvent, ParsedTransaction } from './type';
 import { extractBondingCurveForEvent } from './utils/transactionUtils';
 import { StreamerService } from './streamerService';
-import * as fs from 'fs';
-import * as path from 'path';
-import { isObject } from "lodash";
+import pumpFunIdl from './idls/pumpfun/pump_0.1.0.json';
+import pumpAmmIdl from './idls/pumpAmm/pump_amm_0.1.0.json';
 
 const PUMP_FUN_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 const PUMP_AMM_PROGRAM_ID = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
@@ -83,49 +82,12 @@ class LiquidityPoolMonitor {
     // Initialize streamer
     this.initializeStreamer();
 
-    // Load IDL files for account decoding
-    // Try multiple possible paths for IDL files
-    const possiblePaths = [
-      path.join(__dirname, '../parsers/pumpFun/idls/pump_0.1.0.json'),
-      path.join(__dirname, '../parsers/pumpAmm/idls/pump_amm_0.1.0.json'),
-      path.join(process.cwd(), 'src/parsers/pumpFun/idls/pump_0.1.0.json'),
-      path.join(process.cwd(), 'src/parsers/pumpAmm/idls/pump_amm_0.1.0.json'),
-      path.join(process.cwd(), 'dist/parsers/pumpFun/idls/pump_0.1.0.json'),
-      path.join(process.cwd(), 'dist/parsers/pumpAmm/idls/pump_amm_0.1.0.json'),
-    ];
-
-    let programIdl;
-    let loadedPath: string | null = null;
-    
+    // Load IDL files for account decoding using imports
     try {
-      // Try to find and load an IDL file
-      for (const idlPath of possiblePaths) {
-        if (fs.existsSync(idlPath)) {
-          try {
-            programIdl = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
-            loadedPath = idlPath;
-            console.log(`✅ Loaded IDL file from: ${idlPath}`);
-            break;
-          } catch (parseError) {
-            console.warn(`⚠️ Failed to parse IDL file at ${idlPath}:`, parseError);
-            continue;
-          }
-        }
-      }
-
-      if (!programIdl) {
-        console.warn('⚠️ IDL files not found at any of the expected paths. Pool monitoring will work but account decoding may fail.');
-        console.warn('   Searched paths:', possiblePaths);
-        // Create a minimal valid IDL to prevent errors - account decoding just won't work
-        programIdl = {
-          address: '',
-          metadata: { name: '', version: '', spec: '' },
-          instructions: [],
-          accounts: []
-        } as Idl;
-      }
-
+      // Use pumpFun IDL as default (or pumpAmm if needed)
+      const programIdl = pumpFunIdl as Idl;
       this.accountCoder = new BorshAccountsCoder(programIdl);
+      console.log('✅ Loaded IDL file for account decoding');
     } catch (error: any) {
       console.error('❌ Failed to initialize account coder:', error?.message || error);
       if (error instanceof Error && error.stack) {
@@ -527,7 +489,6 @@ class LiquidityPoolMonitor {
       
       // Validate priceUsd
       if (!priceUsd || isNaN(priceUsd) || !isFinite(priceUsd) || priceUsd <= 0) {
-        console.warn(`⚠️ [MARKETCAP DEBUG] Invalid priceUsd: ${priceUsd} (tokenPriceSol: ${tokenPriceSol}, solPriceUsd: ${solPriceUsd})`);
         return;
       }
 
@@ -541,64 +502,28 @@ class LiquidityPoolMonitor {
       if (isPumpFunOrPumpAmm) {
         // PumpFun/PumpAmm tokens have fixed supply of 1 billion
         const totalSupply = 1_000_000_000; // 1 billion tokens
-        console.log(`🔍 [MARKETCAP DEBUG] PumpFun/PumpAmm token detected (platform: ${platform}) - using fixed supply: ${totalSupply}`);
-        console.log(`🔍 [MARKETCAP DEBUG] Price USD: ${priceUsd}, Price SOL: ${tokenPriceSol}`);
-        
         marketCap = totalSupply * priceUsd;
-        console.log(`🔍 [MARKETCAP DEBUG] Calculated marketcap: ${totalSupply} * ${priceUsd} = ${marketCap}`);
-        
-        if (marketCap === 0 || isNaN(marketCap) || !isFinite(marketCap)) {
-          console.warn(`⚠️ [MARKETCAP DEBUG] Invalid marketcap result: ${marketCap} (totalSupply: ${totalSupply}, priceUsd: ${priceUsd})`);
-        } else {
-          console.log(`✅ [MARKETCAP DEBUG] Successfully calculated marketcap: $${marketCap.toFixed(2)}`);
-        }
       } else {
         // For other platforms, fetch token supply from RPC
         try {
-          console.log(`🔍 [MARKETCAP DEBUG] Starting marketcap calculation for token ${tokenAddress.substring(0, 8)}...`);
-          console.log(`🔍 [MARKETCAP DEBUG] Price USD: ${priceUsd}, Price SOL: ${tokenPriceSol}`);
-          
           const mintPublicKey = new PublicKey(tokenAddress);
-          console.log(`🔍 [MARKETCAP DEBUG] Fetching token supply for mint: ${tokenAddress}`);
-          
           const tokenSupply = await this.solanaConnection.getTokenSupply(mintPublicKey);
-          console.log(`🔍 [MARKETCAP DEBUG] Token supply response:`, tokenSupply ? 'exists' : 'null', tokenSupply?.value ? 'has value' : 'no value');
           
           if (tokenSupply && tokenSupply.value) {
             const rawSupply = parseFloat(tokenSupply.value.amount);
             const decimals = tokenSupply.value.decimals;
-            console.log(`🔍 [MARKETCAP DEBUG] Raw supply: ${rawSupply}, Decimals: ${decimals}`);
             
-            if (isNaN(rawSupply) || !isFinite(rawSupply) || rawSupply <= 0) {
-              console.warn(`⚠️ [MARKETCAP DEBUG] Invalid raw supply: ${rawSupply}`);
-            } else if (isNaN(decimals) || decimals < 0 || decimals > 18) {
-              console.warn(`⚠️ [MARKETCAP DEBUG] Invalid decimals: ${decimals}`);
-            } else {
+            if (!isNaN(rawSupply) && isFinite(rawSupply) && rawSupply > 0 && 
+                !isNaN(decimals) && decimals >= 0 && decimals <= 18) {
               const totalSupply = rawSupply / Math.pow(10, decimals);
-              console.log(`🔍 [MARKETCAP DEBUG] Total supply (after decimals): ${totalSupply}`);
               
-              if (totalSupply <= 0 || !isFinite(totalSupply)) {
-                console.warn(`⚠️ [MARKETCAP DEBUG] Invalid total supply: ${totalSupply}`);
-              } else {
+              if (totalSupply > 0 && isFinite(totalSupply)) {
                 marketCap = totalSupply * priceUsd;
-                console.log(`🔍 [MARKETCAP DEBUG] Calculated marketcap: ${totalSupply} * ${priceUsd} = ${marketCap}`);
-                
-                if (marketCap === 0 || isNaN(marketCap) || !isFinite(marketCap)) {
-                  console.warn(`⚠️ [MARKETCAP DEBUG] Invalid marketcap result: ${marketCap} (totalSupply: ${totalSupply}, priceUsd: ${priceUsd})`);
-                } else {
-                  console.log(`✅ [MARKETCAP DEBUG] Successfully calculated marketcap: $${marketCap.toFixed(2)}`);
-                }
               }
             }
-          } else {
-            console.warn(`⚠️ [MARKETCAP DEBUG] Token supply is null or missing value. tokenSupply:`, tokenSupply);
           }
         } catch (error) {
-          console.error(`❌ [MARKETCAP DEBUG] Failed to fetch token supply for ${tokenAddress.substring(0, 8)}...:`, error);
-          if (error instanceof Error) {
-            console.error(`❌ [MARKETCAP DEBUG] Error message: ${error.message}`);
-            console.error(`❌ [MARKETCAP DEBUG] Error stack: ${error.stack}`);
-          }
+          console.error(`❌ Failed to fetch token supply for ${tokenAddress.substring(0, 8)}...:`, error);
         }
       }
 
@@ -626,7 +551,8 @@ class LiquidityPoolMonitor {
         
         // Validate that session token address matches (safety check)
         if (sessionTokenAddress !== tokenAddress) {
-          console.warn(`⚠️ [MARKETCAP DEBUG] Session token address mismatch: session has ${sessionTokenAddress.substring(0, 8)}..., but update is for ${tokenAddress.substring(0, 8)}...`);
+          // Session token address mismatch - skip this update
+          continue;
         }
 
         // Use createdAt timestamp from stream (slot timestamp) if available, otherwise fallback to current time
@@ -657,10 +583,6 @@ class LiquidityPoolMonitor {
         // Only store marketcap if it's a valid positive number
         // Use null if calculation failed (marketCap is 0 due to error)
         const marketcapValue = (marketCap > 0 && isFinite(marketCap)) ? marketCap : null;
-        
-        if (marketcapValue === null && marketCap === 0) {
-          console.warn(`⚠️ [MARKETCAP DEBUG] Storing null marketcap for session ${sessionKey.substring(0, 20)}... (calculation resulted in 0 or failed)`);
-        }
         
         session.timeseriesData.push({
           timestamp: timestampISO,
