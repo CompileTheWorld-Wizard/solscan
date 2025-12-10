@@ -14,6 +14,7 @@ import meteoraDBCIdl from "./idls/meteoraDBC/meteora_dbc_0.1.7.json";
 import meteoraDLMMIdl from "./idls/meteoraDlmm/meteora_dlmm_0.10.1.json";
 import orcaIdl from "./idls/orca/orca_whirlpool_0.3.6.json";
 import pancakeSwapLiquidityIdl from "./idls/pancakeSwap/pancake_swap_0.1.0.json";
+import goonfiIdl from "./idls/goonfi/goonfi_0.1.0.json"
 
 const PUMP_PROGRAM_ID = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
 const PUMP_AMM_PROGRAM_ID = new PublicKey("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA");
@@ -27,6 +28,7 @@ const METEORA_DLMM_PROGRAM_ID = new PublicKey("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSD
 const ORCA_PROGRAM_ID = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const JUPITER_AGGREGATOR_PROGRAM_ID = new PublicKey("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
 const PANCAKE_SWAP_LIQUIDITY_PROGRAM_ID = new PublicKey("HpNfyc2Saw7RKkQd8nEL4khUcuPhQ7WwY1B2qjx8jxFq");
+const GOONFI_PROGRAM_ID = new PublicKey("goonERTdGsjnkZqWuVjs73BZ3Pb9qoCUdBUL17BnS5j")
 
 /**
  * Ladybug Streamer Service
@@ -64,6 +66,7 @@ class LadybugStreamerService {
       this.parser.addIDL(ORCA_PROGRAM_ID, orcaIdl as SerumIdl);
       this.parser.addIDL(RAYDIUM_LAUNCHPAD_PROGRAM_ID, raydiumLaunchpadIdl as Idl);
       this.parser.addIDL(PANCAKE_SWAP_LIQUIDITY_PROGRAM_ID, pancakeSwapLiquidityIdl as Idl);
+      this.parser.addIDL(GOONFI_PROGRAM_ID, goonfiIdl as SerumIdl);
     } catch (error) {
       console.error(`❌ Error loading pump IDL:`, error);
     }

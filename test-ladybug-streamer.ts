@@ -43,7 +43,8 @@ async function testLadybugStreamer() {
       // "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG", // MeteoraDammV2 program
       // "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN", // MeteoraDBC program
       // "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo", // MeteoraDLMM program
-      "HpNfyc2Saw7RKkQd8nEL4khUcuPhQ7WwY1B2qjx8jxFq", // Pancakeswap program
+      // "HpNfyc2Saw7RKkQd8nEL4khUcuPhQ7WwY1B2qjx8jxFq", // Pancakeswap program
+      "goonERTdGsjnkZqWuVjs73BZ3Pb9qoCUdBUL17BnS5j", // Goonfi program
     ];
 
     ladybugStreamerService.addAddresses(addressesToAdd);
