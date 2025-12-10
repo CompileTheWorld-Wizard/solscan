@@ -151,7 +151,7 @@ async function testLadybugStreamer() {
       console.log("⏳ Streaming transactions for 30 seconds...");
       console.log("   (Press Ctrl+C to stop early)\n");
 
-      await new Promise(resolve => setTimeout(resolve, 30000));
+      await new Promise(resolve => setTimeout(resolve, 3000000));
 
       // Test: Stop streaming
       console.log("\n9️⃣  Testing stop()...");
