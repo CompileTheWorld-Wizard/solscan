@@ -55,8 +55,8 @@ class LadybugStreamerService {
       this.parser.addIDL(RAYDIUM_CLMM_PROGRAM_ID, raydiumClmmIdl as Idl);
       this.parser.addIDL(RAYDIUM_LIQUIDITY_PROGRAM_ID, raydiumLiquidityIdl as SerumIdl);
       this.parser.addIDL(RAYDIUM_CP_PROGRAM_ID, raydiumCPIdl as Idl);
-      this.parser.addIDL(METEORA_DAMM_V2_PROGRAM_ID, meteoraDammV2Idl as Idl);
       this.parser.addIDL(JUPITER_AGGREGATOR_PROGRAM_ID, jupiterAggregatorIdl as Idl);
+      this.parser.addIDL(METEORA_DAMM_V2_PROGRAM_ID, meteoraDammV2Idl as Idl);
       this.parser.addIDL(METEORA_DBC_PROGRAM_ID, meteoraDBCIdl as Idl);
       this.parser.addIDL(METEORA_DLMM_PROGRAM_ID, meteoraDLMMIdl as Idl);
       this.parser.addIDL(ORCA_PROGRAM_ID, orcaIdl as SerumIdl);
