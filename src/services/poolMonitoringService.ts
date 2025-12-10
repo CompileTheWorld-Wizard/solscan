@@ -110,14 +110,28 @@ class LiquidityPoolMonitor {
    * Handle streamer errors and reconnect from lastSlot
    */
   private handleStreamerError(error: any): void {
-    console.log(error)
     if (!this.streamerService) {
       return;
     }
 
-    // Only try to reconnect if we have pools to monitor
+    // If no pools to monitor, stop the streamer to prevent infinite error loop
     if (this.monitoredPools.size === 0) {
-      console.log('⚠️ Streamer error but no pools to monitor - will reconnect when pools are added');
+      // Always disable auto-reconnect and stop, even if not currently streaming
+      // This prevents the streamer from trying to reconnect
+      try {
+        this.streamerService.enableAutoReconnect(false);
+        if (this.streamerService.getIsStreaming()) {
+          this.streamerService.stop();
+          console.log('⚠️ Streamer error but no pools to monitor - stopped streamer');
+        }
+      } catch (stopError: any) {
+        // Ignore errors when stopping - streamer might already be stopped
+      }
+      return;
+    }
+
+    // Only handle errors if streamer is actually streaming
+    if (!this.streamerService.getIsStreaming()) {
       return;
     }
 
@@ -647,6 +661,8 @@ class LiquidityPoolMonitor {
   private stopStreamer(): void {
     if (this.streamerService && this.streamerService.getIsStreaming()) {
       try {
+        // Disable auto-reconnect to prevent automatic reconnection
+        this.streamerService.enableAutoReconnect(false);
         this.streamerService.stop();
         console.log('✅ Stopped pool monitoring streamer');
       } catch (error: any) {
