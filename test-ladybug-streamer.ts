@@ -40,8 +40,8 @@ async function testLadybugStreamer() {
       // "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj", // RaydiumLaunchPad program
       // "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4", // JupiterAggregator program
       // "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc", // Orca program
-      "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG", // MeteoraDammV2 program
-      // "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN", // MeteoraDBC program
+      // "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG", // MeteoraDammV2 program
+      "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN", // MeteoraDBC program
       // "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo", // MeteoraDLMM program
     ];
 
