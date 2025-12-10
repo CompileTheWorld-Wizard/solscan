@@ -59,6 +59,7 @@ class LiquidityPoolMonitor {
   private xToken: string;
   private lastSlot: number | null = null; // Track last processed slot for reconnection
   private fromSlot: number | null = null; // Slot to start from (for first buy recovery)
+  private isShuttingDown: boolean = false; // Flag to prevent error handling during shutdown
 
   constructor(solanaConnection: Connection) {
     this.solanaConnection = solanaConnection;
@@ -114,11 +115,17 @@ class LiquidityPoolMonitor {
       return;
     }
 
+    // Ignore errors if we're shutting down or already stopped
+    if (this.isShuttingDown || !this.streamerService.getIsStreaming()) {
+      return;
+    }
+
     // If no pools to monitor, stop the streamer to prevent infinite error loop
     if (this.monitoredPools.size === 0) {
       // Always disable auto-reconnect and stop, even if not currently streaming
       // This prevents the streamer from trying to reconnect
       try {
+        this.isShuttingDown = true; // Set flag to prevent further error handling
         this.streamerService.enableAutoReconnect(false);
         if (this.streamerService.getIsStreaming()) {
           this.streamerService.stop();
@@ -127,11 +134,6 @@ class LiquidityPoolMonitor {
       } catch (stopError: any) {
         // Ignore errors when stopping - streamer might already be stopped
       }
-      return;
-    }
-
-    // Only handle errors if streamer is actually streaming
-    if (!this.streamerService.getIsStreaming()) {
       return;
     }
 
@@ -628,6 +630,9 @@ class LiquidityPoolMonitor {
       return;
     }
 
+    // Reset shutdown flag when starting
+    this.isShuttingDown = false;
+
     if (!this.streamerService.getIsStreaming()) {
       try {
         // If fromSlot is set, start from that slot
@@ -652,7 +657,14 @@ class LiquidityPoolMonitor {
    * Stop the streamer
    */
   private stopStreamer(): void {
-    if (this.streamerService && this.streamerService.getIsStreaming()) {
+    if (!this.streamerService) {
+      return;
+    }
+
+    // Set shutdown flag to prevent error handling during shutdown
+    this.isShuttingDown = true;
+
+    if (this.streamerService.getIsStreaming()) {
       try {
         // Disable auto-reconnect to prevent automatic reconnection
         this.streamerService.enableAutoReconnect(false);
@@ -678,6 +690,11 @@ class LiquidityPoolMonitor {
         this.stopStreamer();
       }
       return;
+    }
+
+    // Reset shutdown flag if we're adding pools back
+    if (this.isShuttingDown && this.monitoredPools.size > 0) {
+      this.isShuttingDown = false;
     }
 
     // For pool monitoring, we track pool addresses (not program addresses)
@@ -1295,6 +1312,9 @@ class LiquidityPoolMonitor {
 
   async cleanup(): Promise<void> {
     console.log('🧹 Cleaning up pool monitoring service...');
+    
+    // Set shutdown flag first
+    this.isShuttingDown = true;
     
     // Stop the streamer
     this.stopStreamer();
