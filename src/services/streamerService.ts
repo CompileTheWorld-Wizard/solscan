@@ -35,7 +35,7 @@ const GOONFI_PROGRAM_ID = new PublicKey("goonERTdGsjnkZqWuVjs73BZ3Pb9qoCUdBUL17B
  * A new streamer model using ladybug-sdk for transaction streaming
  * Keeps track of addresses using an array variable
  */
-class StreamerService {
+export class StreamerService {
   private parser: Parser;
   private streamer: TransactionStreamer | null = null;
   private trackedAddresses: string[] = []; // Array to track addresses
@@ -222,7 +222,41 @@ class StreamerService {
   public getIsStreaming(): boolean {
     return this.isStreaming;
   }
-}
 
-// Export singleton instance
-export const streamerService = new StreamerService();
+  /**
+   * Set error callback
+   */
+  public onError(callback: (error: any) => void): void {
+    if (!this.streamer) {
+      throw new Error("Streamer not initialized. Call initialize() first.");
+    }
+    this.streamer.onError(callback);
+  }
+
+  /**
+   * Enable or disable auto-reconnect
+   */
+  public enableAutoReconnect(enabled: boolean): void {
+    if (!this.streamer) {
+      throw new Error("Streamer not initialized. Call initialize() first.");
+    }
+    this.streamer.enableAutoReconnect(enabled);
+  }
+
+  /**
+   * Set fromSlot for streaming
+   */
+  public setFromSlot(slot: number): void {
+    if (!this.streamer) {
+      throw new Error("Streamer not initialized. Call initialize() first.");
+    }
+    this.streamer.setFromSlot(slot);
+  }
+
+  /**
+   * Get the underlying TransactionStreamer instance (for advanced operations)
+   */
+  public getStreamer(): TransactionStreamer | null {
+    return this.streamer;
+  }
+}

@@ -8,14 +8,11 @@ import { BorshAccountsCoder } from "@coral-xyz/anchor";
 import { PublicKey, Connection } from "@solana/web3.js";
 import { dbService } from '../database';
 import { redisService } from './redisService';
-import { Parser, TransactionStreamer } from "@shyft-to/ladybug-sdk";
 import { Idl } from "@coral-xyz/anchor";
-import { Idl as SerumIdl } from "@project-serum/anchor";
 import { convertEventToTrackerFormat } from './eventConverter';
 import { ParsedEvent, ParsedTransaction } from './type';
 import { extractBondingCurveForEvent } from './utils/transactionUtils';
-import pumpIdl from "./idls/pumpfun/pump_0.1.0.json";
-import pumpAmmIdl from "./idls/pumpAmm/pump_amm_0.1.0.json";
+import { StreamerService } from './streamerService';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isObject } from "lodash";
@@ -64,9 +61,7 @@ class LiquidityPoolMonitor {
   sessions: Map<string, MonitoringSession>; // Key: walletAddress-tokenAddress-timestamp
   tokenToSessions: Map<string, Set<string>>; // Key: tokenAddress, Value: Set of sessionKeys
   monitoredTokens: Set<string>; // Track which tokens we're monitoring
-  private parser: Parser;
-  private streamer: TransactionStreamer | null = null;
-  private isStreaming: boolean = false;
+  private streamerService: StreamerService | null = null;
   private grpcUrl: string;
   private xToken: string;
   private lastSlot: number | null = null; // Track last processed slot for reconnection
@@ -85,67 +80,96 @@ class LiquidityPoolMonitor {
     this.grpcUrl = process.env.GRPC_URL;
     this.xToken = process.env.X_TOKEN;
 
-    // Initialize parser
-    this.parser = new Parser();
-    this.initializeParser();
-
     // Initialize streamer
     this.initializeStreamer();
 
     // Load IDL files for account decoding
-    const pumpFunIdlPath = path.join(__dirname, '../parsers/pumpFun/idls/pump_0.1.0.json');
-    const pumpAmmIdlPath = path.join(__dirname, '../parsers/pumpAmm/idls/pump_amm_0.1.0.json');
+    // Try multiple possible paths for IDL files
+    const possiblePaths = [
+      path.join(__dirname, '../parsers/pumpFun/idls/pump_0.1.0.json'),
+      path.join(__dirname, '../parsers/pumpAmm/idls/pump_amm_0.1.0.json'),
+      path.join(process.cwd(), 'src/parsers/pumpFun/idls/pump_0.1.0.json'),
+      path.join(process.cwd(), 'src/parsers/pumpAmm/idls/pump_amm_0.1.0.json'),
+      path.join(process.cwd(), 'dist/parsers/pumpFun/idls/pump_0.1.0.json'),
+      path.join(process.cwd(), 'dist/parsers/pumpAmm/idls/pump_amm_0.1.0.json'),
+    ];
 
     let programIdl;
+    let loadedPath: string | null = null;
+    
     try {
-      // Try pump AMM first, fallback to pump.fun
-      if (fs.existsSync(pumpAmmIdlPath)) {
-        programIdl = JSON.parse(fs.readFileSync(pumpAmmIdlPath, 'utf8'));
-      } else if (fs.existsSync(pumpFunIdlPath)) {
-        programIdl = JSON.parse(fs.readFileSync(pumpFunIdlPath, 'utf8'));
-      } else {
-        throw new Error('IDL files not found');
+      // Try to find and load an IDL file
+      for (const idlPath of possiblePaths) {
+        if (fs.existsSync(idlPath)) {
+          try {
+            programIdl = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
+            loadedPath = idlPath;
+            console.log(`✅ Loaded IDL file from: ${idlPath}`);
+            break;
+          } catch (parseError) {
+            console.warn(`⚠️ Failed to parse IDL file at ${idlPath}:`, parseError);
+            continue;
+          }
+        }
       }
+
+      if (!programIdl) {
+        console.warn('⚠️ IDL files not found at any of the expected paths. Pool monitoring will work but account decoding may fail.');
+        console.warn('   Searched paths:', possiblePaths);
+        // Create a minimal valid IDL to prevent errors - account decoding just won't work
+        programIdl = {
+          address: '',
+          metadata: { name: '', version: '', spec: '' },
+          instructions: [],
+          accounts: []
+        } as Idl;
+      }
+
       this.accountCoder = new BorshAccountsCoder(programIdl);
-    } catch (error) {
-      console.error('Failed to load IDL files:', error);
-      throw error;
+    } catch (error: any) {
+      console.error('❌ Failed to initialize account coder:', error?.message || error);
+      if (error instanceof Error && error.stack) {
+        console.error('Error stack:', error.stack);
+      }
+      // Don't throw - allow pool monitoring to continue without account decoding
+      // Create a minimal valid IDL to prevent errors
+      try {
+        const dummyIdl: Idl = {
+          address: '',
+          metadata: { name: '', version: '', spec: '' },
+          instructions: [],
+          accounts: []
+        };
+        this.accountCoder = new BorshAccountsCoder(dummyIdl);
+      } catch (e) {
+        console.error('❌ Failed to create dummy account coder:', e);
+        throw error; // Re-throw original error if we can't create a dummy
+      }
     }
   }
 
-  /**
-   * Initialize parser with IDL files
-   */
-  private initializeParser(): void {
-    try {
-      this.parser.addIDL(new PublicKey(PUMP_FUN_PROGRAM_ID), pumpIdl as Idl);
-      this.parser.addIDL(new PublicKey(PUMP_AMM_PROGRAM_ID), pumpAmmIdl as Idl);
-    } catch (error) {
-      console.error(`❌ Error loading IDL files:`, error);
-    }
-  }
 
   /**
    * Initialize the streamer
    */
   private initializeStreamer(): void {
     try {
-      this.streamer = new TransactionStreamer(this.grpcUrl, this.xToken);
-      this.streamer.addParser(this.parser);
+      this.streamerService = new StreamerService();
+      this.streamerService.initialize(this.grpcUrl, this.xToken);
       
       // Set up callback for events
-      this.streamer.onData((tx: ParsedTransaction) => {
+      this.streamerService.onData((tx: ParsedTransaction) => {
         this.handleTransaction(tx);
       });
       
       // Set up error callback for manual reconnection
-      this.streamer.onError((error: any) => {
+      this.streamerService.onError((error: any) => {
         console.error('❌ Pool monitoring streamer error:', error);
         this.handleStreamerError(error);
       });
       
       // Add PumpFun and PumpAmm program addresses to track
-      this.streamer.addAddresses([
+      this.streamerService.addAddresses([
         PUMP_FUN_PROGRAM_ID,
         PUMP_AMM_PROGRAM_ID
       ]);
@@ -160,7 +184,7 @@ class LiquidityPoolMonitor {
    * Handle streamer errors and reconnect from lastSlot
    */
   private handleStreamerError(error: any): void {
-    if (!this.streamer) {
+    if (!this.streamerService) {
       return;
     }
 
@@ -181,26 +205,24 @@ class LiquidityPoolMonitor {
    * Reconnect streamer from a specific slot
    */
   private reconnectFromSlot(slot: number): void {
-    if (!this.streamer) {
+    if (!this.streamerService) {
       return;
     }
 
     try {
       // Stop current stream
-      if (this.isStreaming) {
-        this.streamer.stop();
-        this.isStreaming = false;
+      if (this.streamerService.getIsStreaming()) {
+        this.streamerService.stop();
       }
 
       // Disable auto-reconnect when using fromSlot
-      this.streamer.enableAutoReconnect(false);
+      this.streamerService.enableAutoReconnect(false);
       
       // Set fromSlot
-      this.streamer.setFromSlot(slot);
+      this.streamerService.setFromSlot(slot);
       
       // Restart streamer
-      this.streamer.start();
-      this.isStreaming = true;
+      this.streamerService.start();
       
       console.log(`✅ Reconnected pool monitoring streamer from slot ${slot}`);
     } catch (error: any) {
@@ -663,22 +685,21 @@ class LiquidityPoolMonitor {
    * Start the streamer if not already running
    */
   private startStreamerIfNeeded(): void {
-    if (!this.streamer) {
+    if (!this.streamerService) {
       console.warn('⚠️ Streamer not initialized');
       return;
     }
 
-    if (!this.isStreaming) {
+    if (!this.streamerService.getIsStreaming()) {
       try {
         // If fromSlot is set, ensure auto-reconnect is disabled
         if (this.fromSlot !== null) {
-          this.streamer.enableAutoReconnect(false);
-          this.streamer.setFromSlot(this.fromSlot);
+          this.streamerService.enableAutoReconnect(false);
+          this.streamerService.setFromSlot(this.fromSlot);
           console.log(`📍 Starting streamer with fromSlot: ${this.fromSlot}`);
         }
         
-        this.streamer.start();
-        this.isStreaming = true;
+        this.streamerService.start();
         console.log('✅ Started pool monitoring streamer');
       } catch (error: any) {
         console.error('Failed to start pool monitoring streamer:', error?.message || error);
@@ -690,10 +711,9 @@ class LiquidityPoolMonitor {
    * Stop the streamer
    */
   private stopStreamer(): void {
-    if (this.streamer && this.isStreaming) {
+    if (this.streamerService && this.streamerService.getIsStreaming()) {
       try {
-        this.streamer.stop();
-        this.isStreaming = false;
+        this.streamerService.stop();
         console.log('✅ Stopped pool monitoring streamer');
       } catch (error: any) {
         console.error('Failed to stop pool monitoring streamer:', error?.message || error);
@@ -705,7 +725,7 @@ class LiquidityPoolMonitor {
    * Update streamer addresses when tokens are added/removed
    */
   private updateStreamerAddresses(): void {
-    if (!this.streamer) {
+    if (!this.streamerService) {
       return;
     }
 
@@ -792,9 +812,9 @@ class LiquidityPoolMonitor {
         console.log(`📍 Set fromSlot to ${slotNumber} for first buy recovery`);
         
         // Configure streamer with fromSlot
-        if (this.streamer) {
-          this.streamer.enableAutoReconnect(false); // Disable auto-reconnect when using fromSlot
-          this.streamer.setFromSlot(slotNumber);
+        if (this.streamerService) {
+          this.streamerService.enableAutoReconnect(false); // Disable auto-reconnect when using fromSlot
+          this.streamerService.setFromSlot(slotNumber);
         }
       }
     }

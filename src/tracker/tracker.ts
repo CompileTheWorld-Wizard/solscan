@@ -3,7 +3,7 @@ import { dbService } from "../database";
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { tokenQueueService } from "../services/tokenQueueService";
 import { PoolMonitoringService } from "../services/poolMonitoringService";
-import { streamerService } from "../services/streamerService";
+import { StreamerService } from "../services/streamerService";
 import { convertEventToTrackerFormat } from "../services/eventConverter";
 import { ParsedEvent, ParsedTransaction } from "../services/type";
 import { extractBondingCurveForEvent } from "../services/utils/transactionUtils";
@@ -14,6 +14,7 @@ class TransactionTracker {
   private addresses: string[] = [];
   private solanaConnection: Connection | null = null;
   private poolMonitoringService: PoolMonitoringService | null = null;
+  private streamerService: StreamerService | null = null;
   private streamerInitialized: boolean = false;
 
   constructor() {
@@ -42,17 +43,24 @@ class TransactionTracker {
     // Initialize pool monitoring service
     PoolMonitoringService.getInstance(this.solanaConnection).then(service => {
       this.poolMonitoringService = service;
+      console.log('✅ Pool monitoring service initialized successfully');
     }).catch(error => {
-      console.error('Failed to initialize pool monitoring service:', error);
+      console.error('❌ Failed to initialize pool monitoring service:', error?.message || error);
+      if (error instanceof Error) {
+        console.error('Error stack:', error.stack);
+      }
+      // Continue without pool monitoring - tracker will still work
+      this.poolMonitoringService = null;
     });
 
     // Initialize streamer for PumpFun and PumpAmm
     try {
-      streamerService.initialize(grpcUrl, xToken);
+      this.streamerService = new StreamerService();
+      this.streamerService.initialize(grpcUrl, xToken);
       this.streamerInitialized = true;
       
       // Set up callback for events
-      streamerService.onData((tx: ParsedTransaction) => {
+      this.streamerService.onData((tx: ParsedTransaction) => {
         this.handleTransaction(tx);
       });
       
@@ -72,17 +80,17 @@ class TransactionTracker {
     const newAddresses = addresses.filter(addr => addr.trim().length > 0);
     
     // If streamer is initialized and running, update tracked addresses
-    if (this.streamerInitialized) {
+    if (this.streamerInitialized && this.streamerService) {
       // Remove old addresses that are not in new list
       const addressesToRemove = this.addresses.filter(addr => !newAddresses.includes(addr));
       if (addressesToRemove.length > 0) {
-        streamerService.removeAddresses(addressesToRemove);
+        this.streamerService.removeAddresses(addressesToRemove);
       }
       
       // Add new addresses that are not already tracked
       const addressesToAdd = newAddresses.filter(addr => !this.addresses.includes(addr));
       if (addressesToAdd.length > 0) {
-        streamerService.addAddresses(addressesToAdd);
+        this.streamerService.addAddresses(addressesToAdd);
       }
     }
     
@@ -958,6 +966,9 @@ class TransactionTracker {
           const bondingCurve = extractBondingCurveForEvent(tx, event);
           if (bondingCurve) {
             result.pool = bondingCurve;
+            console.log(`✅ Extracted bonding_curve (pool) for PumpFun: ${bondingCurve.substring(0, 8)}...`);
+          } else {
+            console.log(`⚠️ Could not extract bonding_curve from compiledInstructions for PumpFun transaction`);
           }
         }
 
@@ -1040,11 +1051,19 @@ class TransactionTracker {
     // Run transaction processing and pool monitoring in parallel
     if (txType === 'BUY' || txType === 'SELL') {
       // Module 2: Pool monitoring (runs in parallel, only for BUY/SELL with pool address)
-      if (tokenAddress && result.pool && this.poolMonitoringService) {
-        const currentSlotStr = slot?.toString();
-        this.processPoolMonitoring(result, tokenAddress, signature, txType, createdAt, currentSlotStr).catch(error => {
-          console.error(`Error processing pool monitoring:`, error?.message || error);
-        });
+      if (tokenAddress && result.pool) {
+        if (!this.poolMonitoringService) {
+          console.log(`⚠️ Pool monitoring service not initialized yet, skipping pool monitoring for ${signature?.substring(0, 8)}...`);
+        } else {
+          const currentSlotStr = slot?.toString();
+          this.processPoolMonitoring(result, tokenAddress, signature, txType, createdAt, currentSlotStr).catch(error => {
+            console.error(`Error processing pool monitoring:`, error?.message || error);
+          });
+        }
+      } else {
+        if (!result.pool) {
+          console.log(`⚠️ No pool address found in result for ${signature?.substring(0, 8)}... (platform: ${result.platform})`);
+        }
       }
 
       // Module 1: Transaction data processing
@@ -1077,15 +1096,17 @@ class TransactionTracker {
     }
 
     // Ensure addresses are added to streamer
-    try {
-      const currentTracked = streamerService.getTrackedAddresses();
-      const addressesToAdd = this.addresses.filter(addr => !currentTracked.includes(addr));
-      
-      if (addressesToAdd.length > 0) {
-        streamerService.addAddresses(addressesToAdd);
+    if (this.streamerService) {
+      try {
+        const currentTracked = this.streamerService.getTrackedAddresses();
+        const addressesToAdd = this.addresses.filter(addr => !currentTracked.includes(addr));
+        
+        if (addressesToAdd.length > 0) {
+          this.streamerService.addAddresses(addressesToAdd);
+        }
+      } catch (error: any) {
+        console.error('Failed to add addresses to streamer:', error?.message || error);
       }
-    } catch (error: any) {
-      console.error('Failed to add addresses to streamer:', error?.message || error);
     }
 
     this.isRunning = true;
@@ -1094,13 +1115,18 @@ class TransactionTracker {
     tokenQueueService.start();
 
     // Start streamer for PumpFun and PumpAmm
-    try {
-      streamerService.start();
-      console.log("✅ Started streamer");
-    } catch (error: any) {
-      console.error('Failed to start streamer:', error?.message || error);
+    if (this.streamerService) {
+      try {
+        this.streamerService.start();
+        console.log("✅ Started streamer");
+      } catch (error: any) {
+        console.error('Failed to start streamer:', error?.message || error);
+        this.isRunning = false;
+        return { success: false, message: `Failed to start streamer: ${error?.message || error}` };
+      }
+    } else {
       this.isRunning = false;
-      return { success: false, message: `Failed to start streamer: ${error?.message || error}` };
+      return { success: false, message: "Streamer service not initialized" };
     }
 
     console.log('🚀 '.repeat(30));
@@ -1136,9 +1162,9 @@ class TransactionTracker {
     }
 
     // Stop streamer
-    if (this.streamerInitialized) {
+    if (this.streamerInitialized && this.streamerService) {
       try {
-        streamerService.stop();
+        this.streamerService.stop();
         console.log("✅ Stopped streamer");
       } catch (error: any) {
         console.error('Failed to stop streamer:', error?.message || error);
