@@ -154,7 +154,11 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
 
     return pairs;
   } catch (error: any) {
-    console.error('Error extracting mint-bonding_curve pairs from compiledInstructions:', error?.message || error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Error extracting mint-bonding_curve pairs from compiledInstructions:', errorMessage);
+    if (error instanceof Error && error.stack) {
+      console.error('Stack trace:', error.stack);
+    }
     return [];
   }
 }
@@ -201,7 +205,11 @@ export function matchEventWithBondingCurve(event: any, pairs: MintBondingCurvePa
 
     return null;
   } catch (error: any) {
-    console.error('Error matching event with bonding_curve:', error?.message || error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Error matching event with bonding_curve:', errorMessage);
+    if (error instanceof Error && error.stack) {
+      console.error('Stack trace:', error.stack);
+    }
     return null;
   }
 }
