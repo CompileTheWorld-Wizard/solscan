@@ -522,12 +522,12 @@
           "isSigner": false
         },
         {
-          "name": "uerCoinTokenAccount",
+          "name": "userCoinTokenAccount",
           "isMut": true,
           "isSigner": false
         },
         {
-          "name": "uerPcTokenAccount",
+          "name": "userPcTokenAccount",
           "isMut": true,
           "isSigner": false
         },
@@ -1008,12 +1008,12 @@
           "isSigner": false
         },
         {
-          "name": "uerSourceTokenAccount",
+          "name": "userSourceTokenAccount",
           "isMut": true,
           "isSigner": false
         },
         {
-          "name": "uerDestinationTokenAccount",
+          "name": "userDestinationTokenAccount",
           "isMut": true,
           "isSigner": false
         },
@@ -1194,12 +1194,12 @@
           "isSigner": false
         },
         {
-          "name": "uerSourceTokenAccount",
+          "name": "userSourceTokenAccount",
           "isMut": true,
           "isSigner": false
         },
         {
-          "name": "uerDestinationTokenAccount",
+          "name": "userDestinationTokenAccount",
           "isMut": true,
           "isSigner": false
         },
@@ -1438,6 +1438,116 @@
           "type": "publicKey"
         }
       ]
+    },
+    {
+      "name": "swapBaseInV2",
+      "accounts": [
+        {
+          "name": "tokenProgram",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "amm",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "ammAuthority",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "ammCoinVault",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "ammPcVault",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "userSourceTokenAccount",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "userDestinationTokenAccount",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "userWalletAccount",
+          "isMut": false,
+          "isSigner": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amountIn",
+          "type": "u64"
+        },
+        {
+          "name": "minimumAmountOut",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "swapBaseOutV2",
+      "accounts": [
+        {
+          "name": "tokenProgram",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "amm",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "ammAuthority",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "ammCoinVault",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "ammPcVault",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "userSourceTokenAccount",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "userDestinationTokenAccount",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "userWalletAccount",
+          "isMut": false,
+          "isSigner": true
+        }
+      ],
+      "args": [
+        {
+          "name": "maxAmountIn",
+          "type": "u64"
+        },
+        {
+          "name": "amountOut",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -1449,10 +1559,7 @@
           {
             "name": "owner",
             "type": {
-              "array": [
-                "u64",
-                4
-              ]
+              "array": ["u64", 4]
             }
           },
           {
@@ -1469,10 +1576,7 @@
           {
             "name": "padding1",
             "type": {
-              "array": [
-                "u64",
-                8
-              ]
+              "array": ["u64", 8]
             }
           },
           {
@@ -1529,28 +1633,19 @@
           {
             "name": "padding2",
             "type": {
-              "array": [
-                "u64",
-                6
-              ]
+              "array": ["u64", 6]
             }
           },
           {
             "name": "replaceBuyClientId",
             "type": {
-              "array": [
-                "u64",
-                10
-              ]
+              "array": ["u64", 10]
             }
           },
           {
             "name": "replaceSellClientId",
             "type": {
-              "array": [
-                "u64",
-                10
-              ]
+              "array": ["u64", 10]
             }
           },
           {
@@ -1580,10 +1675,7 @@
           {
             "name": "padding3",
             "type": {
-              "array": [
-                "u64",
-                10
-              ]
+              "array": ["u64", 10]
             }
           },
           {
@@ -1773,10 +1865,7 @@
           {
             "name": "padding",
             "type": {
-              "array": [
-                "u64",
-                2
-              ]
+              "array": ["u64", 2]
             }
           }
         ]
@@ -1820,10 +1909,7 @@
           {
             "name": "owner",
             "type": {
-              "array": [
-                "u64",
-                4
-              ]
+              "array": ["u64", 4]
             }
           },
           {
@@ -1944,19 +2030,13 @@
           {
             "name": "pending1",
             "type": {
-              "array": [
-                "u64",
-                28
-              ]
+              "array": ["u64", 28]
             }
           },
           {
             "name": "pending2",
             "type": {
-              "array": [
-                "u64",
-                32
-              ]
+              "array": ["u64", 32]
             }
           }
         ]
@@ -2313,5 +2393,9 @@
       "name": "UnknownAmmError",
       "msg": "Unknown Amm Error"
     }
-  ]
+  ],
+    "metadata": {
+        "instruction_selector_type": "index",
+        "address": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
+    }
 }
