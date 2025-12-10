@@ -57,14 +57,13 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
       compiledInstructionsLength: Array.isArray(compiledInstructions) ? compiledInstructions.length : 0
     });
 
-    // First, try to extract from compiledInstructions (with data.name)
+    // First, try to extract from compiledInstructions
     if (Array.isArray(compiledInstructions) && compiledInstructions.length > 0) {
       console.log(`[extractAllMintBondingCurvePairs] 📋 Found ${compiledInstructions.length} compiledInstructions, checking for PumpFun...`);
       
       let pumpFunInstructionsFound = 0;
       let pumpFunInstructionsWithValidAccounts = 0;
-      let pumpFunInstructionsWithDataName = 0;
-      // Optimize: Check programId first (faster check), then accounts, then data.name
+      // Optimize: Check programId first (faster check), then accounts
       for (let i = 0; i < compiledInstructions.length; i++) {
         const ix = compiledInstructions[i];
         
@@ -82,7 +81,7 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
           dataName: ix.data?.name
         });
         
-        // Check accounts length before accessing data
+        // Check accounts length
         const accounts = ix.accounts;
         if (!Array.isArray(accounts) || accounts.length < 4) {
           console.log(`[extractAllMintBondingCurvePairs] ⚠️ PumpFun instruction at index ${i} has invalid accounts:`, {
@@ -94,36 +93,19 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
         
         pumpFunInstructionsWithValidAccounts++;
         console.log(`[extractAllMintBondingCurvePairs] ✅ PumpFun instruction at index ${i} has valid accounts (length ${accounts.length})`);
-        
-        // Check data.name last (most expensive check)
-        const dataName = ix.data?.name;
-        if (!dataName) {
-          console.log(`[extractAllMintBondingCurvePairs] ⚠️ PumpFun instruction at index ${i} has no data.name:`, {
-            hasData: !!ix.data,
-            instruction: ix,
-            dataKeys: ix.data ? Object.keys(ix.data) : []
-          });
-          continue;
-        }
-        
-        pumpFunInstructionsWithDataName++;
-        console.log(`[extractAllMintBondingCurvePairs] ✅ PumpFun instruction at index ${i} has data.name: "${dataName}"`);
-        
-        // Use direct comparison instead of toLowerCase when possible
-        const name = dataName.toLowerCase();
-        if (name !== 'buy' && name !== 'sell') {
-          console.log(`[extractAllMintBondingCurvePairs] ⚠️ PumpFun instruction at index ${i} has data.name "${dataName}" which is not 'buy' or 'sell'`);
-          continue;
-        }
 
         // Extract addresses (already validated length >= 4)
         const mint = accounts[2];
         const bondingCurve = accounts[3];
         
+        // Try to get instruction name from data.name if available, otherwise use 'unknown'
+        const dataName = ix.data?.name;
+        const instructionName = dataName ? dataName.toLowerCase() : 'unknown';
+        
         console.log(`[extractAllMintBondingCurvePairs] 🔍 Extracting from instruction ${i}:`, {
           mint: typeof mint === 'string' ? `${mint.substring(0, 8)}...` : `[${typeof mint}]`,
           bondingCurve: typeof bondingCurve === 'string' ? `${bondingCurve.substring(0, 8)}...` : `[${typeof bondingCurve}]`,
-          instructionName: name
+          instructionName: instructionName
         });
         
         // Fast validation: check type and length
@@ -132,12 +114,12 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
           pairs.push({
             mint,
             bondingCurve,
-            instructionName: name
+            instructionName: instructionName
           });
           console.log(`[extractAllMintBondingCurvePairs] ✅ Successfully extracted pair from instruction ${i}:`, {
             mint: `${mint.substring(0, 8)}...`,
             bondingCurve: `${bondingCurve.substring(0, 8)}...`,
-            instructionName: name
+            instructionName: instructionName
           });
         } else {
           console.log(`[extractAllMintBondingCurvePairs] ⚠️ Invalid mint/bondingCurve types in instruction ${i}:`, {
@@ -153,7 +135,6 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
         totalInstructions: compiledInstructions.length,
         pumpFunInstructionsFound,
         pumpFunInstructionsWithValidAccounts,
-        pumpFunInstructionsWithDataName,
         pairsExtracted: pairs.length
       });
     } else {
