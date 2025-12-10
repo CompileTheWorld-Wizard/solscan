@@ -1,36 +1,29 @@
 require("dotenv").config();
-import Client, { CommitmentLevel } from "@triton-one/yellowstone-grpc";
-import { SubscribeRequest } from "@triton-one/yellowstone-grpc/dist/types/grpc/geyser";
-import * as bs58 from "bs58";
-import { parseTransaction } from "../parsers/parseFilter";
 import { dbService } from "../database";
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { tokenQueueService } from "../services/tokenQueueService";
 import { PoolMonitoringService } from "../services/poolMonitoringService";
-
-const RETRY_DELAY_MS = 1000
-const MAX_RETRY_WITH_LAST_SLOT = 5
-
-type StreamResult = {
-  lastSlot?: string;
-  hasRcvdMSg: boolean;
-};
+import { ladybugStreamerService } from "../services/ladybugStreamerService";
+import { convertLadybugEventToTrackerFormat } from "../services/ladybugEventConverter";
+import { LadybugEvent, LadybugTransaction } from "../services/ladybugTypes";
 
 class TransactionTracker {
-  private client: Client | null = null;
   private isRunning: boolean = false;
-  private shouldStop: boolean = false;
   private addresses: string[] = [];
-  private currentStream: any = null;
   private solanaConnection: Connection | null = null;
   private poolMonitoringService: PoolMonitoringService | null = null;
+  private ladybugInitialized: boolean = false;
+  
+  // PumpFun and PumpAmm program addresses for ladybug streaming
+  private readonly PUMP_FUN_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+  private readonly PUMP_AMM_PROGRAM_ID = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
 
   constructor() {
     // Initialize with empty addresses
   }
 
   /**
-   * Initialize the tracker with GRPC client
+   * Initialize the tracker with ladybug streamer
    */
   initialize() {
     if (!process.env.GRPC_URL || !process.env.X_TOKEN) {
@@ -40,17 +33,7 @@ class TransactionTracker {
     const grpcUrl = process.env.GRPC_URL;
     const xToken = process.env.X_TOKEN;
 
-    console.log(`🔗 Connecting to gRPC endpoint: ${grpcUrl.replace(/\/\/.*@/, '//***@')}`); // Hide credentials in URL
-
-    this.client = new Client(grpcUrl, xToken, {
-      "grpc.keepalive_permit_without_calls": 1,
-      "grpc.keepalive_time_ms": 10000,
-      "grpc.keepalive_timeout_ms": 1000,
-      "grpc.default_compression_algorithm": 2,
-      // "grpc.max_receive_message_length": 1024*1024*1024
-    });
-
-    // Initialize Solana RPC connection for wallet analysis
+    // Initialize Solana RPC connection for wallet analysis and pool account fetching
     const shyftApiKey = process.env.X_TOKEN;
     const rpcUrl = `https://dillwifit.shyft.to/${shyftApiKey}`;
     this.solanaConnection = new Connection(rpcUrl, "confirmed");
@@ -62,25 +45,42 @@ class TransactionTracker {
       console.error('Failed to initialize pool monitoring service:', error);
     });
 
+    // Initialize ladybug streamer for PumpFun and PumpAmm
+    try {
+      ladybugStreamerService.initialize(grpcUrl, xToken);
+      this.ladybugInitialized = true;
+      
+      // Add PumpFun and PumpAmm program addresses to ladybug streamer
+      ladybugStreamerService.addAddresses([
+        this.PUMP_FUN_PROGRAM_ID,
+        this.PUMP_AMM_PROGRAM_ID
+      ]);
+      
+      // Set up callback for ladybug events
+      ladybugStreamerService.onData((tx: LadybugTransaction) => {
+        this.handleLadybugTransaction(tx);
+      });
+      
+      console.log("✅ Ladybug streamer initialized for PumpFun and PumpAmm");
+    } catch (error: any) {
+      console.error('Failed to initialize ladybug streamer:', error?.message || error);
+      this.ladybugInitialized = false;
+    }
+
     console.log("✅ Tracker initialized");
   }
 
   /**
-   * Set addresses to track (from web interface inputs)
+   * Set addresses to track (kept for API compatibility, but not used for streaming)
+   * Note: We now track program addresses (PumpFun/PumpAmm) via ladybug streamer, not wallet addresses
    */
   setAddresses(addresses: string[]) {
     this.addresses = addresses.filter(addr => addr.trim().length > 0);
-    console.log('='.repeat(60));
-    console.log('📍 ADDRESSES SET FROM WEB INTERFACE:');
-    console.log('='.repeat(60));
-    this.addresses.forEach((addr, index) => {
-      console.log(`   ${index + 1}. ${addr}`);
-    });
-    console.log('='.repeat(60) + '\n');
+    console.log('📍 Addresses set (for API compatibility):', this.addresses.length);
   }
 
   /**
-   * Get current addresses
+   * Get current addresses (kept for API compatibility)
    */
   getAddresses(): string[] {
     return [...this.addresses];
@@ -93,145 +93,11 @@ class TransactionTracker {
     return this.isRunning;
   }
 
-  /**
-   * Handle the stream
-   */
-  private async handleStream(
-    args: SubscribeRequest,
-    lastSlot?: string
-  ): Promise<StreamResult> {
-    if (!this.client) {
-      throw new Error("Client not initialized");
-    }
-
-    const stream = await this.client.subscribe();
-    this.currentStream = stream;
-    let hasRcvdMSg = false;
-    let currentSlot = lastSlot;
-
-    return new Promise((resolve, reject) => {
-      stream.on("data", (data) => {
-        // Check if we should stop
-        if (this.shouldStop) {
-          stream.end();
-          return;
-        }
-
-        // Update lastSlot from the data
-        if (data.transaction?.slot) {
-          currentSlot = data.transaction.slot.toString();
-        }
-
-        // Extract createdAt timestamp from stream data (slot timestamp)
-        const createdAt = data.createdAt || null;
-
-        const tx = data.transaction?.transaction?.transaction;
-        if (tx?.signatures?.[0]) {
-          hasRcvdMSg = true;
-          const sig = bs58.encode(tx.signatures[0]);
-          console.log("Got tx:", sig, "slot:", currentSlot);
-
-          const result = parseTransaction(data.transaction);
-
-          // Process transaction asynchronously (non-blocking)
-          if (result) {
-            // Run transaction processing and pool monitoring in parallel
-            const txType = result.type?.toUpperCase();
-            const tokenAddress = (txType === 'BUY' || txType === 'SELL') 
-              ? this.extractTokenAddress(result) 
-              : null;
-
-            // Module 2: Pool monitoring (runs in parallel, only for BUY/SELL with pool address)
-            if ((txType === 'BUY' || txType === 'SELL') && tokenAddress && result.pool && this.poolMonitoringService) {
-              this.processPoolMonitoring(result, tokenAddress, sig, txType, createdAt, currentSlot).catch(error => {
-                console.error(`Error processing pool monitoring:`, error?.message || error);
-              });
-            }
-
-            // Module 1: Transaction data processing (save transaction, check dev still holding, calculate market cap, check/register first_buy or first_sell)
-            this.processTransaction(result, sig, currentSlot, createdAt).catch(error => {
-              console.error(`Error processing transaction:`, error?.message || error);
-            });
-          }
-        }
-      });
-
-      stream.on("error", (err) => {
-        stream.end();
-        reject({ error: err, lastSlot: currentSlot, hasRcvdMSg });
-      });
-
-      const finalize = () => resolve({ lastSlot: currentSlot, hasRcvdMSg });
-      stream.on("end", finalize);
-      stream.on("close", finalize);
-
-      stream.write(args, (err: any) => {
-        if (err) reject({ error: err, lastSlot: currentSlot, hasRcvdMSg });
-      });
-    });
-  }
-
-  /**
-   * Subscribe to the stream
-   */
-  private async subscribeCommand(args: SubscribeRequest) {
-    let lastSlot: string | undefined;
-    let retryCount = 0;
-
-    while (this.isRunning && !this.shouldStop) {
-      try {
-        if (args.fromSlot) {
-          console.log("Starting stream from slot", args.fromSlot);
-        }
-
-        const result = await this.handleStream(args, lastSlot);
-        lastSlot = result.lastSlot;
-
-        // If we finished normally and should stop, break the loop
-        if (this.shouldStop) {
-          break;
-        }
-      } catch (err: any) {
-        // If we should stop, break the loop
-        if (this.shouldStop) {
-          break;
-        }
-        console.log(err)
-        console.error(
-          `Stream error, retrying in ${RETRY_DELAY_MS} second...`,
-        );
-
-        //in case the stream is interrupted, it waits for a while before retrying
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-
-        lastSlot = err.lastSlot;
-        if (err.hasRcvdMSg) retryCount = 0;
-
-        if (lastSlot && retryCount < MAX_RETRY_WITH_LAST_SLOT) {
-          console.log(
-            `#${retryCount} retrying with last slot ${lastSlot}, remaining retries ${MAX_RETRY_WITH_LAST_SLOT - retryCount
-            }`,
-          );
-          // sets the fromSlot to the last slot received before the stream was interrupted, if it exists
-          args.fromSlot = lastSlot;
-          retryCount++;
-        } else {
-          //when there is no last slot available, it starts the stream from the latest slot
-          console.log("Retrying from latest slot (no last slot available)");
-          delete args.fromSlot;
-          retryCount = 0;
-          lastSlot = undefined;
-        }
-      }
-    }
-
-    console.log("🛑 Tracker stopped");
-  }
 
   /**
    * Process transaction asynchronously - Module 1: Transaction data processing
    * Handles: save transaction, check dev still holding, calculate market cap/token price, check/register first_buy or first_sell
-   * Note: Pool monitoring (Module 2) runs in parallel separately in handleStream
+   * Note: Pool monitoring (Module 2) runs in parallel separately
    */
   private async processTransaction(
     result: any,
@@ -886,6 +752,158 @@ class TransactionTracker {
   }
 
   /**
+   * Fetch token mint from PumpAmm pool account
+   */
+  private async fetchTokenMintFromPool(poolAddress: string): Promise<string | null> {
+    if (!this.solanaConnection || !poolAddress) {
+      return null;
+    }
+
+    try {
+      const poolPublicKey = new PublicKey(poolAddress);
+      const accountInfo = await this.solanaConnection.getAccountInfo(poolPublicKey);
+      
+      if (!accountInfo || !accountInfo.data) {
+        return null;
+      }
+
+      // PumpAmm pool account structure: base_mint is at offset 33 (after pool_bump: u8, index: u16, creator: pubkey)
+      // We need to parse the account data according to the IDL structure
+      // For now, we'll use a simpler approach: fetch from a known API or parse the account
+      // The base_mint is a pubkey (32 bytes) starting at offset 33
+      if (accountInfo.data.length >= 65) {
+        const baseMintBytes = accountInfo.data.slice(33, 65);
+        const baseMint = new PublicKey(baseMintBytes);
+        return baseMint.toString();
+      }
+    } catch (error: any) {
+      console.error(`Failed to fetch token mint from pool ${poolAddress}:`, error?.message || error);
+    }
+
+    return null;
+  }
+
+  /**
+   * Handle transactions from ladybug streamer (PumpFun and PumpAmm only)
+   */
+  private handleLadybugTransaction(tx: LadybugTransaction): void {
+    try {
+      // Check if tracker is running
+      if (!this.isRunning) {
+        return;
+      }
+
+      const events = tx?.transaction?.message?.events;
+      if (!events || events.length === 0) {
+        return;
+      }
+
+      const signature = tx?.transaction?.signatures?.[0];
+      const slot = tx?.transaction?.slot;
+      const createdAt = tx?.createdAt;
+
+      // Process each event
+      for (const event of events) {
+        // Only process PumpFun and PumpAmm events
+        if (event.name !== "TradeEvent" && event.name !== "BuyEvent" && event.name !== "SellEvent") {
+          continue;
+        }
+
+        // Convert event to tracker format
+        const result = convertLadybugEventToTrackerFormat(
+          event as LadybugEvent,
+          signature,
+          slot,
+          createdAt
+        );
+
+        if (!result) {
+          continue;
+        }
+
+        // Extract token address for buy/sell events
+        let tokenAddress = (result.type?.toUpperCase() === 'BUY' || result.type?.toUpperCase() === 'SELL')
+          ? this.extractTokenAddress(result)
+          : null;
+
+        // For PumpAmm events, fetch token mint from pool account if not available
+        if ((result.type?.toUpperCase() === 'BUY' || result.type?.toUpperCase() === 'SELL') && 
+            !tokenAddress && 
+            result.platform === "PumpFun Amm" && 
+            result.pool) {
+          // Fetch token mint asynchronously
+          this.fetchTokenMintFromPool(result.pool).then(mint => {
+            if (mint) {
+              // Update result with token mint
+              const txType = result.type?.toUpperCase();
+              if (txType === 'BUY') {
+                result.mintTo = mint;
+              } else if (txType === 'SELL') {
+                result.mintFrom = mint;
+              }
+              
+              // Process the transaction with the updated token address
+              this.processLadybugEvent(result, signature || '', slot, createdAt);
+            } else {
+              console.log(`⚠️ Could not extract token address from PumpAmm pool: ${result.pool}`);
+            }
+          }).catch(error => {
+            console.error(`Error fetching token mint from pool:`, error?.message || error);
+          });
+          
+          // Skip processing for now, will be processed after token mint is fetched
+          continue;
+        }
+
+        // Process the event
+        this.processLadybugEvent(result, signature || '', slot, createdAt);
+      }
+    } catch (error: any) {
+      console.error(`❌ Error handling ladybug transaction:`, error?.message || error);
+    }
+  }
+
+  /**
+   * Process a ladybug event (helper method)
+   */
+  private processLadybugEvent(
+    result: any,
+    signature: string,
+    slot: number | undefined,
+    createdAt: string | null
+  ): void {
+    const txType = result.type?.toUpperCase();
+    const tokenAddress = (txType === 'BUY' || txType === 'SELL')
+      ? this.extractTokenAddress(result)
+      : null;
+
+    if (!tokenAddress && (txType === 'BUY' || txType === 'SELL')) {
+      console.log(`⚠️ Could not extract token address from ${result.platform} event`);
+      return;
+    }
+
+    console.log(`📥 Ladybug ${result.platform} ${result.type} transaction: ${signature?.substring(0, 8)}...`);
+
+    // Process transaction asynchronously (non-blocking)
+    // Run transaction processing and pool monitoring in parallel
+    if (txType === 'BUY' || txType === 'SELL') {
+      // Module 2: Pool monitoring (runs in parallel, only for BUY/SELL with pool address)
+      if (tokenAddress && result.pool && this.poolMonitoringService) {
+        const currentSlotStr = slot?.toString();
+        this.processPoolMonitoring(result, tokenAddress, signature, txType, createdAt, currentSlotStr).catch(error => {
+          console.error(`Error processing pool monitoring:`, error?.message || error);
+        });
+      }
+
+      // Module 1: Transaction data processing
+      const currentSlotStr = slot?.toString();
+      this.processTransaction(result, signature, currentSlotStr, createdAt).catch(error => {
+        console.error(`Error processing transaction:`, error?.message || error);
+      });
+    }
+  }
+
+  /**
    * Start tracking transactions
    */
   async start(): Promise<{ success: boolean; message: string }> {
@@ -893,64 +911,34 @@ class TransactionTracker {
       return { success: false, message: "Tracker is already running" };
     }
 
-    if (this.addresses.length === 0) {
-      return { success: false, message: "No addresses to track" };
-    }
-
-    if (!this.client) {
+    // Initialize if not already initialized
+    if (!this.ladybugInitialized) {
       this.initialize();
     }
 
-    // Ensure any previous stream is completely closed
-    if (this.currentStream) {
-      try {
-        this.currentStream.end();
-        this.currentStream = null;
-      } catch (error) {
-        // Ignore errors
-      }
-      // Wait for stream to fully close
-      await new Promise(resolve => setTimeout(resolve, 300));
+    if (!this.ladybugInitialized) {
+      return { success: false, message: "Failed to initialize ladybug streamer" };
     }
 
     this.isRunning = true;
-    this.shouldStop = false;
 
     // Start token queue processor
     tokenQueueService.start();
 
+    // Start ladybug streamer for PumpFun and PumpAmm
+    try {
+      ladybugStreamerService.start();
+      console.log("✅ Started ladybug streamer for PumpFun and PumpAmm");
+    } catch (error: any) {
+      console.error('Failed to start ladybug streamer:', error?.message || error);
+      this.isRunning = false;
+      return { success: false, message: `Failed to start streamer: ${error?.message || error}` };
+    }
+
     console.log('🚀 '.repeat(30));
     console.log('STARTING TRANSACTION TRACKING');
-    console.log('Using addresses from web interface inputs:');
-    this.addresses.forEach((addr, index) => {
-      console.log(`   Input ${index + 1}: ${addr}`);
-    });
+    console.log('Tracking PumpFun and PumpAmm transactions via ladybug streamer');
     console.log('🚀 '.repeat(30) + '\n');
-
-    const req: SubscribeRequest = {
-      accounts: {},
-      slots: {},
-      transactions: {
-        targetWallet: {
-          vote: false,
-          failed: false,
-          accountInclude: this.addresses, // ← Addresses from web interface inputs!
-          accountExclude: [],
-          accountRequired: [],
-        },
-      },
-      transactionsStatus: {},
-      blocks: {},
-      blocksMeta: {},
-      entry: {},
-      accountsDataSlice: [],
-      commitment: CommitmentLevel.CONFIRMED,
-    };
-
-    // Start streaming in the background
-    this.subscribeCommand(req).then(() => {
-      this.isRunning = false;
-    });
 
     return { success: true, message: "Tracker started successfully" };
   }
@@ -976,7 +964,15 @@ class TransactionTracker {
       return { success: false, message: "Tracker is not running" };
     }
 
-    this.shouldStop = true;
+    // Stop ladybug streamer
+    if (this.ladybugInitialized) {
+      try {
+        ladybugStreamerService.stop();
+        console.log("✅ Stopped ladybug streamer");
+      } catch (error: any) {
+        console.error('Failed to stop ladybug streamer:', error?.message || error);
+      }
+    }
 
     // Stop token queue processor
     tokenQueueService.stop();
@@ -988,57 +984,7 @@ class TransactionTracker {
       });
     }
 
-    // Clear old subscription by sending empty subscription request before ending stream
-    if (this.currentStream) {
-      try {
-        // Send empty subscription to clear old addresses from server
-        const emptyReq: SubscribeRequest = {
-          slots: {},
-          accounts: {},
-          transactions: {},
-          blocks: {},
-          blocksMeta: {},
-          accountsDataSlice: [],
-          transactionsStatus: {},
-          entry: {}
-        };
-
-        // Send empty subscription to clear old subscription
-        await new Promise<void>((resolve) => {
-          try {
-            this.currentStream.write(emptyReq, (err: any) => {
-              if (err) {
-                console.error("Error sending empty subscription:", err);
-              } else {
-                console.log("✅ Sent empty subscription to clear old addresses");
-              }
-              resolve();
-            });
-          } catch (error) {
-            console.error("Error writing empty subscription:", error);
-            resolve();
-          }
-        });
-
-        // Wait a bit for the empty subscription to be processed
-        await new Promise(resolve => setTimeout(resolve, 200));
-
-        // Now end the stream
-        this.currentStream.end();
-      } catch (error) {
-        console.error("Error ending stream:", error);
-      }
-    }
-
-    // Wait a bit for cleanup
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    // Clear stream reference
-    this.currentStream = null;
     this.isRunning = false;
-
-    // Clear addresses to ensure fresh start next time
-    this.addresses = [];
 
     return { success: true, message: "Tracker stopped successfully" };
   }
