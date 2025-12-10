@@ -92,6 +92,7 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
  */
 export function matchEventWithBondingCurve(event: any, pairs: MintBondingCurvePair[]): string | null {
   try {
+    console.log(event, pairs)
     if (!event || !pairs || pairs.length === 0) {
       return null;
     }
