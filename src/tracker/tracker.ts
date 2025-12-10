@@ -1033,12 +1033,9 @@ class TransactionTracker {
 
     // Ensure addresses are added to streamer
     if (this.streamerService) {
-      try {
-        const currentTracked = this.streamerService.getTrackedAddresses();
-        const addressesToAdd = this.addresses.filter(addr => !currentTracked.includes(addr));
-        
-        if (addressesToAdd.length > 0) {
-          this.streamerService.addAddresses(addressesToAdd);
+      try {        
+        if (this.addresses.length > 0) {
+          this.streamerService.addAddresses(this.addresses);
         }
       } catch (error: any) {
         console.error('Failed to add addresses to streamer:', error?.message || error);

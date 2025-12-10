@@ -53,15 +53,6 @@ async function testLadybugStreamer() {
     streamerService.addAddresses(addressesToAdd);
     console.log(`   ✅ Added addresses: ${addressesToAdd.join(", ")}\n`);
 
-    // Test: Get tracked addresses
-    console.log("3️⃣  Testing getTrackedAddresses()...");
-    const tracked = streamerService.getTrackedAddresses();
-    console.log(`   ✅ Currently tracking ${tracked.length} address(es):`);
-    tracked.forEach((addr, index) => {
-      console.log(`      ${index + 1}. ${addr}`);
-    });
-    console.log();
-
     // Test: Add more addresses
     console.log("4️⃣  Testing addAddresses() with additional addresses...");
     const additionalAddresses = [
@@ -98,20 +89,20 @@ async function testLadybugStreamer() {
         const signature = tx?.transaction?.signatures?.[0];
         console.log(`   Signature: ${signature}`);
         console.log(`   Events count: ${tx.transaction.message.events.length}`);
-        
+
         // Process each event and extract bonding curve
         tx.transaction.message.events.forEach((event: any, index: number) => {
           console.log(`\n   Event ${index + 1}: ${event.name}`);
-          
+
           // Extract bonding curve for this event
           const bondingCurve = extractBondingCurveForEvent(tx, event);
-          
+
           if (bondingCurve) {
             console.log(`   ✅ Bonding Curve: ${bondingCurve}`);
           } else {
             console.log(`   ⚠️  No bonding curve found for this event`);
           }
-          
+
           // Log event data
           if (event.name === "TradeEvent" && event.data) {
             console.log(`   Mint: ${event.data.mint}`);
@@ -122,7 +113,7 @@ async function testLadybugStreamer() {
             console.log(`   User: ${event.data.user}`);
           }
         });
-        
+
         // Uncomment to see full transaction/event details
         // console.log(JSON.stringify(tx, null, 2));
         // console.log(JSON.stringify(tx?.transaction?.message?.events, null, 2));
@@ -133,34 +124,26 @@ async function testLadybugStreamer() {
 
     // Test: Start streaming
     console.log("7️⃣  Testing start()...");
-    const trackedBeforeStart = streamerService.getTrackedAddresses();
-    if (trackedBeforeStart.length === 0) {
-      console.log("   ⚠️  No addresses tracked. Cannot start streaming.");
-      console.log("   💡 Add addresses first using addAddresses()\n");
-    } else {
-      streamerService.start();
-      console.log(`   ✅ Started streaming for ${trackedBeforeStart.length} address(es)\n`);
+    streamerService.start();
+    console.log(`   ✅ Started streaming\n`);
 
-      // Check streaming status
-      console.log("8️⃣  Checking streaming status...");
-      const isStreaming = streamerService.getIsStreaming();
-      console.log(`   ✅ Streaming status: ${isStreaming ? "🟢 Active" : "🔴 Inactive"}\n`);
+    // Check streaming status
+    console.log("8️⃣  Checking streaming status...");
+    const isStreaming = streamerService.getIsStreaming();
+    console.log(`   ✅ Streaming status: ${isStreaming ? "🟢 Active" : "🔴 Inactive"}\n`);
 
-      // Keep the process running for a bit to receive transactions
-      console.log("⏳ Streaming transactions for 30 seconds...");
-      console.log("   (Press Ctrl+C to stop early)\n");
+    // Keep the process running for a bit to receive transactions
+    console.log("⏳ Streaming transactions for 30 seconds...");
+    console.log("   (Press Ctrl+C to stop early)\n");
 
-      await new Promise(resolve => setTimeout(resolve, 3000000));
+    await new Promise(resolve => setTimeout(resolve, 3000000));
 
-      // Test: Stop streaming
-      console.log("\n9️⃣  Testing stop()...");
-      streamerService.stop();
-      console.log("   ✅ Stopped streaming\n");
-    }
-
+    // Test: Stop streaming
+    console.log("\n9️⃣  Testing stop()...");
+    streamerService.stop();
+    console.log("   ✅ Stopped streaming\n");
     // Final status
     console.log("📊 Final Status:");
-    console.log(`   Tracked addresses: ${streamerService.getTrackedAddresses().length}`);
     console.log(`   Streaming: ${streamerService.getIsStreaming() ? "Yes" : "No"}`);
     console.log("\n✅ All tests completed!");
 

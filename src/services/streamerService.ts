@@ -38,7 +38,6 @@ const GOONFI_PROGRAM_ID = new PublicKey("goonERTdGsjnkZqWuVjs73BZ3Pb9qoCUdBUL17B
 export class StreamerService {
   private parser: Parser;
   private streamer: TransactionStreamer | null = null;
-  private trackedAddresses: string[] = []; // Array to track addresses
   private isStreaming: boolean = false;
   private dataCallback: ((tx: any) => void) | null = null;
 
@@ -102,23 +101,9 @@ export class StreamerService {
       throw new Error("Streamer not initialized. Call initialize() first.");
     }
 
-    // Validate addresses
-    const validAddresses: string[] = [];
-    for (const addr of addresses) {
-      try {
-        new PublicKey(addr); // Validate address format
-        if (!this.trackedAddresses.includes(addr)) {
-          validAddresses.push(addr);
-          this.trackedAddresses.push(addr);
-        }
-      } catch (error) {
-        console.warn(`⚠️  Invalid address format: ${addr}`);
-      }
-    }
-
-    if (validAddresses.length > 0) {
-      this.streamer.addAddresses(validAddresses);
-      console.log(`✅ Added ${validAddresses.length} address(es) to track. Total tracked: ${this.trackedAddresses.length}`);
+    if (addresses.length > 0) {
+      this.streamer.addAddresses(addresses);
+      console.log(`✅ Added ${addresses.length} address(es) to track.`);
     }
   }
 
@@ -130,29 +115,9 @@ export class StreamerService {
       throw new Error("Streamer not initialized. Call initialize() first.");
     }
 
-    const removedAddresses: string[] = [];
-    for (const addr of addresses) {
-      const index = this.trackedAddresses.indexOf(addr);
-      if (index > -1) {
-        this.trackedAddresses.splice(index, 1);
-        removedAddresses.push(addr);
-      }
-    }
-
-    if (removedAddresses.length > 0) {
-      // Note: ladybug-sdk might not have removeAddresses method
-      // If not available, we'll need to recreate the streamer or use a different approach
-      // For now, we'll update our internal tracking
-      console.log(`✅ Removed ${removedAddresses.length} address(es) from tracking. Remaining: ${this.trackedAddresses.length}`);
-      
-      // Re-add remaining addresses if streamer supports it
-      // This is a workaround if removeAddresses is not available
-      if (this.isStreaming && this.trackedAddresses.length > 0) {
-        // Stop and restart with updated addresses
-        this.stop();
-        this.streamer.addAddresses(this.trackedAddresses);
-        this.start();
-      }
+    if (addresses.length > 0) {
+      this.streamer.removeAddresses(addresses);
+      console.log(`✅ Removed ${addresses.length} address(es) from tracking.`);
     }
   }
 
@@ -180,14 +145,9 @@ export class StreamerService {
       return;
     }
 
-    if (this.trackedAddresses.length === 0) {
-      console.warn("⚠️  No addresses to track. Add addresses before starting.");
-      return;
-    }
-
     this.streamer.start();
     this.isStreaming = true;
-    console.log(` Started streaming for ${this.trackedAddresses.length} address(es)`);
+    console.log(` Started streaming...`);
   }
 
   /**
@@ -206,14 +166,8 @@ export class StreamerService {
     // Note: Check if streamer has a stop method
     // If not available, we'll just mark as not streaming
     this.isStreaming = false;
+    this.streamer.stop();
     console.log(" Stopped streaming");
-  }
-
-  /**
-   * Get currently tracked addresses
-   */
-  public getTrackedAddresses(): string[] {
-    return [...this.trackedAddresses]; // Return a copy
   }
 
   /**

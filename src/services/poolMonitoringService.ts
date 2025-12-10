@@ -628,13 +628,6 @@ class LiquidityPoolMonitor {
       return;
     }
 
-    // Check if streamer has addresses to track
-    const trackedAddresses = this.streamerService.getTrackedAddresses();
-    if (trackedAddresses.length === 0) {
-      console.log('⚠️ Cannot start streamer - no addresses tracked yet');
-      return;
-    }
-
     if (!this.streamerService.getIsStreaming()) {
       try {
         // If fromSlot is set, start from that slot
@@ -642,12 +635,12 @@ class LiquidityPoolMonitor {
           this.streamerService.enableAutoReconnect(false);
           this.streamerService.setFromSlot(this.fromSlot);
           this.streamerService.start();
-          console.log(`📍 Started pool monitoring streamer from slot ${this.fromSlot} (tracking ${trackedAddresses.length} pool address(es))`);
+          console.log(`📍 Started pool monitoring streamer from slot ${this.fromSlot}`);
         } else {
           // Start normally (from current slot)
           this.streamerService.enableAutoReconnect(true);
           this.streamerService.start();
-          console.log(`✅ Started pool monitoring streamer (tracking ${trackedAddresses.length} pool address(es))`);
+          console.log(`✅ Started pool monitoring streamer`);
         }
       } catch (error: any) {
         console.error('Failed to start pool monitoring streamer:', error?.message || error);
@@ -690,12 +683,9 @@ class LiquidityPoolMonitor {
     // For pool monitoring, we track pool addresses (not program addresses)
     // Add all monitored pool addresses to the streamer
     const poolsToAdd: string[] = [];
-    const currentTrackedAddresses = this.streamerService.getTrackedAddresses();
     
     for (const poolAddress of this.monitoredPools) {
-      if (!currentTrackedAddresses.includes(poolAddress)) {
-        poolsToAdd.push(poolAddress);
-      }
+      poolsToAdd.push(poolAddress);
     }
 
     // If streamer is already running, just add new addresses
