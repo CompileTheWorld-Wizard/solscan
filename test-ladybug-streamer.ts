@@ -37,8 +37,8 @@ async function testLadybugStreamer() {
       // "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", // RaydiumLiquidity Program
       // "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", // RaydiumCpmm program
       // "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK", // RaydiumClmm program
-      "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj", // RaydiumLaunchPad program
-      // "JUP6rZpY64TM5Rf9MhWvXkYFJyAUHbS3Y7sEKtJqLqY", // JupiterAggregator program
+      // "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj", // RaydiumLaunchPad program
+      "JUP6rZpY64TM5Rf9MhWvXkYFJyAUHbS3Y7sEKtJqLqY", // JupiterAggregator program
       // "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc", // Orca program
       // "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG", // MeteoraDammV2 program
       // "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN", // MeteoraDBC program
