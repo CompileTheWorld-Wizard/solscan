@@ -179,48 +179,50 @@ export function matchEventWithBondingCurve(event: any, pairs: MintBondingCurvePa
 
     // For BuyEvent: match by instruction name 'buy'
     if (eventName === "BuyEvent") {
-      // Find pairs with instructionName 'buy'
-      const buyPairs = pairs.filter(pair => pair.instructionName === 'buy');
-      if (buyPairs.length === 1) {
-        return buyPairs[0].bondingCurve;
-      }
-      // If multiple buy pairs, try to match by mint if available
       const eventMint = event.data?.mint;
-      if (eventMint) {
-        for (let i = 0; i < buyPairs.length; i++) {
-          if (buyPairs[i].mint === eventMint) {
-            return buyPairs[i].bondingCurve;
+      let firstBuyPair: MintBondingCurvePair | null = null;
+      let mintMatch: MintBondingCurvePair | null = null;
+      
+      // Iterate once to find buy pairs
+      for (let i = 0; i < pairs.length; i++) {
+        if (pairs[i].instructionName === 'buy') {
+          if (!firstBuyPair) {
+            firstBuyPair = pairs[i];
+          }
+          // If we have a mint, try to match by mint
+          if (eventMint && pairs[i].mint === eventMint) {
+            mintMatch = pairs[i];
+            break; // Found exact match, exit early
           }
         }
       }
-      // If no mint match, return first buy pair
-      if (buyPairs.length > 0) {
-        return buyPairs[0].bondingCurve;
-      }
-      return null;
+      
+      // Return mint match if found, otherwise first buy pair
+      return mintMatch ? mintMatch.bondingCurve : (firstBuyPair ? firstBuyPair.bondingCurve : null);
     }
 
     // For SellEvent: match by instruction name 'sell'
     if (eventName === "SellEvent") {
-      // Find pairs with instructionName 'sell'
-      const sellPairs = pairs.filter(pair => pair.instructionName === 'sell');
-      if (sellPairs.length === 1) {
-        return sellPairs[0].bondingCurve;
-      }
-      // If multiple sell pairs, try to match by mint if available
       const eventMint = event.data?.mint;
-      if (eventMint) {
-        for (let i = 0; i < sellPairs.length; i++) {
-          if (sellPairs[i].mint === eventMint) {
-            return sellPairs[i].bondingCurve;
+      let firstSellPair: MintBondingCurvePair | null = null;
+      let mintMatch: MintBondingCurvePair | null = null;
+      
+      // Iterate once to find sell pairs
+      for (let i = 0; i < pairs.length; i++) {
+        if (pairs[i].instructionName === 'sell') {
+          if (!firstSellPair) {
+            firstSellPair = pairs[i];
+          }
+          // If we have a mint, try to match by mint
+          if (eventMint && pairs[i].mint === eventMint) {
+            mintMatch = pairs[i];
+            break; // Found exact match, exit early
           }
         }
       }
-      // If no mint match, return first sell pair
-      if (sellPairs.length > 0) {
-        return sellPairs[0].bondingCurve;
-      }
-      return null;
+      
+      // Return mint match if found, otherwise first sell pair
+      return mintMatch ? mintMatch.bondingCurve : (firstSellPair ? firstSellPair.bondingCurve : null);
     }
 
     return null;
