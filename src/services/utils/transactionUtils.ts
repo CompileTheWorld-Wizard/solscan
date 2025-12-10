@@ -46,6 +46,8 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
     const txMessage = tx.transaction?.message || tx.message;
     const compiledInstructions = txMessage?.compiledInstructions || tx.compiledInstructions;
 
+    console.log(compiledInstructions)
+
     // First, try to extract from compiledInstructions (with data.name)
     if (Array.isArray(compiledInstructions) && compiledInstructions.length > 0) {
       // Optimize: Check programId first (faster check), then accounts, then data.name
