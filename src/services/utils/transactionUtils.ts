@@ -100,6 +100,7 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
         if (!dataName) {
           console.log(`[extractAllMintBondingCurvePairs] ⚠️ PumpFun instruction at index ${i} has no data.name:`, {
             hasData: !!ix.data,
+            instruction: ix,
             dataKeys: ix.data ? Object.keys(ix.data) : []
           });
           continue;
