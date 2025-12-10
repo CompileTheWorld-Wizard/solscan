@@ -491,6 +491,8 @@ class DatabaseService {
     tokenPriceUsd?: number | null
   ): Promise<void> {
     try {
+      console.log(`🔍 [DB MARKETCAP] Updating tx ${transactionId.substring(0, 8)}... with marketCap=${marketCap}, totalSupply=${totalSupply}, tokenPriceSol=${tokenPriceSol}, tokenPriceUsd=${tokenPriceUsd}`);
+      
       const query = `
         UPDATE tbl_solscan_transactions
         SET market_cap = $2, 
@@ -499,16 +501,25 @@ class DatabaseService {
             token_price_usd = $5
         WHERE transaction_id = $1
       `;
-      await this.pool.query(query, [
+      const result = await this.pool.query(query, [
         transactionId,
         marketCap,
         totalSupply ?? null,
         tokenPriceSol ?? null,
         tokenPriceUsd ?? null
       ]);
-      console.log(`💾 Market cap, total supply, and token prices updated for tx: ${transactionId}`);
+      
+      if (result.rowCount === 0) {
+        console.warn(`⚠️ [DB MARKETCAP] No rows updated for tx ${transactionId.substring(0, 8)}... (transaction may not exist)`);
+      } else {
+        console.log(`✅ [DB MARKETCAP] Successfully updated ${result.rowCount} row(s) for tx ${transactionId.substring(0, 8)}...`);
+        console.log(`💾 Market cap, total supply, and token prices updated for tx: ${transactionId}`);
+      }
     } catch (error: any) {
-      console.error(`❌ Failed to update market cap for ${transactionId}:`, error.message);
+      console.error(`❌ [DB MARKETCAP] Failed to update market cap for ${transactionId}:`, error.message);
+      if (error.stack) {
+        console.error(`❌ [DB MARKETCAP] Error stack:`, error.stack);
+      }
     }
   }
 
@@ -1469,6 +1480,7 @@ class DatabaseService {
             openPositionCount !== undefined ? openPositionCount : null
           ]);
           const mcapStr = marketData?.market_cap ? marketData.market_cap.toString() : (marketData?.supply ? `${marketData.supply} (MCap N/A)` : 'N/A');
+          console.log(`🔍 [DB WALLET] Saving BUY: wallet=${walletAddress.substring(0, 8)}..., token=${tokenAddress.substring(0, 8)}..., amount=${amount}, market_cap=${marketData?.market_cap}, supply=${marketData?.supply}, price=${marketData?.price}`);
           console.log(`💾 Wallet BUY tracked: ${walletAddress.substring(0, 8)}... - ${tokenAddress.substring(0, 8)}... (Amount: ${amount}, MCap: ${mcapStr})`);
         } else if (transactionType === 'SELL') {
           // Insert or update first sell info (only if first_sell_timestamp is NULL)
@@ -1499,6 +1511,7 @@ class DatabaseService {
             marketData?.price || null
           ]);
           const mcapStr = marketData?.market_cap ? marketData.market_cap.toString() : (marketData?.supply ? `${marketData.supply} (MCap N/A)` : 'N/A');
+          console.log(`🔍 [DB WALLET] Saving SELL: wallet=${walletAddress.substring(0, 8)}..., token=${tokenAddress.substring(0, 8)}..., amount=${amount}, market_cap=${marketData?.market_cap}, supply=${marketData?.supply}, price=${marketData?.price}`);
           console.log(`💾 Wallet SELL tracked: ${walletAddress.substring(0, 8)}... - ${tokenAddress.substring(0, 8)}... (Amount: ${amount}, MCap: ${mcapStr})`);
         }
       } catch (error: any) {
