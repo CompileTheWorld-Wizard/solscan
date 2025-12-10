@@ -90,6 +90,7 @@ async function testLadybugStreamer() {
     ladybugStreamerService.onData((tx: any) => {
       console.log("\n📥 Received transaction:");
       if (tx?.transaction?.message?.events?.length > 0) {
+        console.log(tx?.transaction?.signatures?.[0])
         // console.log(JSON.stringify(tx));
         console.log(JSON.stringify(tx?.transaction?.message?.events, null, 2));
       }
