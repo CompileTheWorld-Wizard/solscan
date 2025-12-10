@@ -438,6 +438,8 @@ class LiquidityPoolMonitor {
           this.streamerService.removeAddresses([poolAddress]);
         }
         console.log(`🧹 Cleaned up orphaned pool ${poolAddress.substring(0, 8)}... (no sessions)`);
+        // Update streamer addresses (will stop streamer if no pools remain)
+        this.updateStreamerAddresses();
         return;
       }
       
@@ -459,6 +461,8 @@ class LiquidityPoolMonitor {
             this.streamerService.removeAddresses([poolAddress]);
           }
           console.log(`🧹 Cleaned up pool ${poolAddress.substring(0, 8)}... (all sessions were stale)`);
+          // Update streamer addresses (will stop streamer if no pools remain)
+          this.updateStreamerAddresses();
           return;
         }
       }
@@ -619,18 +623,18 @@ class LiquidityPoolMonitor {
 
     if (!this.streamerService.getIsStreaming()) {
       try {
-        // If fromSlot is set, ensure auto-reconnect is disabled
+        // If fromSlot is set, start from that slot
         if (this.fromSlot !== null) {
           this.streamerService.enableAutoReconnect(false);
           this.streamerService.setFromSlot(this.fromSlot);
-          console.log(`📍 Starting streamer with fromSlot: ${this.fromSlot}`);
+          this.streamerService.start();
+          console.log(`📍 Started pool monitoring streamer from slot ${this.fromSlot} (tracking ${trackedAddresses.length} pool address(es))`);
         } else {
-          // Enable auto-reconnect if not using fromSlot
+          // Start normally (from current slot)
           this.streamerService.enableAutoReconnect(true);
+          this.streamerService.start();
+          console.log(`✅ Started pool monitoring streamer (tracking ${trackedAddresses.length} pool address(es))`);
         }
-        
-        this.streamerService.start();
-        console.log(`✅ Started pool monitoring streamer (tracking ${trackedAddresses.length} pool address(es))`);
       } catch (error: any) {
         console.error('Failed to start pool monitoring streamer:', error?.message || error);
       }
@@ -659,6 +663,14 @@ class LiquidityPoolMonitor {
       return;
     }
 
+    // If no pools to monitor, stop the streamer
+    if (this.monitoredPools.size === 0) {
+      if (this.streamerService.getIsStreaming()) {
+        this.stopStreamer();
+      }
+      return;
+    }
+
     // For pool monitoring, we track pool addresses (not program addresses)
     // Add all monitored pool addresses to the streamer
     const poolsToAdd: string[] = [];
@@ -670,17 +682,21 @@ class LiquidityPoolMonitor {
       }
     }
 
-    if (poolsToAdd.length > 0) {
-      this.streamerService.addAddresses(poolsToAdd);
-      console.log(`➕ Added ${poolsToAdd.length} pool address(es) to streamer`);
-    }
-
-    // Start streamer if needed
-    if (this.monitoredPools.size > 0) {
-      this.startStreamerIfNeeded();
+    // If streamer is already running, just add new addresses
+    if (this.streamerService.getIsStreaming()) {
+      if (poolsToAdd.length > 0) {
+        this.streamerService.addAddresses(poolsToAdd);
+        console.log(`➕ Added ${poolsToAdd.length} pool address(es) to running streamer`);
+      }
     } else {
-      // If no pools to monitor, we can stop the streamer
-      // this.stopStreamer();
+      // Streamer is not running - add all addresses and start from slot
+      if (poolsToAdd.length > 0) {
+        this.streamerService.addAddresses(poolsToAdd);
+        console.log(`➕ Added ${poolsToAdd.length} pool address(es) to streamer`);
+      }
+      
+      // Start streamer from the given slot (if available)
+      this.startStreamerIfNeeded();
     }
   }
 
@@ -924,6 +940,9 @@ class LiquidityPoolMonitor {
             this.streamerService.removeAddresses([poolAddress]);
           }
           console.log(`➖ Removed pool ${poolAddress.substring(0, 8)}... from monitoring (no active sessions, remaining pools: ${this.monitoredPools.size})`);
+          
+          // Update streamer addresses (will stop streamer if no pools remain)
+          this.updateStreamerAddresses();
         }
       } else {
         console.log(`ℹ️ Pool ${poolAddress.substring(0, 8)}... still has ${poolSessions.size} active session(s)`);
