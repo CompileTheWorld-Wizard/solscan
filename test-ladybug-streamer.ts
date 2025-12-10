@@ -32,8 +32,8 @@ async function testLadybugStreamer() {
     // Test: Add addresses using array variable
     console.log("2️⃣  Testing addAddresses() with array variable...");
     const addressesToAdd = [
-      "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", // Pump.fun program
-      // "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", // Pump Amm program
+      // "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", // Pump.fun program
+      "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", // Pump Amm program
       // "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", // RaydiumCpmm program
       // "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", // RaydiumAmm
       // "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK", // RaydiumClmm program
@@ -90,7 +90,8 @@ async function testLadybugStreamer() {
     ladybugStreamerService.onData((tx: any) => {
       console.log("\n📥 Received transaction:");
       if (tx?.transaction?.message?.events?.length > 0) {
-        console.log(JSON.stringify(tx));
+        // console.log(JSON.stringify(tx));
+        console.log(JSON.stringify(tx?.transaction?.message?.events, null, 2));
       }
       
       // console.log(tx?.transaction?.signatures)
