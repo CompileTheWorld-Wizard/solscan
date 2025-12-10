@@ -110,7 +110,14 @@ class LiquidityPoolMonitor {
    * Handle streamer errors and reconnect from lastSlot
    */
   private handleStreamerError(error: any): void {
+    console.log(error)
     if (!this.streamerService) {
+      return;
+    }
+
+    // Only try to reconnect if we have pools to monitor
+    if (this.monitoredPools.size === 0) {
+      console.log('⚠️ Streamer error but no pools to monitor - will reconnect when pools are added');
       return;
     }
 
@@ -123,7 +130,35 @@ class LiquidityPoolMonitor {
       console.log(`🔄 Reconnecting pool monitoring streamer from fromSlot: ${this.fromSlot}`);
       this.reconnectFromSlot(this.fromSlot);
     } else {
-      console.error('❌ No slot available for reconnection');
+      // No slot available - try to restart normally (will use current slot)
+      console.log('⚠️ No slot available for reconnection, attempting normal restart');
+      this.restartStreamer();
+    }
+  }
+
+  /**
+   * Restart streamer normally (without fromSlot)
+   */
+  private restartStreamer(): void {
+    if (!this.streamerService) {
+      return;
+    }
+
+    try {
+      // Stop current stream if running
+      if (this.streamerService.getIsStreaming()) {
+        this.streamerService.stop();
+      }
+
+      // // Re-enable auto-reconnect
+      // this.streamerService.enableAutoReconnect(true);
+      
+      // Restart streamer
+      this.streamerService.start();
+      
+      console.log(`✅ Restarted pool monitoring streamer normally`);
+    } catch (error: any) {
+      console.error(`Failed to restart streamer:`, error?.message || error);
     }
   }
 
@@ -569,6 +604,19 @@ class LiquidityPoolMonitor {
       return;
     }
 
+    // Only start if we have pools to monitor
+    if (this.monitoredPools.size === 0) {
+      console.log('⚠️ Cannot start streamer - no pools to monitor');
+      return;
+    }
+
+    // Check if streamer has addresses to track
+    const trackedAddresses = this.streamerService.getTrackedAddresses();
+    if (trackedAddresses.length === 0) {
+      console.log('⚠️ Cannot start streamer - no addresses tracked yet');
+      return;
+    }
+
     if (!this.streamerService.getIsStreaming()) {
       try {
         // If fromSlot is set, ensure auto-reconnect is disabled
@@ -576,10 +624,13 @@ class LiquidityPoolMonitor {
           this.streamerService.enableAutoReconnect(false);
           this.streamerService.setFromSlot(this.fromSlot);
           console.log(`📍 Starting streamer with fromSlot: ${this.fromSlot}`);
+        } else {
+          // Enable auto-reconnect if not using fromSlot
+          this.streamerService.enableAutoReconnect(true);
         }
         
         this.streamerService.start();
-        console.log('✅ Started pool monitoring streamer');
+        console.log(`✅ Started pool monitoring streamer (tracking ${trackedAddresses.length} pool address(es))`);
       } catch (error: any) {
         console.error('Failed to start pool monitoring streamer:', error?.message || error);
       }
