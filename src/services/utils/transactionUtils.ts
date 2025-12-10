@@ -176,7 +176,7 @@ export function extractAllMintBondingCurvePairs(tx: any): MintBondingCurvePair[]
 
     return pairs;
   } catch (error: any) {
-    console.error('Error extracting mint/bonding_curve pairs from compiledInstructions:', error?.message || error);
+    console.error('Error extracting mint-bonding_curve pairs from compiledInstructions:', error?.message || error);
     return [];
   }
 }
