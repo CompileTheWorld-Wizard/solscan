@@ -52,8 +52,8 @@ class LiquidityPoolMonitor {
   accountCoder: BorshAccountsCoder;
   solanaConnection: Connection;
   sessions: Map<string, MonitoringSession>; // Key: walletAddress-tokenAddress-timestamp
-  tokenToSessions: Map<string, Set<string>>; // Key: tokenAddress, Value: Set of sessionKeys
-  monitoredTokens: Set<string>; // Track which tokens we're monitoring
+  poolToSessions: Map<string, Set<string>>; // Key: poolAddress, Value: Set of sessionKeys
+  monitoredPools: Set<string>; // Track which pool addresses we're monitoring
   private streamerService: StreamerService | null = null;
   private grpcUrl: string;
   private xToken: string;
@@ -63,8 +63,8 @@ class LiquidityPoolMonitor {
   constructor(solanaConnection: Connection) {
     this.solanaConnection = solanaConnection;
     this.sessions = new Map();
-    this.tokenToSessions = new Map();
-    this.monitoredTokens = new Set();
+    this.poolToSessions = new Map();
+    this.monitoredPools = new Set();
 
     // Get gRPC credentials from environment
     if (!process.env.GRPC_URL || !process.env.X_TOKEN) {
@@ -96,8 +96,11 @@ class LiquidityPoolMonitor {
         console.error('❌ Pool monitoring streamer error:', error);
         this.handleStreamerError(error);
       });
+
+      // Don't start streamer automatically - it will start when pool addresses are added
+      // this.streamerService.start();
       
-      console.log("✅ Pool monitoring streamer initialized");
+      console.log("✅ Pool monitoring streamer initialized (will start when pools are added)");
     } catch (error: any) {
       console.error('Failed to initialize pool monitoring streamer:', error?.message || error);
     }
@@ -206,6 +209,17 @@ class LiquidityPoolMonitor {
           }
         }
 
+        // Get pool address from result
+        const poolAddress = result.pool || null;
+        if (!poolAddress) {
+          continue;
+        }
+
+        // Only process if this pool address is being monitored
+        if (!this.monitoredPools.has(poolAddress)) {
+          continue;
+        }
+
         // Extract token address for buy/sell events
         let tokenAddress: string | null = null;
         const txType = result.type?.toUpperCase();
@@ -240,11 +254,6 @@ class LiquidityPoolMonitor {
         }
 
         if (!tokenAddress) {
-          continue;
-        }
-
-        // Only process if this token is being monitored
-        if (!this.monitoredTokens.has(tokenAddress)) {
           continue;
         }
 
@@ -371,19 +380,29 @@ class LiquidityPoolMonitor {
         return;
       }
 
-      // First check if this token is still being monitored
-      if (!this.monitoredTokens.has(tokenAddress)) {
-        // Token was removed from monitoring, ignore this update
+      // Get pool address from result
+      const poolAddress = result.pool || null;
+      if (!poolAddress) {
         return;
       }
 
-      // Find all sessions monitoring this token
-      const sessionKeys = this.tokenToSessions.get(tokenAddress);
+      // First check if this pool is still being monitored
+      if (!this.monitoredPools.has(poolAddress)) {
+        // Pool was removed from monitoring, ignore this update
+        return;
+      }
+
+      // Find all sessions monitoring this pool
+      const sessionKeys = this.poolToSessions.get(poolAddress);
       if (!sessionKeys || sessionKeys.size === 0) {
-        // No sessions for this token - remove it from monitoring
-        this.monitoredTokens.delete(tokenAddress);
-        this.tokenToSessions.delete(tokenAddress);
-        console.log(`🧹 Cleaned up orphaned token ${tokenAddress.substring(0, 8)}... (no sessions)`);
+        // No sessions for this pool - remove it from monitoring
+        this.monitoredPools.delete(poolAddress);
+        this.poolToSessions.delete(poolAddress);
+        // Remove pool address from streamer
+        if (this.streamerService) {
+          this.streamerService.removeAddresses([poolAddress]);
+        }
+        console.log(`🧹 Cleaned up orphaned pool ${poolAddress.substring(0, 8)}... (no sessions)`);
         return;
       }
       
@@ -396,11 +415,15 @@ class LiquidityPoolMonitor {
             sessionKeys.delete(key);
           }
         });
-        // If no valid sessions remain, remove token
+        // If no valid sessions remain, remove pool
         if (sessionKeys.size === 0) {
-          this.monitoredTokens.delete(tokenAddress);
-          this.tokenToSessions.delete(tokenAddress);
-          console.log(`🧹 Cleaned up token ${tokenAddress.substring(0, 8)}... (all sessions were stale)`);
+          this.monitoredPools.delete(poolAddress);
+          this.poolToSessions.delete(poolAddress);
+          // Remove pool address from streamer
+          if (this.streamerService) {
+            this.streamerService.removeAddresses([poolAddress]);
+          }
+          console.log(`🧹 Cleaned up pool ${poolAddress.substring(0, 8)}... (all sessions were stale)`);
           return;
         }
       }
@@ -411,10 +434,7 @@ class LiquidityPoolMonitor {
         console.log(`⚠️ No valid price found in transaction result for token ${tokenAddress.substring(0, 8)}...`);
         return;
       }
-
-      // Get pool address from result if available
-      const poolAddress = result.pool || null;
-
+      
       // Get SOL price from Redis to calculate USD price and market cap
       const solPriceUsd = await redisService.getLatestSolPrice();
       if (!solPriceUsd) {
@@ -581,21 +601,34 @@ class LiquidityPoolMonitor {
   }
 
   /**
-   * Update streamer addresses when tokens are added/removed
+   * Update streamer addresses when pools are added/removed
    */
   private updateStreamerAddresses(): void {
     if (!this.streamerService) {
       return;
     }
 
-    // For pool monitoring, we track program addresses (PumpFun/PumpAmm)
-    // The streamer already has these addresses, so we just need to ensure it's running
-    // when we have tokens to monitor
-    if (this.monitoredTokens.size > 0) {
+    // For pool monitoring, we track pool addresses (not program addresses)
+    // Add all monitored pool addresses to the streamer
+    const poolsToAdd: string[] = [];
+    const currentTrackedAddresses = this.streamerService.getTrackedAddresses();
+    
+    for (const poolAddress of this.monitoredPools) {
+      if (!currentTrackedAddresses.includes(poolAddress)) {
+        poolsToAdd.push(poolAddress);
+      }
+    }
+
+    if (poolsToAdd.length > 0) {
+      this.streamerService.addAddresses(poolsToAdd);
+      console.log(`➕ Added ${poolsToAdd.length} pool address(es) to streamer`);
+    }
+
+    // Start streamer if needed
+    if (this.monitoredPools.size > 0) {
       this.startStreamerIfNeeded();
     } else {
-      // If no tokens to monitor, we can stop the streamer
-      // But keep it running since program addresses are always tracked
+      // If no pools to monitor, we can stop the streamer
       // this.stopStreamer();
     }
   }
@@ -656,11 +689,11 @@ class LiquidityPoolMonitor {
 
     this.sessions.set(sessionKey, session);
 
-    // Add token to monitored tokens if not already there
-    const isNewToken = !this.monitoredTokens.has(tokenAddress);
-    if (isNewToken) {
-      this.monitoredTokens.add(tokenAddress);
-      console.log(`➕ Added token ${tokenAddress.substring(0, 8)}... to monitoring (total: ${this.monitoredTokens.size})`);
+    // Add pool to monitored pools if not already there
+    const isNewPool = !this.monitoredPools.has(poolAddress);
+    if (isNewPool) {
+      this.monitoredPools.add(poolAddress);
+      console.log(`➕ Added pool ${poolAddress.substring(0, 8)}... to monitoring (total: ${this.monitoredPools.size})`);
     }
 
     // Set fromSlot for first buy recovery (only if this is the first session with fromSlot)
@@ -678,14 +711,14 @@ class LiquidityPoolMonitor {
       }
     }
 
-    // Track which sessions are monitoring this token
-    if (!this.tokenToSessions.has(tokenAddress)) {
-      this.tokenToSessions.set(tokenAddress, new Set());
+    // Track which sessions are monitoring this pool
+    if (!this.poolToSessions.has(poolAddress)) {
+      this.poolToSessions.set(poolAddress, new Set());
     }
-    this.tokenToSessions.get(tokenAddress)!.add(sessionKey);
+    this.poolToSessions.get(poolAddress)!.add(sessionKey);
 
-    // Token is now being monitored (updates will come from streamer)
-    // Start streamer if needed
+    // Pool is now being monitored (updates will come from streamer)
+    // Start streamer if needed and add pool address to streamer
     this.updateStreamerAddresses();
 
     // Set timeout for maximum duration
@@ -797,7 +830,7 @@ class LiquidityPoolMonitor {
       return;
     }
 
-    const tokenAddress = session.tokenAddress;
+    const poolAddress = session.poolAddress;
 
     // Clear timeouts
     if (session.timeoutId) {
@@ -807,21 +840,21 @@ class LiquidityPoolMonitor {
       clearTimeout(session.stopAfterSellTimeout);
     }
 
-    // Remove session from token tracking
-    const tokenSessions = this.tokenToSessions.get(tokenAddress);
-    if (tokenSessions) {
-      tokenSessions.delete(sessionKey);
+    // Remove session from pool tracking
+    const poolSessions = this.poolToSessions.get(poolAddress);
+    if (poolSessions) {
+      poolSessions.delete(sessionKey);
       
-      // Check if there are any remaining active sessions for this token
+      // Check if there are any remaining active sessions for this pool
       // First, clean up any stale session references
-      Array.from(tokenSessions).forEach(key => {
+      Array.from(poolSessions).forEach(key => {
         if (!this.sessions.has(key)) {
-          tokenSessions.delete(key);
+          poolSessions.delete(key);
         }
       });
       
       let hasActiveSessions = false;
-      for (const remainingSessionKey of tokenSessions) {
+      for (const remainingSessionKey of poolSessions) {
         const remainingSession = this.sessions.get(remainingSessionKey);
         if (remainingSession && !remainingSession.stopSignal) {
           hasActiveSessions = true;
@@ -829,18 +862,20 @@ class LiquidityPoolMonitor {
         }
       }
       
-      // If no active sessions remain for this token, remove it from monitoring
-      if (tokenSessions.size === 0 || !hasActiveSessions) {
-        this.tokenToSessions.delete(tokenAddress);
-        // Remove token from monitored set BEFORE updating subscription
-        const wasRemoved = this.monitoredTokens.delete(tokenAddress);
+      // If no active sessions remain for this pool, remove it from monitoring
+      if (poolSessions.size === 0 || !hasActiveSessions) {
+        this.poolToSessions.delete(poolAddress);
+        // Remove pool from monitored set and streamer
+        const wasRemoved = this.monitoredPools.delete(poolAddress);
         if (wasRemoved) {
-          console.log(`➖ Removed token ${tokenAddress.substring(0, 8)}... from monitoring (no active sessions, remaining tokens: ${this.monitoredTokens.size})`);
-          
-          // Token removed from monitoring
+          // Remove pool address from streamer
+          if (this.streamerService) {
+            this.streamerService.removeAddresses([poolAddress]);
+          }
+          console.log(`➖ Removed pool ${poolAddress.substring(0, 8)}... from monitoring (no active sessions, remaining pools: ${this.monitoredPools.size})`);
         }
       } else {
-        console.log(`ℹ️ Token ${tokenAddress.substring(0, 8)}... still has ${tokenSessions.size} active session(s)`);
+        console.log(`ℹ️ Pool ${poolAddress.substring(0, 8)}... still has ${poolSessions.size} active session(s)`);
       }
     }
 
@@ -1188,10 +1223,10 @@ class LiquidityPoolMonitor {
     // Stop the streamer
     this.stopStreamer();
     
-    // Clear all sessions and tokens
+    // Clear all sessions and pools
     this.sessions.clear();
-    this.tokenToSessions.clear();
-    this.monitoredTokens.clear();
+    this.poolToSessions.clear();
+    this.monitoredPools.clear();
     
     console.log('✅ Pool monitoring service cleaned up');
   }
