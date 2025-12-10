@@ -218,6 +218,7 @@ export function extractBondingCurveForEvent(tx: any, event: any): string | null 
 
   const pairs = extractAllMintBondingCurvePairs(tx);
   if (pairs.length === 0) {
+    console.log(tx)
     return null;
   }
 
