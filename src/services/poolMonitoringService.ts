@@ -13,6 +13,7 @@ import { Idl } from "@coral-xyz/anchor";
 import { Idl as SerumIdl } from "@project-serum/anchor";
 import { convertEventToTrackerFormat } from './eventConverter';
 import { ParsedEvent, ParsedTransaction } from './type';
+import { extractBondingCurveForEvent } from './utils/transactionUtils';
 import pumpIdl from "./idls/pumpfun/pump_0.1.0.json";
 import pumpAmmIdl from "./idls/pumpAmm/pump_amm_0.1.0.json";
 import * as fs from 'fs';
@@ -55,24 +56,6 @@ interface MonitoringSession {
   processedSignatures: Set<string>; // Track processed transaction signatures to avoid duplicates
   firstBuyTxId: string | null; // First buy transaction ID
   firstSellTxId: string | null; // First sell transaction ID
-}
-
-function bnLayoutFormatter(obj: any) {
-  for (const key in obj) {
-    if (obj[key]?.constructor?.name === "PublicKey") {
-      obj[key] = (obj[key] as PublicKey).toBase58();
-    } else if (obj[key]?.constructor?.name === "BN") {
-      obj[key] = Number(obj[key].toString());
-    } else if (obj[key]?.constructor?.name === "BigInt") {
-      obj[key] = Number(obj[key].toString());
-    } else if (obj[key]?.constructor?.name === "Buffer") {
-      obj[key] = (obj[key] as Buffer).toString("base64");
-    } else if (isObject(obj[key])) {
-      bnLayoutFormatter(obj[key]);
-    } else {
-      obj[key] = obj[key];
-    }
-  }
 }
 
 class LiquidityPoolMonitor {
@@ -266,6 +249,16 @@ class LiquidityPoolMonitor {
 
         if (!result || !result.price) {
           continue;
+        }
+
+        // For PumpFun transactions, extract bonding_curve from compiledInstructions
+        // by matching the event's mint with the instruction's mint
+        // and set it as pool if not already set
+        if (result.platform === "PumpFun" && !result.pool) {
+          const bondingCurve = extractBondingCurveForEvent(tx, event);
+          if (bondingCurve) {
+            result.pool = bondingCurve;
+          }
         }
 
         // Extract token address for buy/sell events

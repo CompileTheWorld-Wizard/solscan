@@ -6,6 +6,7 @@ import { PoolMonitoringService } from "../services/poolMonitoringService";
 import { streamerService } from "../services/streamerService";
 import { convertEventToTrackerFormat } from "../services/eventConverter";
 import { ParsedEvent, ParsedTransaction } from "../services/type";
+import { extractBondingCurveForEvent } from "../services/utils/transactionUtils";
 import { redisService } from "../services/redisService";
 
 class TransactionTracker {
@@ -922,8 +923,6 @@ class TransactionTracker {
         return;
       }
 
-      console.log(JSON.stringify(tx))
-
       const events = tx?.transaction?.message?.events;
       if (!events || events.length === 0) {
         return;
@@ -950,6 +949,16 @@ class TransactionTracker {
 
         if (!result) {
           continue;
+        }
+
+        // For PumpFun transactions, extract bonding_curve from compiledInstructions
+        // by matching the event's mint with the instruction's mint
+        // and set it as pool if not already set
+        if (result.platform === "PumpFun" && !result.pool) {
+          const bondingCurve = extractBondingCurveForEvent(tx, event);
+          if (bondingCurve) {
+            result.pool = bondingCurve;
+          }
         }
 
         // Filter: Only process transactions for tracked wallet addresses
