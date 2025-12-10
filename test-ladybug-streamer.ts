@@ -34,7 +34,8 @@ async function testLadybugStreamer() {
     // Test: Add addresses using array variable
     console.log("2️⃣  Testing addAddresses() with array variable...");
     const addressesToAdd = [
-      "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", // Pump.fun program
+      "2ezv4U5HmPpkt2xLsKnw1FyyGmjFBeW7c166p99Hw2xB"
+      // "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", // Pump.fun program
       // "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", // Pump Amm program
       // "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", // RaydiumLiquidity Program
       // "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", // RaydiumCpmm program
