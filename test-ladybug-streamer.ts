@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
-import { streamerService } from "./src/services/streamerService";
+import { StreamerService } from "./src/services/streamerService";
+import { extractBondingCurveForEvent } from "./src/services/utils/transactionUtils";
 
 // Load environment variables
 dotenv.config();
@@ -14,6 +15,7 @@ async function testLadybugStreamer() {
   // Check environment variables
   const grpcUrl = process.env.GRPC_URL;
   const xToken = process.env.X_TOKEN;
+  const streamerService = new StreamerService();
 
   if (!grpcUrl || !xToken) {
     console.error("❌ Missing required environment variables:");
@@ -92,14 +94,39 @@ async function testLadybugStreamer() {
     streamerService.onData((tx: any) => {
       console.log("\n📥 Received transaction:");
       if (tx?.transaction?.message?.events?.length > 0) {
-        console.log(tx?.transaction?.signatures?.[0])
-        console.log(JSON.stringify(tx));
-        console.log(JSON.stringify(tx?.transaction?.message?.events, null, 2));
+        const signature = tx?.transaction?.signatures?.[0];
+        console.log(`   Signature: ${signature}`);
+        console.log(`   Events count: ${tx.transaction.message.events.length}`);
+        
+        // Process each event and extract bonding curve
+        tx.transaction.message.events.forEach((event: any, index: number) => {
+          console.log(`\n   Event ${index + 1}: ${event.name}`);
+          
+          // Extract bonding curve for this event
+          const bondingCurve = extractBondingCurveForEvent(tx, event);
+          
+          if (bondingCurve) {
+            console.log(`   ✅ Bonding Curve: ${bondingCurve}`);
+          } else {
+            console.log(`   ⚠️  No bonding curve found for this event`);
+          }
+          
+          // Log event data
+          if (event.name === "TradeEvent" && event.data) {
+            console.log(`   Mint: ${event.data.mint}`);
+            console.log(`   Type: ${event.data.is_buy ? "Buy" : "Sell"}`);
+            console.log(`   User: ${event.data.user}`);
+          } else if ((event.name === "BuyEvent" || event.name === "SellEvent") && event.data) {
+            console.log(`   Pool: ${event.data.pool}`);
+            console.log(`   User: ${event.data.user}`);
+          }
+        });
+        
+        // Uncomment to see full transaction/event details
+        // console.log(JSON.stringify(tx, null, 2));
+        // console.log(JSON.stringify(tx?.transaction?.message?.events, null, 2));
+        // console.log(JSON.stringify(tx?.transaction?.message?.compiledInstructions, null, 2));
       }
-      
-      // console.log(tx?.transaction?.signatures)
-      // console.log(JSON.stringify(tx?.transaction?.message?.events, null, 2));
-      // console.log(JSON.stringify(tx?.transaction?.message?.compiledInstructions, null, 2));
     });
     console.log("   ✅ Callback set\n");
 
