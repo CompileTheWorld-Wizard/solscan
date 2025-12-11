@@ -102,6 +102,7 @@ class LiquidityPoolMonitor {
       // Set up error callback for manual reconnection
       this.streamerService.onError((error: any) => {
         console.error('❌ Pool monitoring streamer error:', error);
+        console.log('Monitored pools:', this.monitoredPools);
         this.handleStreamerError(error);
       });
 
