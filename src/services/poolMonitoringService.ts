@@ -609,9 +609,6 @@ class LiquidityPoolMonitor {
 
     if (this.streamerService.getIsStreaming()) {
       try {
-        // Disable auto-reconnect to prevent automatic reconnection
-        this.streamerService.enableAutoReconnect(false);
-        this.streamerService.stop();
         console.log('✅ Stopped pool monitoring streamer');
       } catch (error: any) {
         console.error('Failed to stop pool monitoring streamer:', error?.message || error);
@@ -733,20 +730,20 @@ class LiquidityPoolMonitor {
       console.log(`➕ Added pool ${poolAddress.substring(0, 8)}... to monitoring (total: ${this.monitoredPools.size})`);
     }
 
-    // Set fromSlot for first buy recovery (only if this is the first session with fromSlot)
-    if (fromSlot && !this.fromSlot) {
-      const slotNumber = typeof fromSlot === 'string' ? parseInt(fromSlot, 10) : fromSlot;
-      if (!isNaN(slotNumber)) {
-        this.fromSlot = slotNumber;
-        console.log(`📍 Set fromSlot to ${slotNumber} for first buy recovery`);
+    // // Set fromSlot for first buy recovery (only if this is the first session with fromSlot)
+    // if (fromSlot && !this.fromSlot) {
+    //   const slotNumber = typeof fromSlot === 'string' ? parseInt(fromSlot, 10) : fromSlot;
+    //   if (!isNaN(slotNumber)) {
+    //     this.fromSlot = slotNumber;
+    //     console.log(`📍 Set fromSlot to ${slotNumber} for first buy recovery`);
         
-        // Configure streamer with fromSlot
-        if (this.streamerService) {
-          this.streamerService.enableAutoReconnect(false); // Disable auto-reconnect when using fromSlot
-          this.streamerService.setFromSlot(slotNumber);
-        }
-      }
-    }
+    //     // Configure streamer with fromSlot
+    //     if (this.streamerService) {
+    //       this.streamerService.enableAutoReconnect(false); // Disable auto-reconnect when using fromSlot
+    //       this.streamerService.setFromSlot(slotNumber);
+    //     }
+    //   }
+    // }
 
     // Track which sessions are monitoring this pool
     if (!this.poolToSessions.has(poolAddress)) {
