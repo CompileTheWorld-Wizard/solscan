@@ -15,6 +15,9 @@ import { StreamerService } from './streamerService';
 
 // const PUMP_PROGRAM_ID = '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P';
 
+// Keep-alive address to maintain connection even when no pools are being tracked
+const KEEP_ALIVE_ADDRESS = 'So22222222222222222222222222222222222222222';
+
 interface PeakData {
   peakPriceSol: number;
   peakPriceUsd: number;
@@ -67,6 +70,10 @@ class LiquidityPoolMonitor {
     this.poolToSessions = new Map();
     this.monitoredPools = new Set();
 
+    // Always add keep-alive address to maintain connection
+    this.monitoredPools.add(KEEP_ALIVE_ADDRESS);
+    console.log(`🔗 Added keep-alive address ${KEEP_ALIVE_ADDRESS.substring(0, 8)}... to maintain connection`);
+
     // Get gRPC credentials from environment
     if (!process.env.GRPC_URL || !process.env.X_TOKEN) {
       throw new Error("Missing GRPC_URL or X_TOKEN environment variables for pool monitoring");
@@ -98,10 +105,14 @@ class LiquidityPoolMonitor {
         this.handleStreamerError(error);
       });
 
-      // Don't start streamer automatically - it will start when pool addresses are added
-      // this.streamerService.start();
+      // Add keep-alive address to streamer immediately to maintain connection
+      this.streamerService.addAddresses([KEEP_ALIVE_ADDRESS]);
       
-      console.log("✅ Pool monitoring streamer initialized (will start when pools are added)");
+      // Start streamer immediately with keep-alive address to maintain connection
+      this.streamerService.enableAutoReconnect(true);
+      this.streamerService.start();
+      
+      console.log("✅ Pool monitoring streamer initialized and started with keep-alive address");
     } catch (error: any) {
       console.error('Failed to initialize pool monitoring streamer:', error?.message || error);
     }
@@ -120,21 +131,17 @@ class LiquidityPoolMonitor {
       return;
     }
 
-    // If no pools to monitor, stop the streamer to prevent infinite error loop
-    if (this.monitoredPools.size === 0) {
-      // Always disable auto-reconnect and stop, even if not currently streaming
-      // This prevents the streamer from trying to reconnect
-      try {
-        this.isShuttingDown = true; // Set flag to prevent further error handling
-        this.streamerService.enableAutoReconnect(false);
-        if (this.streamerService.getIsStreaming()) {
-          this.streamerService.stop();
-          console.log('⚠️ Streamer error but no pools to monitor - stopped streamer');
+    // Always keep connection alive with keep-alive address
+    // Only stop if we're shutting down (not just because no pools)
+    if (this.monitoredPools.size === 0 || (this.monitoredPools.size === 1 && this.monitoredPools.has(KEEP_ALIVE_ADDRESS))) {
+      // Ensure keep-alive address is always present
+      if (!this.monitoredPools.has(KEEP_ALIVE_ADDRESS)) {
+        this.monitoredPools.add(KEEP_ALIVE_ADDRESS);
+        if (this.streamerService) {
+          this.streamerService.addAddresses([KEEP_ALIVE_ADDRESS]);
         }
-      } catch (stopError: any) {
-        // Ignore errors when stopping - streamer might already be stopped
       }
-      return;
+      // Continue with reconnection logic - don't stop
     }
 
     // If we have a lastSlot, reconnect from there
@@ -263,6 +270,11 @@ class LiquidityPoolMonitor {
         // Get pool address from result
         const poolAddress = result.pool || null;
         if (!poolAddress) {
+          continue;
+        }
+
+        // Skip keep-alive address - it's only used to maintain connection
+        if (poolAddress === KEEP_ALIVE_ADDRESS) {
           continue;
         }
 
@@ -447,15 +459,20 @@ class LiquidityPoolMonitor {
       const sessionKeys = this.poolToSessions.get(poolAddress);
       if (!sessionKeys || sessionKeys.size === 0) {
         // No sessions for this pool - remove it from monitoring
-        this.monitoredPools.delete(poolAddress);
-        this.poolToSessions.delete(poolAddress);
-        // Remove pool address from streamer
-        if (this.streamerService) {
-          this.streamerService.removeAddresses([poolAddress]);
+        // But never remove the keep-alive address
+        if (poolAddress !== KEEP_ALIVE_ADDRESS) {
+          this.monitoredPools.delete(poolAddress);
+          this.poolToSessions.delete(poolAddress);
+          // Remove pool address from streamer
+          if (this.streamerService) {
+            this.streamerService.removeAddresses([poolAddress]);
+          }
+          console.log(`🧹 Cleaned up orphaned pool ${poolAddress.substring(0, 8)}... (no sessions)`);
+          // Update streamer addresses (keep-alive ensures connection stays alive)
+          this.updateStreamerAddresses();
+        } else {
+          console.log(`🔗 Keep-alive address ${poolAddress.substring(0, 8)}... remains active to maintain connection`);
         }
-        console.log(`🧹 Cleaned up orphaned pool ${poolAddress.substring(0, 8)}... (no sessions)`);
-        // Update streamer addresses (will stop streamer if no pools remain)
-        this.updateStreamerAddresses();
         return;
       }
       
@@ -469,16 +486,21 @@ class LiquidityPoolMonitor {
           }
         });
         // If no valid sessions remain, remove pool
+        // But never remove the keep-alive address
         if (sessionKeys.size === 0) {
-          this.monitoredPools.delete(poolAddress);
-          this.poolToSessions.delete(poolAddress);
-          // Remove pool address from streamer
-          if (this.streamerService) {
-            this.streamerService.removeAddresses([poolAddress]);
+          if (poolAddress !== KEEP_ALIVE_ADDRESS) {
+            this.monitoredPools.delete(poolAddress);
+            this.poolToSessions.delete(poolAddress);
+            // Remove pool address from streamer
+            if (this.streamerService) {
+              this.streamerService.removeAddresses([poolAddress]);
+            }
+            console.log(`🧹 Cleaned up pool ${poolAddress.substring(0, 8)}... (all sessions were stale)`);
+            // Update streamer addresses (keep-alive ensures connection stays alive)
+            this.updateStreamerAddresses();
+          } else {
+            console.log(`🔗 Keep-alive address ${poolAddress.substring(0, 8)}... remains active to maintain connection`);
           }
-          console.log(`🧹 Cleaned up pool ${poolAddress.substring(0, 8)}... (all sessions were stale)`);
-          // Update streamer addresses (will stop streamer if no pools remain)
-          this.updateStreamerAddresses();
           return;
         }
       }
@@ -624,12 +646,14 @@ class LiquidityPoolMonitor {
       return;
     }
 
-    // Only start if we have pools to monitor
-    if (this.monitoredPools.size === 0) {
-      console.log('⚠️ Cannot start streamer - no pools to monitor');
-      return;
+    // Ensure keep-alive address is always present
+    if (!this.monitoredPools.has(KEEP_ALIVE_ADDRESS)) {
+      this.monitoredPools.add(KEEP_ALIVE_ADDRESS);
+      this.streamerService.addAddresses([KEEP_ALIVE_ADDRESS]);
+      console.log(`🔗 Added keep-alive address to maintain connection`);
     }
 
+    // Always allow starting (keep-alive address ensures we have at least one address)
     // Reset shutdown flag when starting
     this.isShuttingDown = false;
 
@@ -684,24 +708,28 @@ class LiquidityPoolMonitor {
       return;
     }
 
-    // If no pools to monitor, stop the streamer
-    if (this.monitoredPools.size === 0) {
-      if (this.streamerService.getIsStreaming()) {
-        this.stopStreamer();
-      }
-      return;
+    // Ensure keep-alive address is always present
+    if (!this.monitoredPools.has(KEEP_ALIVE_ADDRESS)) {
+      this.monitoredPools.add(KEEP_ALIVE_ADDRESS);
+      this.streamerService.addAddresses([KEEP_ALIVE_ADDRESS]);
+      console.log(`🔗 Added keep-alive address to maintain connection`);
     }
 
+    // Never stop the streamer - keep-alive address ensures connection stays alive
     // Reset shutdown flag if we're adding pools back
     if (this.isShuttingDown && this.monitoredPools.size > 0) {
       this.isShuttingDown = false;
     }
 
     // For pool monitoring, we track pool addresses (not program addresses)
-    // Add all monitored pool addresses to the streamer
+    // Add all monitored pool addresses to the streamer (excluding keep-alive if already added)
     const poolsToAdd: string[] = [];
     
     for (const poolAddress of this.monitoredPools) {
+      // Skip keep-alive address if streamer is already running (it's already added)
+      if (poolAddress === KEEP_ALIVE_ADDRESS && this.streamerService.getIsStreaming()) {
+        continue;
+      }
       poolsToAdd.push(poolAddress);
     }
 
@@ -953,19 +981,24 @@ class LiquidityPoolMonitor {
       }
       
       // If no active sessions remain for this pool, remove it from monitoring
+      // But never remove the keep-alive address
       if (poolSessions.size === 0 || !hasActiveSessions) {
         this.poolToSessions.delete(poolAddress);
-        // Remove pool from monitored set and streamer
-        const wasRemoved = this.monitoredPools.delete(poolAddress);
-        if (wasRemoved) {
-          // Remove pool address from streamer
-          if (this.streamerService) {
-            this.streamerService.removeAddresses([poolAddress]);
+        // Remove pool from monitored set and streamer (but not keep-alive address)
+        if (poolAddress !== KEEP_ALIVE_ADDRESS) {
+          const wasRemoved = this.monitoredPools.delete(poolAddress);
+          if (wasRemoved) {
+            // Remove pool address from streamer
+            if (this.streamerService) {
+              this.streamerService.removeAddresses([poolAddress]);
+            }
+            console.log(`➖ Removed pool ${poolAddress.substring(0, 8)}... from monitoring (no active sessions, remaining pools: ${this.monitoredPools.size})`);
+            
+            // Update streamer addresses (keep-alive ensures connection stays alive)
+            this.updateStreamerAddresses();
           }
-          console.log(`➖ Removed pool ${poolAddress.substring(0, 8)}... from monitoring (no active sessions, remaining pools: ${this.monitoredPools.size})`);
-          
-          // Update streamer addresses (will stop streamer if no pools remain)
-          this.updateStreamerAddresses();
+        } else {
+          console.log(`🔗 Keep-alive address ${poolAddress.substring(0, 8)}... remains active to maintain connection`);
         }
       } else {
         console.log(`ℹ️ Pool ${poolAddress.substring(0, 8)}... still has ${poolSessions.size} active session(s)`);
@@ -1319,7 +1352,7 @@ class LiquidityPoolMonitor {
     // Stop the streamer
     this.stopStreamer();
     
-    // Clear all sessions and pools
+    // Clear all sessions and pools (including keep-alive address during cleanup)
     this.sessions.clear();
     this.poolToSessions.clear();
     this.monitoredPools.clear();
