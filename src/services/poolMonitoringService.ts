@@ -109,8 +109,6 @@ class LiquidityPoolMonitor {
       // Add keep-alive address to streamer immediately to maintain connection
       this.streamerService.addAddresses([KEEP_ALIVE_ADDRESS]);
       
-      // Start streamer immediately with keep-alive address to maintain connection
-      this.streamerService.enableAutoReconnect(true);
       this.streamerService.start();
       
       console.log("✅ Pool monitoring streamer initialized and started with keep-alive address");
@@ -648,23 +646,27 @@ class LiquidityPoolMonitor {
       }
       poolsToAdd.push(poolAddress);
     }
-
-    // If streamer is already running, just add new addresses
-    if (this.streamerService.getIsStreaming()) {
-      if (poolsToAdd.length > 0) {
-        this.streamerService.addAddresses(poolsToAdd);
-        console.log(`➕ Added ${poolsToAdd.length} pool address(es) to running streamer`);
-      }
-    } else {
-      // Streamer is not running - add all addresses and start from slot
-      if (poolsToAdd.length > 0) {
-        this.streamerService.addAddresses(poolsToAdd);
-        console.log(`➕ Added ${poolsToAdd.length} pool address(es) to streamer`);
-      }
-      
-      // Start streamer from the given slot (if available)
-      this.startStreamerIfNeeded();
+    if (poolsToAdd.length > 0) {
+      this.streamerService.addAddresses(poolsToAdd);
+      console.log(`➕ Added ${poolsToAdd.length} pool address(es) to running streamer`);
     }
+
+    // // If streamer is already running, just add new addresses
+    // if (this.streamerService.getIsStreaming()) {
+    //   if (poolsToAdd.length > 0) {
+    //     this.streamerService.addAddresses(poolsToAdd);
+    //     console.log(`➕ Added ${poolsToAdd.length} pool address(es) to running streamer`);
+    //   }
+    // } else {
+    //   // Streamer is not running - add all addresses and start from slot
+    //   if (poolsToAdd.length > 0) {
+    //     this.streamerService.addAddresses(poolsToAdd);
+    //     console.log(`➕ Added ${poolsToAdd.length} pool address(es) to streamer`);
+    //   }
+      
+    //   // Start streamer from the given slot (if available)
+    //   this.startStreamerIfNeeded();
+    // }
   }
 
 
