@@ -1002,8 +1002,27 @@ class LiquidityPoolMonitor {
     firstBuyDataPoint: TimeseriesDataPoint | undefined,
     firstSellDataPoint: TimeseriesDataPoint | undefined
   ): { peakBuyToSell: PeakData | null; peakSellToEnd: PeakData | null; buyCount: number; buysBeforeFirstSell: number; buysAfterFirstSell: number } {
+    // Initialize peakBuyToSell with buy data if available (even if filteredData is empty)
+    let peakBuyToSell: PeakData | null = null;
+    if (firstBuyDataPoint) {
+      const buyTimestamp = firstBuyDataPoint.timestamp ? new Date(firstBuyDataPoint.timestamp).getTime() : firstBuyTimestamp;
+      const buyPriceUsd = firstBuyDataPoint.tokenPriceUsd || 0;
+      const buyPriceSol = firstBuyDataPoint.tokenPriceSol || 0;
+      const buyMarketCap = firstBuyDataPoint.marketcap || 0;
+      
+      // Initialize with buy data if we have valid price or market cap
+      if (buyPriceUsd > 0 || buyMarketCap > 0) {
+        peakBuyToSell = {
+          peakPriceSol: buyPriceSol,
+          peakPriceUsd: buyPriceUsd,
+          peakMarketCap: buyMarketCap,
+          timestamp: buyTimestamp
+        };
+      }
+    }
+    
     if (filteredData.length === 0) {
-      return { peakBuyToSell: null, peakSellToEnd: null, buyCount: 0, buysBeforeFirstSell: 0, buysAfterFirstSell: 0 };
+      return { peakBuyToSell, peakSellToEnd: null, buyCount: 0, buysBeforeFirstSell: 0, buysAfterFirstSell: 0 };
     }
 
     // Remove duplicates by signature (keep first occurrence)
@@ -1028,8 +1047,8 @@ class LiquidityPoolMonitor {
       
       return true;
     });
-
-    let peakBuyToSell: PeakData | null = null;
+    
+    // peakBuyToSell is already initialized with buy data above
     let peakSellToEnd: PeakData | null = null;
     let buyCount = 0;
     let buysBeforeFirstSell = 0;
@@ -1078,8 +1097,20 @@ class LiquidityPoolMonitor {
 
       // Calculate peakBuyToSell (before sell)
       // Note: All data here is already after the wallet's buy timestamp (filtered above)
+      // Update peakBuyToSell if we find a higher price than the initial buy data
       if (!sellTimestamp || dpTimestamp < sellTimestamp) {
-        if (!peakBuyToSell || priceUsd > peakBuyToSell.peakPriceUsd) {
+        if (peakBuyToSell) {
+          // Update if we find a higher price
+          if (priceUsd > peakBuyToSell.peakPriceUsd) {
+            peakBuyToSell = {
+              peakPriceSol: priceSol,
+              peakPriceUsd: priceUsd,
+              peakMarketCap: marketCap,
+              timestamp: dpTimestamp
+            };
+          }
+        } else {
+          // Initialize if not already set (shouldn't happen, but safety check)
           peakBuyToSell = {
             peakPriceSol: priceSol,
             peakPriceUsd: priceUsd,
@@ -1100,14 +1131,16 @@ class LiquidityPoolMonitor {
       }
     }
 
-    // Fallback: If no buys before first sell, use first buy market cap for peakBuyToSell
-    if (!peakBuyToSell && buysBeforeFirstSell === 0 && firstBuyDataPoint) {
+    // Fallback: If peakBuyToSell is still null (shouldn't happen if firstBuyDataPoint exists, but safety check)
+    // Use first buy data point to initialize
+    if (!peakBuyToSell && firstBuyDataPoint) {
       const buyTimestamp = firstBuyDataPoint.timestamp ? new Date(firstBuyDataPoint.timestamp).getTime() : firstBuyTimestamp;
       const buyPriceUsd = firstBuyDataPoint.tokenPriceUsd || 0;
       const buyPriceSol = firstBuyDataPoint.tokenPriceSol || 0;
       const buyMarketCap = firstBuyDataPoint.marketcap || 0;
       
-      if (buyMarketCap > 0) {
+      // Initialize even if market cap is 0, as long as we have price data
+      if (buyPriceUsd > 0 || buyMarketCap > 0) {
         peakBuyToSell = {
           peakPriceSol: buyPriceSol,
           peakPriceUsd: buyPriceUsd,
@@ -1142,7 +1175,56 @@ class LiquidityPoolMonitor {
       // Calculate peak prices from timeseries data
       const calculated = this.calculatePeakPricesFromTimeseries(session);
       
-      const peakBuyToSell = calculated.peakBuyToSell || {
+      // If peakBuyToSell is still null, try to initialize with buy data from timeseries
+      let peakBuyToSell = calculated.peakBuyToSell;
+      if (!peakBuyToSell && session.timeseriesData.length > 0) {
+        // Try to find first buy data point
+        let firstBuyDataPoint: TimeseriesDataPoint | undefined;
+        
+        if (session.firstBuyTxId) {
+          // Look for the first buy transaction by signature
+          firstBuyDataPoint = session.timeseriesData.find(
+            dp => dp.signature === session.firstBuyTxId
+          );
+        }
+        
+        // If not found by signature, look for first BUY transaction type
+        if (!firstBuyDataPoint) {
+          firstBuyDataPoint = session.timeseriesData.find(
+            dp => dp.transactionType === 'BUY'
+          );
+        }
+        
+        // If still not found, use first data point with valid price
+        if (!firstBuyDataPoint) {
+          firstBuyDataPoint = session.timeseriesData.find(
+            dp => dp.tokenPriceUsd && dp.tokenPriceUsd > 0
+          );
+        }
+        
+        // Initialize peakBuyToSell with found data point
+        if (firstBuyDataPoint) {
+          const buyTimestamp = firstBuyDataPoint.timestamp 
+            ? new Date(firstBuyDataPoint.timestamp).getTime() 
+            : session.startTime;
+          const buyPriceUsd = firstBuyDataPoint.tokenPriceUsd || 0;
+          const buyPriceSol = firstBuyDataPoint.tokenPriceSol || 0;
+          const buyMarketCap = firstBuyDataPoint.marketcap || 0;
+          
+          if (buyPriceUsd > 0 || buyMarketCap > 0) {
+            peakBuyToSell = {
+              peakPriceSol: buyPriceSol,
+              peakPriceUsd: buyPriceUsd,
+              peakMarketCap: buyMarketCap,
+              timestamp: buyTimestamp
+            };
+            console.log(`📊 Initialized peakBuyToSell with buy data: $${buyPriceUsd.toFixed(6)} (MCap: $${buyMarketCap.toFixed(2)})`);
+          }
+        }
+      }
+      
+      // Final fallback: use zeros if still null
+      peakBuyToSell = peakBuyToSell || {
         peakPriceSol: 0,
         peakPriceUsd: 0,
         peakMarketCap: 0,
