@@ -555,46 +555,6 @@ class LiquidityPoolMonitor {
   }
 
   /**
-   * Start the streamer if not already running
-   */
-  private startStreamerIfNeeded(): void {
-    if (!this.streamerService) {
-      console.warn('⚠️ Streamer not initialized');
-      return;
-    }
-
-    // Ensure keep-alive address is always present
-    if (!this.monitoredPools.has(KEEP_ALIVE_ADDRESS)) {
-      this.monitoredPools.add(KEEP_ALIVE_ADDRESS);
-      this.streamerService.addAddresses([KEEP_ALIVE_ADDRESS]);
-      console.log(`🔗 Added keep-alive address to maintain connection`);
-    }
-
-    // Always allow starting (keep-alive address ensures we have at least one address)
-    // Reset shutdown flag when starting
-    this.isShuttingDown = false;
-
-    if (!this.streamerService.getIsStreaming()) {
-      try {
-        // If fromSlot is set, start from that slot
-        if (this.fromSlot !== null) {
-          this.streamerService.enableAutoReconnect(false);
-          this.streamerService.setFromSlot(this.fromSlot);
-          this.streamerService.start();
-          console.log(`📍 Started pool monitoring streamer from slot ${this.fromSlot}`);
-        } else {
-          // Start normally (from current slot)
-          this.streamerService.enableAutoReconnect(true);
-          this.streamerService.start();
-          console.log(`✅ Started pool monitoring streamer`);
-        }
-      } catch (error: any) {
-        console.error('Failed to start pool monitoring streamer:', error?.message || error);
-      }
-    }
-  }
-
-  /**
    * Stop the streamer
    */
   private stopStreamer(): void {
@@ -650,23 +610,6 @@ class LiquidityPoolMonitor {
       this.streamerService.addAddresses(poolsToAdd);
       console.log(`➕ Added ${poolsToAdd.length} pool address(es) to running streamer`);
     }
-
-    // // If streamer is already running, just add new addresses
-    // if (this.streamerService.getIsStreaming()) {
-    //   if (poolsToAdd.length > 0) {
-    //     this.streamerService.addAddresses(poolsToAdd);
-    //     console.log(`➕ Added ${poolsToAdd.length} pool address(es) to running streamer`);
-    //   }
-    // } else {
-    //   // Streamer is not running - add all addresses and start from slot
-    //   if (poolsToAdd.length > 0) {
-    //     this.streamerService.addAddresses(poolsToAdd);
-    //     console.log(`➕ Added ${poolsToAdd.length} pool address(es) to streamer`);
-    //   }
-      
-    //   // Start streamer from the given slot (if available)
-    //   this.startStreamerIfNeeded();
-    // }
   }
 
 
@@ -731,21 +674,6 @@ class LiquidityPoolMonitor {
       this.monitoredPools.add(poolAddress);
       console.log(`➕ Added pool ${poolAddress.substring(0, 8)}... to monitoring (total: ${this.monitoredPools.size})`);
     }
-
-    // // Set fromSlot for first buy recovery (only if this is the first session with fromSlot)
-    // if (fromSlot && !this.fromSlot) {
-    //   const slotNumber = typeof fromSlot === 'string' ? parseInt(fromSlot, 10) : fromSlot;
-    //   if (!isNaN(slotNumber)) {
-    //     this.fromSlot = slotNumber;
-    //     console.log(`📍 Set fromSlot to ${slotNumber} for first buy recovery`);
-        
-    //     // Configure streamer with fromSlot
-    //     if (this.streamerService) {
-    //       this.streamerService.enableAutoReconnect(false); // Disable auto-reconnect when using fromSlot
-    //       this.streamerService.setFromSlot(slotNumber);
-    //     }
-    //   }
-    // }
 
     // Track which sessions are monitoring this pool
     if (!this.poolToSessions.has(poolAddress)) {
