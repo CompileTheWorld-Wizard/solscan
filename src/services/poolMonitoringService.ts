@@ -99,12 +99,12 @@ class LiquidityPoolMonitor {
         this.handleTransaction(tx);
       });
       
-      // Set up error callback for manual reconnection
-      this.streamerService.onError((error: any) => {
-        console.error('❌ Pool monitoring streamer error:', error);
-        console.log('Monitored pools:', this.monitoredPools);
-        this.handleStreamerError(error);
-      });
+      // // Set up error callback for manual reconnection
+      // this.streamerService.onError((error: any) => {
+      //   console.error('❌ Pool monitoring streamer error:', error);
+      //   console.log('Monitored pools:', this.monitoredPools);
+      //   this.handleStreamerError(error);
+      // });
 
       // Add keep-alive address to streamer immediately to maintain connection
       this.streamerService.addAddresses([KEEP_ALIVE_ADDRESS]);
