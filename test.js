@@ -1,13 +1,27 @@
-var myHeaders = new Headers();
-myHeaders.append("x-api-key", "C5WUfQxUvSmrEBES");
+// import { Idl } from "@coral-xyz/anchor";
+import { PublicKey, Connection } from "@solana/web3.js";
+import { Parser } from "@shyft-to/ladybug-sdk";
+import pumpIdl from "./src/services/idls/pumpfun/pump_0.1.0.json" assert { type: "json" };
+import pumpAmmIdl from "./src/services/idls/pumpAmm/pump_amm_0.1.0.json" assert { type: "json" };
 
-var requestOptions = {
-  method: 'GET',
-  headers: myHeaders,
-  redirect: 'follow'
-};
+async function getAndParseTxn() {
+  const connection = new Connection("https://api.mainnet-beta.solana.com");
 
-fetch("https://api.shyft.to/sol/v1/transaction/parsed?network=mainnet-beta&txn_signature=3fgjxx4w2eSazTySUiZZktqdXqpTxTCdi2UrUxdPKQWKhAWppEdCZHgMXJfkuPxfT8g3fNQ2BhNh69W4hAUujDZg", requestOptions)
-  .then(response => response.text())
-  .then(result => console.log(result))
-  .catch(error => console.log('error', error));
+  const parser = new Parser();
+  parser.addIDL(new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"), pumpIdl );
+  parser.addIDL(new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"), pumpAmmIdl );
+  parser.useDefaultInstructionParsing(true);
+
+  const txnSignature = "4rCtASJ6Y9b73gd8vQjYut6LHiUcKuaxGHN9WDqgxsA3Zy2J1bq5rShLV9Qrage28werwsgMGDdPQ6nH2KpJVcKu";
+
+  const transaction = await connection.getTransaction(txnSignature, {
+      maxSupportedTransactionVersion: 0
+    });
+  
+  if(!transaction) throw new Error("Transaction not found");
+  const parsed = parser.parseTransaction(transaction);
+
+  console.log(JSON.stringify(parsed));
+}
+
+getAndParseTxn();

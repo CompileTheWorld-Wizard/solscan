@@ -34,7 +34,8 @@ async function testLadybugStreamer() {
     // Test: Add addresses using array variable
     console.log("2️⃣  Testing addAddresses() with array variable...");
     const addressesToAdd = [
-      "2ezv4U5HmPpkt2xLsKnw1FyyGmjFBeW7c166p99Hw2xB"
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", // SPL Token Program
+      // "2ezv4U5HmPpkt2xLsKnw1FyyGmjFBeW7c166p99Hw2xB"
       // "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", // Pump.fun program
       // "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA", // Pump Amm program
       // "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", // RaydiumLiquidity Program
@@ -52,34 +53,6 @@ async function testLadybugStreamer() {
 
     streamerService.addAddresses(addressesToAdd);
     console.log(`   ✅ Added addresses: ${addressesToAdd.join(", ")}\n`);
-
-    // Test: Add more addresses
-    console.log("4️⃣  Testing addAddresses() with additional addresses...");
-    const additionalAddresses = [
-      // Add more test addresses here
-      // "AnotherAddressHere",
-    ];
-
-    if (additionalAddresses.length > 0) {
-      streamerService.addAddresses(additionalAddresses);
-      console.log(`   ✅ Added ${additionalAddresses.length} more address(es)\n`);
-    } else {
-      console.log("   ⚠️  No additional addresses to add\n");
-    }
-
-    // Test: Remove addresses using array variable
-    console.log("5️⃣  Testing removeAddresses() with array variable...");
-    const addressesToRemove = [
-      // Uncomment to test removal
-      // "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
-    ];
-
-    if (addressesToRemove.length > 0) {
-      streamerService.removeAddresses(addressesToRemove);
-      console.log(`   ✅ Removed ${addressesToRemove.length} address(es)\n`);
-    } else {
-      console.log("   ⚠️  No addresses to remove (uncomment addressesToRemove to test)\n");
-    }
 
     // Test: Set data callback
     console.log("6️⃣  Testing onData() callback...");
